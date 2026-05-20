@@ -1,0 +1,15 @@
+[package]
+name = "Dromon-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+ash = "0.38.0"
+ash-window = "0.13.0"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+nalgebra = "0.34.2"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+softbuffer = "0.4"
+winit = "0.30.13"
