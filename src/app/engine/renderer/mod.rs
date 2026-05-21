@@ -1,4 +1,7 @@
+mod context;
+
 use anyhow::{Result, anyhow};
+use context::Context as VulkanContext;
 use softbuffer::{Context, Surface};
 use std::{num::NonZeroU32, sync::Arc};
 use winit::window::Window;

@@ -6,4 +6,4 @@ Dromon is a long-term personal project aimed at learning low-level graphics prog
 
 ## Status
 
-Early development — engine foundation in progress.
+Early development, engine foundation in progress.

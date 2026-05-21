@@ -1,6 +1,6 @@
 mod engine;
 
-use winit::application::ApplicationHandler;
+use winit::{application::ApplicationHandler, window::WindowAttributes};
 
 use crate::app::engine::Engine;
 
@@ -12,6 +12,15 @@ pub struct App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         self.engine = Some(Engine::new(event_loop).unwrap()); //TODO: gérer les erreurs proprement
+        // if let Some(engine) = self.engine.as_mut() {
+        //     let secondary_window_attributes =
+        //         WindowAttributes::default().with_title("Secondary window");
+        //     let secondary_window = engine.create_window(event_loop, secondary_window_attributes);
+        // }
+    }
+
+    fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.engine = None;
     }
 
     fn window_event(
@@ -20,15 +29,8 @@ impl ApplicationHandler for App {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        match event {
-            //HACK : workaround : display a window by filling the buffer using softbuffer for Wayland
-            winit::event::WindowEvent::CloseRequested => event_loop.exit(),
-            winit::event::WindowEvent::RedrawRequested => {
-                if let Some(engine) = &mut self.engine {
-                    engine.draw(window_id);
-                }
-            }
-            _ => {}
+        if let Some(engine) = &mut self.engine {
+            engine.window_event(event_loop, window_id, event);
         }
     }
 }
