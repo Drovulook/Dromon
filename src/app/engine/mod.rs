@@ -1,5 +1,9 @@
 mod renderer;
+mod rendering_context;
 
+use crate::app::engine::rendering_context::{
+    ContextAttributes, RenderingContext, queue_family_picker,
+};
 use anyhow::Result;
 use renderer::Renderer;
 use std::{collections::HashMap, sync::Arc};
@@ -15,6 +19,7 @@ pub struct Engine {
     renderers: HashMap<WindowId, Renderer>,
     windows: HashMap<WindowId, Arc<Window>>,
     primary_window_id: WindowId,
+    rendering_context: Arc<RenderingContext>,
 }
 
 impl Engine {
@@ -26,10 +31,16 @@ impl Engine {
 
         let primary_window_id = primary_window.id();
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
+
+        let rendering_context = Arc::new(RenderingContext::new(ContextAttributes {
+            compatibility_window: &primary_window,
+            queue_family_picker: queue_family_picker::single_queue_family,
+        })?);
+
         let renderers = windows
             .iter()
             .map(|(id, window)| {
-                let renderer = Renderer::new(window.clone()).unwrap();
+                let renderer = Renderer::new(rendering_context.clone(), window.clone()).unwrap();
                 (*id, renderer)
             })
             .collect::<HashMap<_, _>>();
@@ -38,6 +49,7 @@ impl Engine {
             renderers,
             windows,
             primary_window_id,
+            rendering_context,
         })
     }
     pub fn draw(&mut self, window_id: WindowId) {
@@ -80,8 +92,10 @@ impl Engine {
         let window = Arc::new(event_loop.create_window(attributes)?);
         let window_id = window.id();
         self.windows.insert(window_id, window.clone());
-        self.renderers
-            .insert(window_id, Renderer::new(window.clone())?);
+        self.renderers.insert(
+            window_id,
+            Renderer::new(self.rendering_context.clone(), window.clone())?,
+        );
         Ok(window_id)
     }
 }

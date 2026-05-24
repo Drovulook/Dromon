@@ -1,34 +1,23 @@
-mod context;
-
-use anyhow::Context as AnyhowContext;
+use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::{Result, anyhow};
-use ash::vk;
-use context::Context as VulkanContext;
-use softbuffer::{Context, Surface};
+use softbuffer::Context as SoftBufferContext;
+use softbuffer::Surface;
 use std::{num::NonZeroU32, sync::Arc};
 use winit::window::Window;
 
-use crate::app::engine::renderer::context::{ContextAttributes, queue_family_picker};
-
 pub struct Renderer {
     surface: Surface<Arc<Window>, Arc<Window>>,
-    vk_context: VulkanContext,
+    context: Arc<RenderingContext>,
 }
 
 impl Renderer {
-    pub(crate) fn new(window: Arc<Window>) -> Result<Self> {
-        let context = Context::new(window.clone()).map_err(|e| anyhow!("{e}"))?;
-        let surface = Surface::new(&context, window.clone()).map_err(|e| anyhow!("{e}"))?;
+    pub(crate) fn new(context: Arc<RenderingContext>, window: Arc<Window>) -> Result<Self> {
+        let softbuffer_context =
+            SoftBufferContext::new(window.clone()).map_err(|e| anyhow!("{e}"))?;
+        let surface =
+            Surface::new(&softbuffer_context, window.clone()).map_err(|e| anyhow!("{e}"))?;
 
-        let vk_context = VulkanContext::new(ContextAttributes {
-            window,
-            queue_family_picker: queue_family_picker::single_queue_family,
-        })?;
-
-        Ok(Self {
-            surface,
-            vk_context,
-        })
+        Ok(Self { surface, context })
     }
 
     pub(crate) fn draw(&mut self) -> Result<()> {

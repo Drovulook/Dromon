@@ -6,23 +6,21 @@ use winit::{
     window::Window,
 };
 
-pub struct Context {
+pub struct RenderingContext {
     pub queues: Vec<vk::Queue>,
     pub device: ash::Device,
     pub queue_indices_set: HashSet<u32>,
     pub queue_families: QueueFamilies,
     pub physical_devices: Vec<PhysicalDevice>,
-    pub surface: ash::vk::SurfaceKHR,
     pub surface_extensions: ash::khr::surface::Instance,
     pub instance: ash::Instance,
     pub entry: ash::Entry,
-    pub attributes: ContextAttributes,
 }
 
 type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, QueueFamilies)>;
 
-pub struct ContextAttributes {
-    pub window: Arc<Window>,
+pub struct ContextAttributes<'window> {
+    pub compatibility_window: &'window Window,
     pub queue_family_picker: QueueFamilyPicker,
 }
 
@@ -49,7 +47,7 @@ pub struct QueueFamilies {
 }
 
 pub mod queue_family_picker {
-    use crate::app::engine::renderer::context::{PhysicalDevice, QueueFamilies};
+    use crate::app::engine::rendering_context::{PhysicalDevice, QueueFamilies};
     use anyhow::Context as AnyhowContext;
     use anyhow::Result;
     use ash::vk;
@@ -90,13 +88,13 @@ pub mod queue_family_picker {
     }
 }
 
-impl Context {
+impl RenderingContext {
     pub fn new(attributes: ContextAttributes) -> Result<Self> {
         unsafe {
             // TODO: créer entry et instance une seule fois, pas une fois / renderer
             let entry = ash::Entry::load()?;
-            let raw_display_handle = attributes.window.display_handle()?.as_raw();
-            let raw_window_handle = attributes.window.window_handle()?.as_raw();
+            let raw_display_handle = attributes.compatibility_window.display_handle()?.as_raw();
+            let raw_window_handle = attributes.compatibility_window.window_handle()?.as_raw();
 
             let instance = entry.create_instance(
                 &vk::InstanceCreateInfo::default()
@@ -110,7 +108,7 @@ impl Context {
             )?;
 
             let surface_extensions = ash::khr::surface::Instance::new(&entry, &instance);
-            let surface = ash_window::create_surface(
+            let compatibility_surface = ash_window::create_surface(
                 &entry,
                 &instance,
                 raw_display_handle,
@@ -153,9 +151,10 @@ impl Context {
 
             physical_devices.retain(|device| {
                 surface_extensions
-                    .get_physical_device_surface_support(device.handle, 0, surface)
+                    .get_physical_device_surface_support(device.handle, 0, compatibility_surface)
                     .unwrap_or(false)
             });
+            surface_extensions.destroy_surface(compatibility_surface, None);
 
             let (physical_device, queue_families) =
                 (attributes.queue_family_picker)(physical_devices.clone())?;
@@ -206,20 +205,19 @@ impl Context {
                 queue_indices_set,
                 queue_families,
                 physical_devices,
-                surface,
                 surface_extensions,
                 instance,
                 entry,
-                attributes,
             })
         }
     }
 }
 
-impl Drop for Context {
+impl Drop for RenderingContext {
     fn drop(&mut self) {
         unsafe {
-            self.surface_extensions.destroy_surface(self.surface, None);
+            self.device.destroy_device(None);
+            self.instance.destroy_instance(None);
         }
     }
 }
