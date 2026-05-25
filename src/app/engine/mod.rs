@@ -1,4 +1,6 @@
-mod renderer;
+pub mod renderer;
+
+mod debug_messenger;
 mod rendering_context;
 
 use crate::app::engine::rendering_context::{
@@ -30,12 +32,13 @@ impl Engine {
         let primary_window = Arc::new(event_loop.create_window(attrs)?);
 
         let primary_window_id = primary_window.id();
-        let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
 
         let rendering_context = Arc::new(RenderingContext::new(ContextAttributes {
             compatibility_window: &primary_window,
             queue_family_picker: queue_family_picker::single_queue_family,
         })?);
+
+        let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
 
         let renderers = windows
             .iter()

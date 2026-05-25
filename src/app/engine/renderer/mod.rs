@@ -1,3 +1,5 @@
+mod swapchain;
+
 use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::{Result, anyhow};
 use softbuffer::Context as SoftBufferContext;
@@ -7,6 +9,7 @@ use winit::window::Window;
 
 pub struct Renderer {
     surface: Surface<Arc<Window>, Arc<Window>>,
+    swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
 }
 

@@ -1,5 +1,18 @@
+/* Assumptions:
+ * - Vulkan version 1.3
+ * - GPU discret (DISCRETE_GPU) requis — single_queue_family rejette les iGPU
+ * - Une seule queue créée par famille (queue_priorities: &[1.0])
+ * - graphics / present / transfer / compute sur la même famille (single_queue_family)
+ * - Surface support vérifiée sur queue index 0 uniquement (retain hardcodé)
+ * - Features supportées par le GPU : dynamic_rendering, buffer_device_address
+ * - Extension VK_KHR_swapchain disponible
+ * - La compatibility_surface est temporaire : détruite après filtrage des devices
+ */
+
+use super::debug_messenger::DebugMessenger;
 use anyhow::Result;
 use ash::vk;
+use std::ffi::CStr;
 use std::{collections::HashSet, sync::Arc};
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
@@ -11,10 +24,11 @@ pub struct RenderingContext {
     pub device: ash::Device,
     pub queue_indices_set: HashSet<u32>,
     pub queue_families: QueueFamilies,
-    pub physical_devices: Vec<PhysicalDevice>,
+    pub physical_device: PhysicalDevice,
     pub surface_extensions: ash::khr::surface::Instance,
     pub instance: ash::Instance,
     pub entry: ash::Entry,
+    pub debug_messenger: Option<DebugMessenger>,
 }
 
 type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, QueueFamilies)>;
@@ -88,6 +102,11 @@ pub mod queue_family_picker {
     }
 }
 
+const VALIDATION_LAYER: &CStr =
+    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") };
+const DEBUG_UTILS_EXT: &CStr =
+    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_EXT_debug_utils\0") };
+
 impl RenderingContext {
     pub fn new(attributes: ContextAttributes) -> Result<Self> {
         unsafe {
@@ -96,18 +115,40 @@ impl RenderingContext {
             let raw_display_handle = attributes.compatibility_window.display_handle()?.as_raw();
             let raw_window_handle = attributes.compatibility_window.window_handle()?.as_raw();
 
+            // validation layers
+            let mut extensions =
+                ash_window::enumerate_required_extensions(raw_display_handle)?.to_vec();
+            #[cfg(debug_assertions)]
+            extensions.push(DEBUG_UTILS_EXT.as_ptr());
+
+            let layers = {
+                #[cfg(debug_assertions)]
+                {
+                    vec![VALIDATION_LAYER.as_ptr()]
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    vec![]
+                }
+            };
+
+            let debug_messenger = None::<DebugMessenger>; //
+
             let instance = entry.create_instance(
                 &vk::InstanceCreateInfo::default()
                     .application_info(
                         &vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3),
                     )
-                    .enabled_extension_names(ash_window::enumerate_required_extensions(
-                        raw_display_handle,
-                    )?),
+                    .enabled_extension_names(&extensions)
+                    .enabled_layer_names(&layers),
                 None,
             )?;
 
+            #[cfg(debug_assertions)]
+            let debug_messenger = Some(DebugMessenger::new(&entry, &instance)?);
+
             let surface_extensions = ash::khr::surface::Instance::new(&entry, &instance);
+
             let compatibility_surface = ash_window::create_surface(
                 &entry,
                 &instance,
@@ -134,9 +175,6 @@ impl RenderingContext {
                             properties,
                         })
                         .collect::<Vec<_>>();
-
-                    // let name = std::ffi::CStr::from_ptr(properties.device_name.as_ptr());
-                    // dbg!(name, props.device_type, props.api_version);
 
                     PhysicalDevice {
                         handle: device,
@@ -204,18 +242,57 @@ impl RenderingContext {
                 device,
                 queue_indices_set,
                 queue_families,
-                physical_devices,
+                physical_device,
                 surface_extensions,
                 instance,
                 entry,
+                debug_messenger,
             })
         }
     }
+
+    /// # Safety
+    /// The window should outlive the surface
+    pub unsafe fn create_surface(&self, window: Arc<Window>) -> Result<vk::SurfaceKHR> {
+        let raw_display_handle = window.display_handle()?.as_raw();
+        let raw_window_handle = window.window_handle()?.as_raw();
+        unsafe {
+            let surface = ash_window::create_surface(
+                &self.entry,
+                &self.instance,
+                raw_display_handle,
+                raw_window_handle,
+                None,
+            )?;
+            Ok(surface)
+        }
+    }
+
+    pub unsafe fn get_surface_capabilities(
+        &self,
+        surface: vk::SurfaceKHR,
+    ) -> Result<vk::SurfaceCapabilitiesKHR> {
+        unsafe {
+            let surface_capabilities = self
+                .surface_extensions
+                .get_physical_device_surface_capabilities(self.physical_device.handle, surface)?;
+            Ok(surface_capabilities)
+        }
+    }
+}
+
+struct SwapchainSurface {
+    handle: vk::SurfaceKHR,
+    capabilities: vk::SurfaceCapabilitiesKHR,
 }
 
 impl Drop for RenderingContext {
     fn drop(&mut self) {
         unsafe {
+            #[cfg(debug_assertions)]
+            if let Some(m) = &self.debug_messenger {
+                m.destroy();
+            }
             self.device.destroy_device(None);
             self.instance.destroy_instance(None);
         }
