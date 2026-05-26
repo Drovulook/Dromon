@@ -19,8 +19,18 @@ impl Renderer {
             SoftBufferContext::new(window.clone()).map_err(|e| anyhow!("{e}"))?;
         let surface =
             Surface::new(&softbuffer_context, window.clone()).map_err(|e| anyhow!("{e}"))?;
+        let mut swapchain = swapchain::Swapchain::new(context.clone(), window.clone())?;
+        swapchain.update_size()?;
 
-        Ok(Self { surface, context })
+        Ok(Self {
+            surface,
+            context,
+            swapchain,
+        })
+    }
+
+    pub fn resize(&mut self) -> Result<()> {
+        self.swapchain.update_size()
     }
 
     pub(crate) fn draw(&mut self) -> Result<()> {

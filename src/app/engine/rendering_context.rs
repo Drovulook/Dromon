@@ -21,14 +21,15 @@ use winit::{
 
 pub struct RenderingContext {
     pub queues: Vec<vk::Queue>,
+    pub swapchain_extensions: ash::khr::swapchain::Device,
     pub device: ash::Device,
     pub queue_indices_set: HashSet<u32>,
     pub queue_families: QueueFamilies,
     pub physical_device: PhysicalDevice,
+    pub debug_messenger: Option<DebugMessenger>,
     pub surface_extensions: ash::khr::surface::Instance,
     pub instance: ash::Instance,
     pub entry: ash::Entry,
-    pub debug_messenger: Option<DebugMessenger>,
 }
 
 type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, QueueFamilies)>;
@@ -231,6 +232,8 @@ impl RenderingContext {
                 None,
             )?;
 
+            let swapchain_extensions = ash::khr::swapchain::Device::new(&instance, &device);
+
             let queues = queue_indices_set
                 .iter()
                 .copied()
@@ -247,43 +250,89 @@ impl RenderingContext {
                 instance,
                 entry,
                 debug_messenger,
+                swapchain_extensions,
             })
         }
     }
 
     /// # Safety
     /// The window should outlive the surface
-    pub unsafe fn create_surface(&self, window: Arc<Window>) -> Result<vk::SurfaceKHR> {
+    pub unsafe fn create_surface(&self, window: Arc<Window>) -> Result<SwapchainSurface> {
         let raw_display_handle = window.display_handle()?.as_raw();
         let raw_window_handle = window.window_handle()?.as_raw();
         unsafe {
-            let surface = ash_window::create_surface(
+            let handle = ash_window::create_surface(
                 &self.entry,
                 &self.instance,
                 raw_display_handle,
                 raw_window_handle,
                 None,
             )?;
-            Ok(surface)
+            let capabilities = self
+                .surface_extensions
+                .get_physical_device_surface_capabilities(self.physical_device.handle, handle)?;
+
+            let formats = self
+                .surface_extensions
+                .get_physical_device_surface_formats(self.physical_device.handle, handle)?;
+
+            let present_modes = self
+                .surface_extensions
+                .get_physical_device_surface_present_modes(self.physical_device.handle, handle)?;
+
+            Ok(SwapchainSurface {
+                handle,
+                capabilities: capabilities,
+                formats,
+                present_modes,
+            })
         }
     }
 
-    pub unsafe fn get_surface_capabilities(
+    pub fn create_swapchain(
         &self,
-        surface: vk::SurfaceKHR,
-    ) -> Result<vk::SurfaceCapabilitiesKHR> {
+        create_info: &vk::SwapchainCreateInfoKHR,
+    ) -> Result<vk::SwapchainKHR> {
         unsafe {
-            let surface_capabilities = self
-                .surface_extensions
-                .get_physical_device_surface_capabilities(self.physical_device.handle, surface)?;
-            Ok(surface_capabilities)
+            Ok(self
+                .swapchain_extensions
+                .create_swapchain(&create_info, None)?)
         }
+    }
+
+    pub fn create_image_view(
+        &self,
+        image: vk::Image,
+        format: vk::Format,
+        aspect_flags: vk::ImageAspectFlags,
+    ) -> Result<vk::ImageView> {
+        let image_view = unsafe {
+            self.device.create_image_view(
+                &vk::ImageViewCreateInfo::default()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(format)
+                    .components(vk::ComponentMapping::default())
+                    .subresource_range(
+                        vk::ImageSubresourceRange::default()
+                            .aspect_mask(aspect_flags)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1),
+                    ),
+                None,
+            )
+        }?;
+        Ok(image_view)
     }
 }
 
-struct SwapchainSurface {
-    handle: vk::SurfaceKHR,
-    capabilities: vk::SurfaceCapabilitiesKHR,
+pub struct SwapchainSurface {
+    pub handle: vk::SurfaceKHR,
+    pub capabilities: vk::SurfaceCapabilitiesKHR,
+    pub formats: Vec<vk::SurfaceFormatKHR>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
 impl Drop for RenderingContext {

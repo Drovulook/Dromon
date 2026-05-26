@@ -80,8 +80,15 @@ impl Engine {
                     self.renderers.remove(&window_id);
                 }
             }
+
             winit::event::WindowEvent::RedrawRequested => {
-                self.draw(window_id);
+                // self.draw(window_id);
+            }
+
+            winit::event::WindowEvent::Resized(size) => {
+                if let Some(renderer) = self.renderers.get_mut(&window_id) {
+                    renderer.resize().unwrap();
+                }
             }
             _ => {}
         }
