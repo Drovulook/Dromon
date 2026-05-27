@@ -13,6 +13,7 @@ use super::debug_messenger::DebugMessenger;
 use anyhow::Result;
 use ash::vk;
 use std::ffi::CStr;
+use std::io;
 use std::{collections::HashSet, sync::Arc};
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
@@ -326,6 +327,15 @@ impl RenderingContext {
         }?;
         Ok(image_view)
     }
+
+    pub fn create_shader_module(&self, code: &[u8]) -> Result<vk::ShaderModule> {
+        let code = ash::util::read_spv(&mut io::Cursor::new(code))?;
+        let create_info = vk::ShaderModuleCreateInfo::default().code(&code);
+        let shader_module = unsafe { self.device.create_shader_module(&create_info, None)? };
+        Ok(shader_module)
+    }
+
+    // pub fn create_graphics_pipeline(&self,
 }
 
 pub struct SwapchainSurface {
