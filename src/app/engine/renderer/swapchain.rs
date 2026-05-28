@@ -8,12 +8,13 @@ pub struct Swapchain {
     pub desired_image_count: u32,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
-    image_views: Vec<vk::ImageView>,
-    images: Vec<vk::Image>,
+    pub image_views: Vec<vk::ImageView>,
+    pub images: Vec<vk::Image>,
     handle: vk::SwapchainKHR,
     surface: SwapchainSurface,
     window: Arc<Window>,
     context: Arc<RenderingContext>,
+    is_dirty: bool,
 }
 
 impl Swapchain {
@@ -42,12 +43,13 @@ impl Swapchain {
             desired_image_count,
             format,
             extent,
-            image_views: vec![],
-            images: vec![],
+            image_views: Default::default(),
+            images: Default::default(),
             handle: Default::default(),
             surface,
             window,
             context,
+            is_dirty: true,
         })
     }
 
@@ -102,6 +104,44 @@ impl Swapchain {
                 )?);
             }
         }
+        Ok(())
+    }
+
+    pub fn aquire_next_image(&mut self, image_available_semaphore: vk::Semaphore) -> Result<u32> {
+        unsafe {
+            let (image_index, is_suboptimal) =
+                self.context.swapchain_extensions.acquire_next_image(
+                    self.handle,
+                    u64::MAX,
+                    image_available_semaphore,
+                    vk::Fence::null(),
+                )?;
+            if is_suboptimal {
+                self.is_dirty = true;
+            }
+            Ok(image_index)
+        }
+    }
+
+    pub fn present(
+        &mut self,
+        image_index: u32,
+        render_finished_semaphore: vk::Semaphore,
+    ) -> Result<()> {
+        let is_suboptimal = unsafe {
+            self.context.swapchain_extensions.queue_present(
+                self.context.queues[self.context.queue_families.present as usize],
+                &vk::PresentInfoKHR::default()
+                    .wait_semaphores(&[render_finished_semaphore])
+                    .swapchains(&[self.handle])
+                    .image_indices(&[image_index]),
+            )
+        }?;
+
+        if is_suboptimal {
+            self.is_dirty = true;
+        }
+
         Ok(())
     }
 }
