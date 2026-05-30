@@ -62,6 +62,13 @@ pub struct QueueFamilies {
     pub compute: u32,
 }
 
+pub struct SwapchainSurface {
+    pub handle: vk::SurfaceKHR,
+    pub capabilities: vk::SurfaceCapabilitiesKHR,
+    pub formats: Vec<vk::SurfaceFormatKHR>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
+}
+
 pub mod queue_family_picker {
     use crate::app::engine::rendering_context::{PhysicalDevice, QueueFamilies};
     use anyhow::Context as AnyhowContext;
@@ -424,14 +431,28 @@ impl RenderingContext {
         }
     }
 
-    // pub fn create_graphics_pipeline(&self,
-}
-
-pub struct SwapchainSurface {
-    pub handle: vk::SurfaceKHR,
-    pub capabilities: vk::SurfaceCapabilitiesKHR,
-    pub formats: Vec<vk::SurfaceFormatKHR>,
-    pub present_modes: Vec<vk::PresentModeKHR>,
+    pub fn begin_rendering(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        image_view: vk::ImageView,
+        clear_color: vk::ClearColorValue,
+        render_area: vk::Rect2D,
+    ) {
+        unsafe {
+            self.device.cmd_begin_rendering(
+                command_buffer,
+                &vk::RenderingInfo::default()
+                    .layer_count(1)
+                    .color_attachments(&[vk::RenderingAttachmentInfo::default()
+                        .image_view(image_view)
+                        .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                        .clear_value(vk::ClearValue { color: clear_color })
+                        .load_op(vk::AttachmentLoadOp::CLEAR)
+                        .store_op(vk::AttachmentStoreOp::STORE)])
+                    .render_area(render_area),
+            );
+        }
+    }
 }
 
 impl Drop for RenderingContext {

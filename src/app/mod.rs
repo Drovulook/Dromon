@@ -23,6 +23,13 @@ impl ApplicationHandler for App {
         self.engine = None;
     }
 
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        //request redraw
+        if let Some(engine) = &mut self.engine {
+            engine.request_redraw();
+        }
+    }
+
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,

@@ -107,7 +107,7 @@ impl Swapchain {
         Ok(())
     }
 
-    pub fn aquire_next_image(&mut self, image_available_semaphore: vk::Semaphore) -> Result<u32> {
+    pub fn acquire_next_image(&mut self, image_available_semaphore: vk::Semaphore) -> Result<u32> {
         unsafe {
             let (image_index, is_suboptimal) =
                 self.context.swapchain_extensions.acquire_next_image(
@@ -144,6 +144,50 @@ impl Swapchain {
 
         Ok(())
     }
+
+    pub fn transition_image_layout(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        image: vk::Image,
+        old_layout: ImageLayoutState,
+        new_layout: ImageLayoutState,
+        aspect_flag: vk::ImageAspectFlags,
+    ) {
+        unsafe {
+            self.context.device.cmd_pipeline_barrier(
+                command_buffer,
+                old_layout.stage_mask,
+                new_layout.stage_mask,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier::default()
+                    .src_access_mask(old_layout.access_mask)
+                    .dst_access_mask(new_layout.access_mask)
+                    .old_layout(old_layout.layout)
+                    .new_layout(new_layout.layout)
+                    .src_queue_family_index(old_layout.queue_family_index)
+                    .dst_queue_family_index(new_layout.queue_family_index)
+                    .image(image)
+                    .subresource_range(
+                        vk::ImageSubresourceRange::default()
+                            .aspect_mask(aspect_flag)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1),
+                    )],
+            )
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ImageLayoutState {
+    pub access_mask: vk::AccessFlags,
+    pub layout: vk::ImageLayout,
+    pub stage_mask: vk::PipelineStageFlags,
+    pub queue_family_index: u32,
 }
 
 impl Drop for Swapchain {

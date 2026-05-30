@@ -55,11 +55,9 @@ impl Engine {
             rendering_context,
         })
     }
-    pub fn draw(&mut self, window_id: WindowId) {
-        if let Some(renderer) = self.renderers.get_mut(&window_id) {
-            renderer.draw().unwrap();
-        }
-        if let Some(window) = self.windows.get(&window_id) {
+
+    pub fn request_redraw(&self) {
+        for window in self.windows.values() {
             window.request_redraw();
         }
     }
@@ -82,7 +80,9 @@ impl Engine {
             }
 
             winit::event::WindowEvent::RedrawRequested => {
-                // self.draw(window_id);
+                if let Some(renderer) = self.renderers.get_mut(&window_id) {
+                    renderer.render().unwrap();
+                }
             }
 
             winit::event::WindowEvent::Resized(size) => {
@@ -90,6 +90,13 @@ impl Engine {
                     renderer.resize().unwrap();
                 }
             }
+
+            winit::event::WindowEvent::ScaleFactorChanged { .. } => {
+                if let Some(renderer) = self.renderers.get_mut(&window_id) {
+                    renderer.resize().unwrap();
+                }
+            }
+
             _ => {}
         }
     }

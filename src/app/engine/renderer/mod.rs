@@ -1,10 +1,10 @@
 mod swapchain;
 
+use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::{Result, anyhow};
 use ash::vk;
 use softbuffer::Context as SoftBufferContext;
-use softbuffer::Surface;
 use std::io;
 use std::{num::NonZeroU32, sync::Arc};
 use winit::window::Window;
@@ -17,7 +17,7 @@ struct Frame {
 }
 
 pub struct Renderer {
-    surface: Surface<Arc<Window>, Arc<Window>>,
+    in_flight_frames_count: usize,
     frame_index: usize,
     frames: Vec<Frame>,
     command_pool: vk::CommandPool,
@@ -36,10 +36,6 @@ pub fn load_shader_module(context: &RenderingContext, path: &str) -> Result<vk::
 
 impl Renderer {
     pub(crate) fn new(context: Arc<RenderingContext>, window: Arc<Window>) -> Result<Self> {
-        let softbuffer_context =
-            SoftBufferContext::new(window.clone()).map_err(|e| anyhow!("{e}"))?;
-        let surface =
-            Surface::new(&softbuffer_context, window.clone()).map_err(|e| anyhow!("{e}"))?;
         let mut swapchain = swapchain::Swapchain::new(context.clone(), window.clone())?;
         swapchain.update_size()?;
 
@@ -70,15 +66,16 @@ impl Renderer {
                 None,
             )?;
 
+            let in_flight_frames_count = 1;
             let command_buffers = context.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
                     .command_pool(command_pool)
                     .level(vk::CommandBufferLevel::PRIMARY)
-                    .command_buffer_count(swapchain.image_views.len() as u32),
+                    .command_buffer_count(in_flight_frames_count as u32),
             )?;
 
             let mut frames = Vec::with_capacity(command_buffers.len());
-            for (_, &command_buffer) in command_buffers.iter().enumerate() {
+            for &command_buffer in command_buffers.iter() {
                 let image_available_semaphore = context
                     .device
                     .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?;
@@ -99,10 +96,10 @@ impl Renderer {
             }
 
             Ok(Self {
+                in_flight_frames_count,
                 frame_index: 0,
                 frames,
                 command_pool,
-                surface,
                 pipeline,
                 pipeline_layout,
                 swapchain,
@@ -115,20 +112,118 @@ impl Renderer {
         self.swapchain.update_size()
     }
 
-    pub(crate) fn draw(&mut self) -> Result<()> {
-        let (width, height) = {
-            let size = self.surface.window().inner_size();
-            (size.width, size.height)
-        };
-        self.surface
-            .resize(
-                NonZeroU32::new(width).unwrap_or(NonZeroU32::new(1).unwrap()),
-                NonZeroU32::new(height).unwrap_or(NonZeroU32::new(1).unwrap()),
-            )
-            .map_err(|e| anyhow!("{e}"))?;
-        let mut buffer = self.surface.buffer_mut().map_err(|e| anyhow!("{e}"))?;
-        buffer.fill(0x00000000);
-        buffer.present().map_err(|e| anyhow!("{e}"))?;
+    pub fn render(&mut self) -> Result<()> {
+        let frame = &self.frames[self.frame_index];
+
+        unsafe {
+            self.context
+                .device
+                .wait_for_fences(&[frame.in_flight_fence], true, u64::MAX)?;
+
+            self.context.device.reset_fences(&[frame.in_flight_fence])?;
+
+            self.context
+                .device
+                .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
+
+            let image_index = self
+                .swapchain
+                .acquire_next_image(frame.image_available_semaphore)?;
+
+            self.context.device.begin_command_buffer(
+                frame.command_buffer,
+                &vk::CommandBufferBeginInfo::default(),
+            )?;
+
+            let undefined_image_state = ImageLayoutState {
+                access_mask: vk::AccessFlags::empty(),
+                layout: vk::ImageLayout::UNDEFINED,
+                stage_mask: vk::PipelineStageFlags::TOP_OF_PIPE,
+                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            };
+
+            let renderable_image_state = ImageLayoutState {
+                access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            };
+
+            let present_image_state = ImageLayoutState {
+                access_mask: vk::AccessFlags::empty(),
+                layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            };
+
+            self.swapchain.transition_image_layout(
+                frame.command_buffer,
+                self.swapchain.images[image_index as usize],
+                undefined_image_state,
+                renderable_image_state,
+                vk::ImageAspectFlags::COLOR,
+            );
+
+            self.swapchain.transition_image_layout(
+                frame.command_buffer,
+                self.swapchain.images[image_index as usize],
+                renderable_image_state,
+                present_image_state,
+                vk::ImageAspectFlags::COLOR,
+            );
+
+            self.context.begin_rendering(
+                frame.command_buffer,
+                self.swapchain.image_views[image_index as usize],
+                vk::ClearColorValue {
+                    float32: [0.002, 0.0, 0.0, 1.0],
+                },
+                vk::Rect2D::default().extent(self.swapchain.extent),
+            );
+
+            self.context.device.cmd_set_viewport(
+                frame.command_buffer,
+                0,
+                &[vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: self.swapchain.extent.width as f32,
+                    height: self.swapchain.extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }],
+            );
+
+            self.context.device.cmd_bind_pipeline(
+                frame.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+
+            self.context
+                .device
+                .cmd_draw(frame.command_buffer, 3, 1, 0, 0);
+
+            self.context.device.cmd_end_rendering(frame.command_buffer);
+
+            self.context
+                .device
+                .end_command_buffer(frame.command_buffer)?;
+
+            self.context.device.queue_submit(
+                self.context.queues[self.context.queue_families.graphics as usize],
+                &[vk::SubmitInfo::default()
+                    .command_buffers(&[frame.command_buffer])
+                    .wait_semaphores(&[frame.image_available_semaphore])
+                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+                    .signal_semaphores(&[frame.render_finished_semaphore])],
+                frame.in_flight_fence,
+            )?;
+
+            self.swapchain
+                .present(image_index, frame.render_finished_semaphore)?;
+        }
+
         Ok(())
     }
 }
