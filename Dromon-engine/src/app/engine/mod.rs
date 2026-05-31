@@ -2,6 +2,7 @@ pub mod renderer;
 
 mod debug_messenger;
 mod rendering_context;
+mod socket_client;
 
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
@@ -25,7 +26,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(event_loop: &ActiveEventLoop) -> Result<Self> {
+    pub fn new(event_loop: &ActiveEventLoop, use_cli: bool) -> Result<Self> {
         let attrs = WindowAttributes::default().with_title("Dromon");
         #[cfg(target_os = "linux")]
         let attrs = attrs.with_name("dromon", "dromon");
@@ -36,6 +37,7 @@ impl Engine {
         let rendering_context = Arc::new(RenderingContext::new(ContextAttributes {
             compatibility_window: &primary_window,
             queue_family_picker: queue_family_picker::single_queue_family,
+            use_cli,
         })?);
 
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);

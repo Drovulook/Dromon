@@ -4,19 +4,20 @@ use winit::application::ApplicationHandler;
 
 use crate::app::engine::Engine;
 
-#[derive(Default)]
 pub struct App {
     engine: Option<Engine>,
+    use_cli: bool,
+}
+
+impl App {
+    pub fn new(use_cli: bool) -> Self {
+        Self { engine: None, use_cli }
+    }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        self.engine = Some(Engine::new(event_loop).unwrap()); //TODO: gérer les erreurs proprement
-        // if let Some(engine) = self.engine.as_mut() {
-        //     let secondary_window_attributes =
-        //         WindowAttributes::default().with_title("Secondary window");
-        //     let secondary_window = engine.create_window(event_loop, secondary_window_attributes);
-        // }
+        self.engine = Some(Engine::new(event_loop, self.use_cli).unwrap());
     }
 
     fn suspended(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -24,7 +25,6 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        //request redraw
         if let Some(engine) = &mut self.engine {
             engine.request_redraw();
         }

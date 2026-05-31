@@ -26,7 +26,7 @@ pub struct Renderer {
     context: Arc<RenderingContext>,
 }
 
-const SHADERS_DIR: &str = "res/shaders/";
+const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
 
 pub fn load_shader_module(context: &RenderingContext, path: &str) -> Result<vk::ShaderModule> {
     let code = std::fs::read(format!("{}{}", SHADERS_DIR, path))?;

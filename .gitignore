@@ -3,5 +3,6 @@
 CLAUDE.md
 links.md
 /Dromon-Claude-Docs
+/__pycache__
 
 /Dromon-engine/res/shaders/*.spv
