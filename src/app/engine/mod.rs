@@ -87,13 +87,13 @@ impl Engine {
 
             winit::event::WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
-                    renderer.resize().unwrap();
+                    renderer.resize();
                 }
             }
 
             winit::event::WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
-                    renderer.resize().unwrap();
+                    renderer.resize();
                 }
             }
 

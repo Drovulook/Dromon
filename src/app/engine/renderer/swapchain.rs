@@ -133,14 +133,18 @@ impl Swapchain {
         render_finished_semaphore: vk::Semaphore,
     ) -> Result<()> {
         let is_suboptimal = unsafe {
-            self.context.swapchain_extensions.queue_present(
+            match self.context.swapchain_extensions.queue_present(
                 self.context.queues[self.context.queue_families.present as usize],
                 &vk::PresentInfoKHR::default()
                     .wait_semaphores(&[render_finished_semaphore])
                     .swapchains(&[self.handle])
                     .image_indices(&[image_index]),
-            )
-        }?;
+            ) {
+                Ok(is_suboptimal) => is_suboptimal,
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => true,
+                Err(error) => return Err(error.into()),
+            }
+        };
 
         if is_suboptimal {
             self.is_dirty = true;
