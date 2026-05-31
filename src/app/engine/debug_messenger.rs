@@ -11,7 +11,7 @@ unsafe extern "system" fn debug_callback(
     let message = unsafe { CStr::from_ptr((*data).p_message) }
         .to_str()
         .unwrap_or("?");
-    eprintln!("[Vulkan {:?}] {}", severity, message);
+    eprintln!("[Vulkan {:?}] {}\n", severity, message);
     vk::FALSE
 }
 

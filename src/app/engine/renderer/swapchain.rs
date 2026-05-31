@@ -14,7 +14,7 @@ pub struct Swapchain {
     surface: SwapchainSurface,
     window: Arc<Window>,
     context: Arc<RenderingContext>,
-    is_dirty: bool,
+    pub is_dirty: bool,
 }
 
 impl Swapchain {
@@ -65,6 +65,8 @@ impl Swapchain {
         }
 
         unsafe {
+            self.context.device.device_wait_idle()?;
+
             let new_swapchain = self.context.swapchain_extensions.create_swapchain(
                 &vk::SwapchainCreateInfoKHR::default()
                     .surface(self.surface.handle)
@@ -104,6 +106,7 @@ impl Swapchain {
                 )?);
             }
         }
+        self.is_dirty = false;
         Ok(())
     }
 
@@ -118,6 +121,7 @@ impl Swapchain {
                 )?;
             if is_suboptimal {
                 self.is_dirty = true;
+                println!("dirty");
             }
             Ok(image_index)
         }
@@ -193,6 +197,7 @@ pub struct ImageLayoutState {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            let _ = self.context.device.device_wait_idle();
             for image_view in self.image_views.drain(..) {
                 self.context.device.destroy_image_view(image_view, None);
             }

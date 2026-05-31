@@ -2,17 +2,13 @@ mod swapchain;
 
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ash::vk;
-use softbuffer::Context as SoftBufferContext;
-use std::io;
-use std::{num::NonZeroU32, sync::Arc};
+use std::sync::Arc;
 use winit::window::Window;
 
 struct Frame {
     command_buffer: vk::CommandBuffer,
-    image_available_semaphore: vk::Semaphore,
-    render_finished_semaphore: vk::Semaphore,
     in_flight_fence: vk::Fence,
 }
 
@@ -20,6 +16,9 @@ pub struct Renderer {
     in_flight_frames_count: usize,
     frame_index: usize,
     frames: Vec<Frame>,
+    image_available_semaphores: Vec<vk::Semaphore>,
+    render_finished_semaphores: Vec<vk::Semaphore>,
+    acquire_semaphore_index: usize,
     command_pool: vk::CommandPool,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
@@ -76,29 +75,46 @@ impl Renderer {
 
             let mut frames = Vec::with_capacity(command_buffers.len());
             for &command_buffer in command_buffers.iter() {
-                let image_available_semaphore = context
-                    .device
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?;
-                let render_finished_semaphore = context
-                    .device
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?;
                 let in_flight_fence = context.device.create_fence(
                     &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
                     None,
                 )?;
-
                 frames.push(Frame {
                     command_buffer,
-                    image_available_semaphore,
-                    render_finished_semaphore,
                     in_flight_fence,
                 });
+            }
+
+            let image_count = swapchain.images.len();
+
+            // N+1 sémaphores en rotation : garantit qu'on ne réutilise pas un sémaphore
+            // encore tenu par WSI (image X non ré-acquise depuis sa dernière présentation)
+            let mut image_available_semaphores = Vec::with_capacity(image_count + 1);
+            for _ in 0..image_count + 1 {
+                image_available_semaphores.push(
+                    context
+                        .device
+                        .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?,
+                );
+            }
+
+            // N sémaphores indexés par image_index : réutilisables dès que l'image est ré-acquise
+            let mut render_finished_semaphores = Vec::with_capacity(image_count);
+            for _ in 0..image_count {
+                render_finished_semaphores.push(
+                    context
+                        .device
+                        .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?,
+                );
             }
 
             Ok(Self {
                 in_flight_frames_count,
                 frame_index: 0,
                 frames,
+                image_available_semaphores,
+                render_finished_semaphores,
+                acquire_semaphore_index: 0,
                 command_pool,
                 pipeline,
                 pipeline_layout,
@@ -119,16 +135,25 @@ impl Renderer {
             self.context
                 .device
                 .wait_for_fences(&[frame.in_flight_fence], true, u64::MAX)?;
-
             self.context.device.reset_fences(&[frame.in_flight_fence])?;
-
             self.context
                 .device
                 .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
 
+            if self.swapchain.is_dirty {
+                self.swapchain.update_size()?;
+            }
+
+            let image_available_semaphore =
+                self.image_available_semaphores[self.acquire_semaphore_index];
+            self.acquire_semaphore_index =
+                (self.acquire_semaphore_index + 1) % self.image_available_semaphores.len();
+
             let image_index = self
                 .swapchain
-                .acquire_next_image(frame.image_available_semaphore)?;
+                .acquire_next_image(image_available_semaphore)?;
+
+            let render_finished_semaphore = self.render_finished_semaphores[image_index as usize];
 
             self.context.device.begin_command_buffer(
                 frame.command_buffer,
@@ -164,14 +189,6 @@ impl Renderer {
                 vk::ImageAspectFlags::COLOR,
             );
 
-            self.swapchain.transition_image_layout(
-                frame.command_buffer,
-                self.swapchain.images[image_index as usize],
-                renderable_image_state,
-                present_image_state,
-                vk::ImageAspectFlags::COLOR,
-            );
-
             self.context.begin_rendering(
                 frame.command_buffer,
                 self.swapchain.image_views[image_index as usize],
@@ -194,6 +211,12 @@ impl Renderer {
                 }],
             );
 
+            self.context.device.cmd_set_scissor(
+                frame.command_buffer,
+                0,
+                &[vk::Rect2D::default().extent(self.swapchain.extent)],
+            );
+
             self.context.device.cmd_bind_pipeline(
                 frame.command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -206,6 +229,14 @@ impl Renderer {
 
             self.context.device.cmd_end_rendering(frame.command_buffer);
 
+            self.swapchain.transition_image_layout(
+                frame.command_buffer,
+                self.swapchain.images[image_index as usize],
+                renderable_image_state,
+                present_image_state,
+                vk::ImageAspectFlags::COLOR,
+            );
+
             self.context
                 .device
                 .end_command_buffer(frame.command_buffer)?;
@@ -214,14 +245,16 @@ impl Renderer {
                 self.context.queues[self.context.queue_families.graphics as usize],
                 &[vk::SubmitInfo::default()
                     .command_buffers(&[frame.command_buffer])
-                    .wait_semaphores(&[frame.image_available_semaphore])
+                    .wait_semaphores(&[image_available_semaphore])
                     .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-                    .signal_semaphores(&[frame.render_finished_semaphore])],
+                    .signal_semaphores(&[render_finished_semaphore])],
                 frame.in_flight_fence,
             )?;
 
             self.swapchain
-                .present(image_index, frame.render_finished_semaphore)?;
+                .present(image_index, render_finished_semaphore)?;
+
+            self.frame_index = (self.frame_index + 1) % self.in_flight_frames_count;
         }
 
         Ok(())
@@ -231,6 +264,21 @@ impl Renderer {
 impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
+            let _ = self.context.device.device_wait_idle();
+            self.frames.drain(..).for_each(|frame| {
+                self.context
+                    .device
+                    .destroy_fence(frame.in_flight_fence, None);
+            });
+            for semaphore in self.image_available_semaphores.drain(..) {
+                self.context.device.destroy_semaphore(semaphore, None);
+            }
+            for semaphore in self.render_finished_semaphores.drain(..) {
+                self.context.device.destroy_semaphore(semaphore, None);
+            }
+            self.context
+                .device
+                .destroy_command_pool(self.command_pool, None);
             self.context.device.destroy_pipeline(self.pipeline, None);
             self.context
                 .device
