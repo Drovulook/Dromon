@@ -1,6 +1,6 @@
 mod engine;
 
-use winit::{application::ApplicationHandler, window::WindowAttributes};
+use winit::application::ApplicationHandler;
 
 use crate::app::engine::Engine;
 
@@ -19,11 +19,11 @@ impl ApplicationHandler for App {
         // }
     }
 
-    fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn suspended(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         self.engine = None;
     }
 
-    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         //request redraw
         if let Some(engine) = &mut self.engine {
             engine.request_redraw();

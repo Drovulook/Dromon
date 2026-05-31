@@ -69,7 +69,6 @@ impl Engine {
         event: winit::event::WindowEvent,
     ) {
         match event {
-            //HACK : workaround : display a window by filling the buffer using softbuffer for Wayland
             winit::event::WindowEvent::CloseRequested => {
                 if window_id == self.primary_window_id {
                     event_loop.exit();

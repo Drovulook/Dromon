@@ -1,1 +1,7 @@
 /target
+/.claude
+CLAUDE.md
+links.md
+/Dromon-Claude-Docs
+
+/Dromon-engine/res/shaders/*.spv

@@ -39,6 +39,8 @@ impl DebugMessenger {
     }
 
     pub unsafe fn destroy(&self) {
-        self.loader.destroy_debug_utils_messenger(self.handle, None);
+        unsafe {
+            self.loader.destroy_debug_utils_messenger(self.handle, None);
+        }
     }
 }
