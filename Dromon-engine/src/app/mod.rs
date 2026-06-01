@@ -1,23 +1,28 @@
 mod engine;
+pub mod logger;
+mod socket_client;
 
+use std::sync::Arc;
+
+use logger::Logger;
 use winit::application::ApplicationHandler;
 
 use crate::app::engine::Engine;
 
 pub struct App {
     engine: Option<Engine>,
-    use_cli: bool,
+    logger: Arc<Logger>,
 }
 
 impl App {
-    pub fn new(use_cli: bool) -> Self {
-        Self { engine: None, use_cli }
+    pub fn new(logger: Arc<Logger>) -> Self {
+        Self { engine: None, logger }
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        self.engine = Some(Engine::new(event_loop, self.use_cli).unwrap());
+        self.engine = Some(Engine::new(event_loop, self.logger.clone()).unwrap());
     }
 
     fn suspended(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {

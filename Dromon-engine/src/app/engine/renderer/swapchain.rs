@@ -1,4 +1,5 @@
 use crate::app::engine::rendering_context::{RenderingContext, SwapchainSurface};
+use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -14,11 +15,16 @@ pub struct Swapchain {
     surface: SwapchainSurface,
     window: Arc<Window>,
     context: Arc<RenderingContext>,
+    logger: Arc<Logger>,
     pub is_dirty: bool,
 }
 
 impl Swapchain {
-    pub fn new(context: Arc<RenderingContext>, window: Arc<Window>) -> Result<Self> {
+    pub fn new(
+        context: Arc<RenderingContext>,
+        window: Arc<Window>,
+        logger: Arc<Logger>,
+    ) -> Result<Self> {
         let surface = unsafe { context.create_surface(window.clone())? };
         let format = vk::Format::B8G8R8A8_SRGB;
         let extent = if surface.capabilities.current_extent.width != u32::MAX {
@@ -49,11 +55,13 @@ impl Swapchain {
             surface,
             window,
             context,
+            logger,
             is_dirty: true,
         })
     }
 
     pub fn update_size(&mut self) -> Result<()> {
+        self.logger.info("update_size");
         let size = self.window.inner_size();
         self.extent = vk::Extent2D {
             width: size.width,
@@ -121,7 +129,7 @@ impl Swapchain {
                 )?;
             if is_suboptimal {
                 self.is_dirty = true;
-                println!("dirty");
+                self.logger.warn("dirty");
             }
             Ok(image_index)
         }

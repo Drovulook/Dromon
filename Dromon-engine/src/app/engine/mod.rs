@@ -2,8 +2,8 @@ pub mod renderer;
 
 mod debug_messenger;
 mod rendering_context;
-mod socket_client;
 
+use crate::app::logger::Logger;
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
 };
@@ -26,7 +26,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(event_loop: &ActiveEventLoop, use_cli: bool) -> Result<Self> {
+    pub fn new(event_loop: &ActiveEventLoop, logger: Arc<Logger>) -> Result<Self> {
         let attrs = WindowAttributes::default().with_title("Dromon");
         #[cfg(target_os = "linux")]
         let attrs = attrs.with_name("dromon", "dromon");
@@ -37,7 +37,7 @@ impl Engine {
         let rendering_context = Arc::new(RenderingContext::new(ContextAttributes {
             compatibility_window: &primary_window,
             queue_family_picker: queue_family_picker::single_queue_family,
-            use_cli,
+            logger: logger.clone(),
         })?);
 
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
@@ -45,7 +45,7 @@ impl Engine {
         let renderers = windows
             .iter()
             .map(|(id, window)| {
-                let renderer = Renderer::new(rendering_context.clone(), window.clone()).unwrap();
+                let renderer = Renderer::new(rendering_context.clone(), window.clone(), logger.clone()).unwrap();
                 (*id, renderer)
             })
             .collect::<HashMap<_, _>>();
@@ -86,7 +86,7 @@ impl Engine {
                 }
             }
 
-            winit::event::WindowEvent::Resized(size) => {
+            winit::event::WindowEvent::Resized(_size) => {
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
                     renderer.resize();
                 }
@@ -106,13 +106,14 @@ impl Engine {
         &mut self,
         event_loop: &ActiveEventLoop,
         attributes: WindowAttributes,
+        logger: Arc<Logger>,
     ) -> Result<WindowId> {
         let window = Arc::new(event_loop.create_window(attributes)?);
         let window_id = window.id();
         self.windows.insert(window_id, window.clone());
         self.renderers.insert(
             window_id,
-            Renderer::new(self.rendering_context.clone(), window.clone())?,
+            Renderer::new(self.rendering_context.clone(), window.clone(), logger)?,
         );
         Ok(window_id)
     }

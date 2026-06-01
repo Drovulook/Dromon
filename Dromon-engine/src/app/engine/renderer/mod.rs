@@ -2,6 +2,7 @@ mod swapchain;
 
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
+use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -34,8 +35,12 @@ pub fn load_shader_module(context: &RenderingContext, path: &str) -> Result<vk::
 }
 
 impl Renderer {
-    pub(crate) fn new(context: Arc<RenderingContext>, window: Arc<Window>) -> Result<Self> {
-        let mut swapchain = swapchain::Swapchain::new(context.clone(), window.clone())?;
+    pub(crate) fn new(
+        context: Arc<RenderingContext>,
+        window: Arc<Window>,
+        logger: Arc<Logger>,
+    ) -> Result<Self> {
+        let mut swapchain = swapchain::Swapchain::new(context.clone(), window.clone(), logger)?;
         swapchain.update_size()?;
 
         let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;

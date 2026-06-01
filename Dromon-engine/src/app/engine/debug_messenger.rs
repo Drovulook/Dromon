@@ -1,7 +1,9 @@
 use anyhow::Result;
 use ash::vk;
 use std::ffi::CStr;
-use std::sync::mpsc::SyncSender;
+use std::sync::Arc;
+
+use crate::app::logger::Logger;
 
 unsafe extern "system" fn debug_callback(
     severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -12,13 +14,13 @@ unsafe extern "system" fn debug_callback(
     let message = unsafe { CStr::from_ptr((*data).p_message) }
         .to_str()
         .unwrap_or("?");
-    let formatted = format!("[Vulkan {:?}] {}", severity, message);
+    let formatted = format!("[{:?}] {}", severity, message);
 
     if !user_data.is_null() {
-        // Safety: user_data pointe vers le SyncSender<String> owned par DebugMessenger,
-        // qui vit aussi longtemps que ce callback peut être appelé.
-        let sender = unsafe { &*(user_data as *const SyncSender<String>) };
-        let _ = sender.try_send(formatted);
+        // Safety: user_data pointe vers le Logger heap-alloué par l'Arc,
+        // qui vit aussi longtemps que DebugMessenger (via _logger).
+        let logger = unsafe { &*(user_data as *const Logger) };
+        logger.vulkan_layer_msg(&formatted);
     } else {
         eprintln!("{}", formatted);
     }
@@ -29,19 +31,19 @@ unsafe extern "system" fn debug_callback(
 pub struct DebugMessenger {
     handle: vk::DebugUtilsMessengerEXT,
     loader: ash::ext::debug_utils::Instance,
-    _sender: Option<Box<SyncSender<String>>>,
+    _logger: Option<Arc<Logger>>,
 }
 
 impl DebugMessenger {
     pub fn new(
         entry: &ash::Entry,
         instance: &ash::Instance,
-        sender: Option<SyncSender<String>>,
+        logger: Option<Arc<Logger>>,
     ) -> Result<Self> {
-        let sender = sender.map(Box::new);
-        let user_data = sender
-            .as_deref()
-            .map(|s| s as *const SyncSender<String> as *mut std::ffi::c_void)
+        // On pointe directement dans l'allocation heap de l'Arc (stable tant que l'Arc vit).
+        let user_data = logger
+            .as_ref()
+            .map(|arc| arc.as_ref() as *const Logger as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
 
         unsafe {
@@ -56,7 +58,11 @@ impl DebugMessenger {
             create_info.p_user_data = user_data;
 
             let handle = loader.create_debug_utils_messenger(&create_info, None)?;
-            Ok(Self { handle, loader, _sender: sender })
+            Ok(Self {
+                handle,
+                loader,
+                _logger: logger,
+            })
         }
     }
 

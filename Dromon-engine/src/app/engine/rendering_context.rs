@@ -10,6 +10,7 @@
  */
 
 use super::debug_messenger::DebugMessenger;
+use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
 use std::ffi::CStr;
@@ -38,7 +39,7 @@ type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, Queu
 pub struct ContextAttributes<'window> {
     pub compatibility_window: &'window Window,
     pub queue_family_picker: QueueFamilyPicker,
-    pub use_cli: bool,
+    pub logger: Arc<Logger>,
 }
 
 #[derive(Debug, Clone)]
@@ -153,16 +154,9 @@ impl RenderingContext {
             )?;
 
             #[cfg(debug_assertions)]
-            let debug_messenger = {
-                let sender = if attributes.use_cli {
-                    let (tx, rx) = std::sync::mpsc::sync_channel(1024);
-                    super::socket_client::spawn_worker(rx);
-                    Some(tx)
-                } else {
-                    None
-                };
-                Some(DebugMessenger::new(&entry, &instance, sender)?)
-            };
+            let debug_messenger = Some(DebugMessenger::new(&entry, &instance, Some(attributes.logger.clone()))?);
+            #[cfg(not(debug_assertions))]
+            let debug_messenger: Option<DebugMessenger> = None;
 
             let surface_extensions = ash::khr::surface::Instance::new(&entry, &instance);
 
