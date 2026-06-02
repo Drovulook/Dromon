@@ -1,13 +1,16 @@
-use ratatui::widgets::ListState;
+use crate::log_parser::{self, ParsedMessage};
+use ratatui::{text::Line, widgets::ListState};
 use std::sync::{Arc, atomic::AtomicBool, mpsc};
 
 pub struct AppState {
-    pub logs: Vec<String>,
+    pub logs: Vec<Line<'static>>,
     pub rx: mpsc::Receiver<String>,
     pub shutdown: Arc<AtomicBool>,
     pub list_state: ListState,
     pub auto_scroll: bool,
     pub viewport_height: usize,
+    pub fps: Option<f32>,
+    pub state: Option<String>,
 }
 
 impl AppState {
@@ -19,6 +22,8 @@ impl AppState {
             list_state: ListState::default(),
             auto_scroll: true,
             viewport_height: 1,
+            fps: None,
+            state: None,
         }
     }
 
@@ -27,9 +32,15 @@ impl AppState {
     }
 
     pub fn push(&mut self, msg: String) {
-        self.logs.push(msg);
-        if self.auto_scroll {
-            *self.list_state.offset_mut() = self.bottom_offset();
+        match log_parser::parse(msg) {
+            ParsedMessage::Log(line) => {
+                self.logs.push(line);
+                if self.auto_scroll {
+                    *self.list_state.offset_mut() = self.bottom_offset();
+                }
+            }
+            ParsedMessage::Fps(fps) => self.fps = Some(fps),
+            ParsedMessage::State(s) => self.state = Some(s),
         }
     }
 

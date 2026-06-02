@@ -1,12 +1,15 @@
 mod app_state;
+mod log_parser;
 
 use app_state::AppState;
 use color_eyre::eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
-    style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem},
+    layout::{Constraint, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 use std::{
     io::{BufRead, BufReader},
@@ -87,41 +90,77 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
     Ok(())
 }
 
+const BG: Color = Color::Rgb(0x02, 0x00, 0x02);
+const BORDER: Color = Color::Rgb(0x9D, 0x7B, 0xBF);
+const TITLE: Color = Color::Rgb(0xE6, 0xA2, 0x4C);
+const FG: Color = Color::Rgb(0xBF, 0xBD, 0xB6);
+const ACCENT: Color = Color::Rgb(0x56, 0x9C, 0xD6);
+
 fn render(frame: &mut Frame, state: &mut AppState) {
-    state.viewport_height = (frame.area().height as usize).saturating_sub(2).max(1);
+    let [status_area, logs_area] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .areas(frame.area());
+
+    state.viewport_height = (logs_area.height as usize).saturating_sub(2).max(1);
     if state.auto_scroll {
         *state.list_state.offset_mut() = state.bottom_offset();
     }
 
+    render_status(frame, state, status_area);
+    render_logs(frame, state, logs_area);
+}
+
+fn render_status(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+    let engine_state = state.state.as_deref().unwrap_or("—");
+    let fps_str = state
+        .fps
+        .map(|f| format!("{:.1}", f))
+        .unwrap_or_else(|| "—".to_string());
+
+    let line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("STATE", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(engine_state, Style::default().fg(FG)),
+        Span::raw("     "),
+        Span::styled("FPS", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(fps_str, Style::default().fg(FG)),
+    ]);
+
+    let block = Block::default()
+        .title(Span::styled("Dromon Engine", Style::default().fg(TITLE)))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER))
+        .style(Style::default().bg(BG));
+
+    frame.render_widget(Paragraph::new(line).block(block), area);
+}
+
+fn render_logs(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = state
         .logs
         .iter()
-        .map(|l| ListItem::new(l.as_str()))
+        .map(|l| ListItem::new(l.clone()))
         .collect();
 
     let title = if state.auto_scroll {
-        "Dromon Logs — (↑↓ scroll  g/G haut/bas  q quitter)"
+        "Logs — (↑↓ scroll  g/G haut/bas  q quitter)"
     } else {
-        "Dromon Logs — [scroll manuel] (G = bas + auto)"
+        "Logs — [scroll manuel] (G = bas + auto)"
     };
 
-    const BG: Color = Color::Rgb(0x07, 0x00, 0x00);
-    const BORDER: Color = Color::Rgb(0x1E, 0x2D, 0x3D);
-    const TITLE: Color = Color::Rgb(0xAA, 0x22, 0x22);
-    const FG: Color = Color::Rgb(0xBF, 0xBD, 0xB6);
-
     let block = Block::default()
-        .title(ratatui::text::Span::styled(
-            title,
-            Style::default().fg(TITLE),
-        ))
+        .title(Span::styled(title, Style::default().fg(TITLE)))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(BORDER))
         .style(Style::default().bg(BG).fg(FG));
 
     frame.render_stateful_widget(
         List::new(items).block(block),
-        frame.area(),
+        area,
         &mut state.list_state,
     );
 }

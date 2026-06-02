@@ -140,14 +140,19 @@ impl Renderer {
             self.context
                 .device
                 .wait_for_fences(&[frame.in_flight_fence], true, u64::MAX)?;
-            self.context.device.reset_fences(&[frame.in_flight_fence])?;
-            self.context
-                .device
-                .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
 
             if self.swapchain.is_dirty {
                 self.swapchain.update_size()?;
             }
+
+            if self.swapchain.extent.width == 0 || self.swapchain.extent.height == 0 {
+                return Ok(());
+            }
+
+            self.context.device.reset_fences(&[frame.in_flight_fence])?;
+            self.context
+                .device
+                .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
 
             let image_available_semaphore =
                 self.image_available_semaphores[self.acquire_semaphore_index];
@@ -159,11 +164,6 @@ impl Renderer {
                 .acquire_next_image(image_available_semaphore)?;
 
             let render_finished_semaphore = self.render_finished_semaphores[image_index as usize];
-
-            self.context.device.begin_command_buffer(
-                frame.command_buffer,
-                &vk::CommandBufferBeginInfo::default(),
-            )?;
 
             let undefined_image_state = ImageLayoutState {
                 access_mask: vk::AccessFlags::empty(),
@@ -186,6 +186,13 @@ impl Renderer {
                 queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             };
 
+            // Commands
+            self.context.device.begin_command_buffer(
+                frame.command_buffer,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )?;
+
             self.swapchain.transition_image_layout(
                 frame.command_buffer,
                 self.swapchain.images[image_index as usize],
@@ -198,7 +205,7 @@ impl Renderer {
                 frame.command_buffer,
                 self.swapchain.image_views[image_index as usize],
                 vk::ClearColorValue {
-                    float32: [0.002, 0.0, 0.0, 1.0],
+                    float32: [0.0015, 0.0, 0.0015, 1.0],
                 },
                 vk::Rect2D::default().extent(self.swapchain.extent),
             );
@@ -245,6 +252,7 @@ impl Renderer {
             self.context
                 .device
                 .end_command_buffer(frame.command_buffer)?;
+            // End on commands
 
             self.context.device.queue_submit(
                 self.context.queues[self.context.queue_families.graphics as usize],

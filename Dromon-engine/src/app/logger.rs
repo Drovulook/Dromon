@@ -34,6 +34,14 @@ impl Logger {
         self.send(format!("[VULKAN] {}", msg));
     }
 
+    pub fn fps(&self, fps: f32) {
+        self.send(format!("[FPS] {:.1}", fps));
+    }
+
+    pub fn state(&self, s: &str) {
+        self.send(format!("[STATE] {}", s));
+    }
+
     fn send(&self, msg: String) {
         match &self.sender {
             Some(tx) => {

@@ -9,7 +9,11 @@ use crate::app::engine::rendering_context::{
 };
 use anyhow::Result;
 use renderer::Renderer;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::Instant,
+};
 use winit::{
     event_loop::ActiveEventLoop,
     window::{Window, WindowAttributes, WindowId},
@@ -23,6 +27,7 @@ pub struct Engine {
     windows: HashMap<WindowId, Arc<Window>>,
     primary_window_id: WindowId,
     rendering_context: Arc<RenderingContext>,
+    logger: Arc<Logger>,
 }
 
 impl Engine {
@@ -50,11 +55,14 @@ impl Engine {
             })
             .collect::<HashMap<_, _>>();
 
+        logger.state("Running");
+
         Ok(Self {
             renderers,
             windows,
             primary_window_id,
             rendering_context,
+            logger,
         })
     }
 
@@ -81,8 +89,13 @@ impl Engine {
             }
 
             winit::event::WindowEvent::RedrawRequested => {
+                let t0 = Instant::now();
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
                     renderer.render().unwrap();
+                }
+                let dt = t0.elapsed().as_secs_f32();
+                if dt > 0.0 {
+                    self.logger.fps(1.0 / dt);
                 }
             }
 
