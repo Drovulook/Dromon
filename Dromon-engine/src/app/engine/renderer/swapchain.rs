@@ -164,27 +164,27 @@ impl Swapchain {
     pub fn transition_image_layout(
         &self,
         command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        old_layout: ImageLayoutState,
-        new_layout: ImageLayoutState,
-        aspect_flag: vk::ImageAspectFlags,
+        states: &[(vk::Image, ImageLayoutState, ImageLayoutState)],
     ) {
-        unsafe {
-            self.context.device.cmd_pipeline_barrier(
-                command_buffer,
-                old_layout.stage_mask,
-                new_layout.stage_mask,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::default()
+        let barriers = states
+            .iter()
+            .map(|(image, old_layout, new_layout)| {
+                let aspect_flag =
+                    if new_layout.layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
+                        vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+                    } else {
+                        vk::ImageAspectFlags::COLOR
+                    };
+                vk::ImageMemoryBarrier2::default()
+                    .src_stage_mask(old_layout.stage_mask)
+                    .dst_stage_mask(new_layout.stage_mask)
                     .src_access_mask(old_layout.access_mask)
                     .dst_access_mask(new_layout.access_mask)
                     .old_layout(old_layout.layout)
                     .new_layout(new_layout.layout)
                     .src_queue_family_index(old_layout.queue_family_index)
                     .dst_queue_family_index(new_layout.queue_family_index)
-                    .image(image)
+                    .image(*image)
                     .subresource_range(
                         vk::ImageSubresourceRange::default()
                             .aspect_mask(aspect_flag)
@@ -192,18 +192,36 @@ impl Swapchain {
                             .level_count(1)
                             .base_array_layer(0)
                             .layer_count(1),
-                    )],
-            )
+                    )
+            })
+            .collect::<Vec<_>>();
+
+        unsafe {
+            self.context.device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo::default().image_memory_barriers(&barriers),
+            );
         }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ImageLayoutState {
-    pub access_mask: vk::AccessFlags,
+    pub access_mask: vk::AccessFlags2,
     pub layout: vk::ImageLayout,
-    pub stage_mask: vk::PipelineStageFlags,
+    pub stage_mask: vk::PipelineStageFlags2,
     pub queue_family_index: u32,
+}
+
+impl Default for ImageLayoutState {
+    fn default() -> Self {
+        Self {
+            access_mask: vk::AccessFlags2::NONE,
+            layout: vk::ImageLayout::UNDEFINED,
+            stage_mask: vk::PipelineStageFlags2::ALL_COMMANDS,
+            queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+        }
+    }
 }
 
 impl Drop for Swapchain {

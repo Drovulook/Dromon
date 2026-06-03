@@ -154,7 +154,11 @@ impl RenderingContext {
             )?;
 
             #[cfg(debug_assertions)]
-            let debug_messenger = Some(DebugMessenger::new(&entry, &instance, Some(attributes.logger.clone()))?);
+            let debug_messenger = Some(DebugMessenger::new(
+                &entry,
+                &instance,
+                Some(attributes.logger.clone()),
+            )?);
             #[cfg(not(debug_assertions))]
             let debug_messenger: Option<DebugMessenger> = None;
 
@@ -232,12 +236,14 @@ impl RenderingContext {
                     .queue_create_infos(&queue_create_infos)
                     .enabled_extension_names(&[ash::khr::swapchain::NAME.as_ptr()])
                     .push_next(
-                        &mut vk::PhysicalDeviceDynamicRenderingFeatures::default()
-                            .dynamic_rendering(true),
+                        &mut vk::PhysicalDeviceVulkan12Features::default()
+                            .buffer_device_address(true)
+                            .descriptor_indexing(true),
                     )
                     .push_next(
-                        &mut vk::PhysicalDeviceBufferDeviceAddressFeatures::default()
-                            .buffer_device_address(true),
+                        &mut vk::PhysicalDeviceVulkan13Features::default()
+                            .dynamic_rendering(true)
+                            .synchronization2(true),
                     ),
                 None,
             )?;

@@ -166,23 +166,23 @@ impl Renderer {
             let render_finished_semaphore = self.render_finished_semaphores[image_index as usize];
 
             let undefined_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags::empty(),
+                access_mask: vk::AccessFlags2::empty(),
                 layout: vk::ImageLayout::UNDEFINED,
-                stage_mask: vk::PipelineStageFlags::TOP_OF_PIPE,
+                stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
                 queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             };
 
             let renderable_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
                 layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             };
 
             let present_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags::empty(),
+                access_mask: vk::AccessFlags2::empty(),
                 layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             };
 
@@ -195,10 +195,11 @@ impl Renderer {
 
             self.swapchain.transition_image_layout(
                 frame.command_buffer,
-                self.swapchain.images[image_index as usize],
-                undefined_image_state,
-                renderable_image_state,
-                vk::ImageAspectFlags::COLOR,
+                &[(
+                    self.swapchain.images[image_index as usize],
+                    undefined_image_state,
+                    renderable_image_state,
+                )],
             );
 
             self.context.begin_rendering(
@@ -243,10 +244,11 @@ impl Renderer {
 
             self.swapchain.transition_image_layout(
                 frame.command_buffer,
-                self.swapchain.images[image_index as usize],
-                renderable_image_state,
-                present_image_state,
-                vk::ImageAspectFlags::COLOR,
+                &[(
+                    self.swapchain.images[image_index as usize],
+                    renderable_image_state,
+                    present_image_state,
+                )],
             );
 
             self.context
