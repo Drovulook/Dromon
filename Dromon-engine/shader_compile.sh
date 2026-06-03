@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-glslc dev_res/shaders/shader.frag -o res/shaders/frag.spv
-glslc dev_res/shaders/shader.vert -o res/shaders/vert.spv
+slangc dev_res/shaders/shader.slang -entry vertMain -stage vertex   -o res/shaders/vert.spv
+slangc dev_res/shaders/shader.slang -entry fragMain -stage fragment -o res/shaders/frag.spv
 
 echo "Shaders compilés."

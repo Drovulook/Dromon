@@ -236,6 +236,10 @@ impl RenderingContext {
                     .queue_create_infos(&queue_create_infos)
                     .enabled_extension_names(&[ash::khr::swapchain::NAME.as_ptr()])
                     .push_next(
+                        &mut vk::PhysicalDeviceVulkan11Features::default()
+                            .shader_draw_parameters(true),
+                    )
+                    .push_next(
                         &mut vk::PhysicalDeviceVulkan12Features::default()
                             .buffer_device_address(true)
                             .descriptor_indexing(true),
