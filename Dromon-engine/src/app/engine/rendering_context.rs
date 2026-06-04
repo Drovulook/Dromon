@@ -8,7 +8,6 @@
  * - Extension VK_KHR_swapchain disponible
  * - La compatibility_surface est temporaire : détruite après filtrage des devices
  */
-
 use super::debug_messenger::DebugMessenger;
 use crate::app::logger::Logger;
 use anyhow::Result;
@@ -359,6 +358,8 @@ impl RenderingContext {
         vertex_shader: vk::ShaderModule,
         fragment_shader: vk::ShaderModule,
         pipeline_layout: vk::PipelineLayout,
+        vertex_bindings: &[vk::VertexInputBindingDescription],
+        vertex_attributes: &[vk::VertexInputAttributeDescription],
         extent: vk::Extent2D,
         format: vk::Format,
         pipeline_cache: vk::PipelineCache,
@@ -382,8 +383,8 @@ impl RenderingContext {
                         ])
                         .vertex_input_state(
                             &vk::PipelineVertexInputStateCreateInfo::default()
-                                .vertex_binding_descriptions(&[])
-                                .vertex_attribute_descriptions(&[]),
+                                .vertex_binding_descriptions(vertex_bindings)
+                                .vertex_attribute_descriptions(vertex_attributes),
                         )
                         .input_assembly_state(
                             &vk::PipelineInputAssemblyStateCreateInfo::default()

@@ -1,5 +1,7 @@
+pub mod model;
 mod swapchain;
 
+use crate::app::engine::renderer::model::Vertex;
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::logger::Logger;
@@ -55,6 +57,8 @@ impl Renderer {
                 vertex_shader,
                 fragment_shader,
                 pipeline_layout,
+                &[Vertex::get_binding_description()],
+                &Vertex::get_attribute_descriptions(),
                 swapchain.extent,
                 swapchain.format,
                 vk::PipelineCache::default(),
