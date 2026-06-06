@@ -1,7 +1,7 @@
 pub mod model;
 mod swapchain;
 
-use crate::app::engine::renderer::model::Vertex;
+use crate::app::engine::renderer::model::{Model, TRIANGLE_VERTICES, Vertex};
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::logger::Logger;
@@ -27,6 +27,7 @@ pub struct Renderer {
     pipeline_layout: vk::PipelineLayout,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
+    triangle_model: Model,
 }
 
 const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
@@ -117,6 +118,8 @@ impl Renderer {
                 );
             }
 
+            let triangle_model = Model::new(context.clone(), TRIANGLE_VERTICES.to_vec())?;
+
             Ok(Self {
                 in_flight_frames_count,
                 frame_index: 0,
@@ -129,6 +132,7 @@ impl Renderer {
                 pipeline_layout,
                 swapchain,
                 context,
+                triangle_model,
             })
         }
     }
@@ -240,9 +244,22 @@ impl Renderer {
                 self.pipeline,
             );
 
-            self.context
-                .device
-                .cmd_draw(frame.command_buffer, 3, 1, 0, 0);
+            self.context.device.cmd_bind_vertex_buffers2(
+                frame.command_buffer, // le command buffer en cours d'enregistrement
+                0,                    // first_binding : index du premier binding (slot 0)
+                &[self.triangle_model.vertex_buffer], // buffers : liste des buffers à binder
+                &[0], // offsets : offset en bytes dans chaque buffer (0 = depuis le début)
+                None, // sizes : taille à lire dans chaque buffer (None = jusqu'à la fin)
+                None, // strides : override du stride défini dans le pipeline (None = utilise celui du pipeline)
+            );
+
+            self.context.device.cmd_draw(
+                frame.command_buffer,
+                self.triangle_model.vertices.len() as u32,
+                1,
+                0,
+                0,
+            );
 
             self.context.device.cmd_end_rendering(frame.command_buffer);
 

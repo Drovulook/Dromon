@@ -301,21 +301,10 @@ impl RenderingContext {
 
             Ok(SwapchainSurface {
                 handle,
-                capabilities: capabilities,
+                capabilities,
                 formats,
                 present_modes,
             })
-        }
-    }
-
-    pub fn create_swapchain(
-        &self,
-        create_info: &vk::SwapchainCreateInfoKHR,
-    ) -> Result<vk::SwapchainKHR> {
-        unsafe {
-            Ok(self
-                .swapchain_extensions
-                .create_swapchain(&create_info, None)?)
         }
     }
 
@@ -471,11 +460,11 @@ impl RenderingContext {
 impl Drop for RenderingContext {
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_device(None);
             #[cfg(debug_assertions)]
             if let Some(m) = &self.debug_messenger {
                 m.destroy();
             }
-            self.device.destroy_device(None);
             self.instance.destroy_instance(None);
         }
     }

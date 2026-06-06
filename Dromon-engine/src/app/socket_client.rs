@@ -5,7 +5,7 @@ use std::time::Duration;
 
 pub const SOCKET_PATH: &str = "/tmp/dromon.sock";
 
-pub fn spawn_worker(receiver: Receiver<String>) {
+pub fn spawn_worker(receiver: Receiver<String>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut stream: Option<UnixStream> = None;
 
@@ -30,5 +30,5 @@ pub fn spawn_worker(receiver: Receiver<String>) {
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
-    });
+    })
 }

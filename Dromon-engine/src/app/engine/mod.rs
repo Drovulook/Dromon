@@ -50,10 +50,10 @@ impl Engine {
         let renderers = windows
             .iter()
             .map(|(id, window)| {
-                let renderer = Renderer::new(rendering_context.clone(), window.clone(), logger.clone()).unwrap();
-                (*id, renderer)
+                let renderer = Renderer::new(rendering_context.clone(), window.clone(), logger.clone())?;
+                Ok((*id, renderer))
             })
-            .collect::<HashMap<_, _>>();
+            .collect::<Result<HashMap<_, _>>>()?;
 
         logger.state("Running");
 
@@ -77,7 +77,7 @@ impl Engine {
         event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: winit::event::WindowEvent,
-    ) {
+    ) -> Result<()> {
         match event {
             winit::event::WindowEvent::CloseRequested => {
                 if window_id == self.primary_window_id {
@@ -91,7 +91,7 @@ impl Engine {
             winit::event::WindowEvent::RedrawRequested => {
                 let t0 = Instant::now();
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
-                    renderer.render().unwrap();
+                    renderer.render()?;
                 }
                 let dt = t0.elapsed().as_secs_f32();
                 if dt > 0.0 {
@@ -113,6 +113,7 @@ impl Engine {
 
             _ => {}
         }
+        Ok(())
     }
 
     pub fn create_window(
