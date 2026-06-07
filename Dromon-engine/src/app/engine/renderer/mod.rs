@@ -1,3 +1,4 @@
+mod buffer;
 pub mod model;
 mod swapchain;
 
@@ -22,7 +23,7 @@ pub struct Renderer {
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
     acquire_semaphore_index: usize,
-    command_pool: vk::CommandPool,
+    frame_command_pool: vk::CommandPool,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     swapchain: swapchain::Swapchain,
@@ -68,7 +69,7 @@ impl Renderer {
             context.device.destroy_shader_module(vertex_shader, None);
             context.device.destroy_shader_module(fragment_shader, None);
 
-            let command_pool = context.device.create_command_pool(
+            let frame_command_pool = context.device.create_command_pool(
                 &vk::CommandPoolCreateInfo::default()
                     .queue_family_index(context.queue_families.graphics)
                     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
@@ -78,7 +79,7 @@ impl Renderer {
             let in_flight_frames_count = 2;
             let command_buffers = context.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(command_pool)
+                    .command_pool(frame_command_pool)
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .command_buffer_count(in_flight_frames_count as u32),
             )?;
@@ -120,6 +121,8 @@ impl Renderer {
 
             let triangle_model = Model::new(context.clone(), TRIANGLE_VERTICES.to_vec())?;
 
+            Renderer::initialize(context.clone(), &triangle_model)?;
+
             Ok(Self {
                 in_flight_frames_count,
                 frame_index: 0,
@@ -127,7 +130,7 @@ impl Renderer {
                 image_available_semaphores,
                 render_finished_semaphores,
                 acquire_semaphore_index: 0,
-                command_pool,
+                frame_command_pool,
                 pipeline,
                 pipeline_layout,
                 swapchain,
@@ -135,6 +138,61 @@ impl Renderer {
                 triangle_model,
             })
         }
+    }
+
+    fn initialize(context: Arc<RenderingContext>, model: &Model) -> Result<()> {
+        //create transfer command pool and buffer
+        let transfer_command_pool = unsafe {
+            context.device.create_command_pool(
+                &vk::CommandPoolCreateInfo::default()
+                    // TODO : utiliser la famille de commandes appropriée
+                    .queue_family_index(context.queue_families.graphics)
+                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+                None,
+            )
+        }?;
+        let transfer_command_buffer = unsafe {
+            context.device.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_pool(transfer_command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1),
+            )
+        }?[0];
+
+        unsafe {
+            context.device.begin_command_buffer(
+                transfer_command_buffer,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )
+        }?;
+
+        // all transfer commands go here
+        model.copy_from_staging_to_device(&transfer_command_buffer);
+        //
+
+        unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
+
+        // submit
+        let graphics_queue = context.queues[context.queue_families.graphics as usize];
+        unsafe {
+            context.device.queue_submit(
+                graphics_queue,
+                &[vk::SubmitInfo::default().command_buffers(&[transfer_command_buffer])],
+                vk::Fence::null(),
+            )
+        }?;
+        unsafe { context.device.queue_wait_idle(graphics_queue) }?;
+
+        // cleanup
+        unsafe {
+            context
+                .device
+                .destroy_command_pool(transfer_command_pool, None)
+        };
+
+        Ok(())
     }
 
     pub fn resize(&mut self) {
@@ -244,14 +302,7 @@ impl Renderer {
                 self.pipeline,
             );
 
-            self.context.device.cmd_bind_vertex_buffers2(
-                frame.command_buffer, // le command buffer en cours d'enregistrement
-                0,                    // first_binding : index du premier binding (slot 0)
-                &[self.triangle_model.vertex_buffer], // buffers : liste des buffers à binder
-                &[0], // offsets : offset en bytes dans chaque buffer (0 = depuis le début)
-                None, // sizes : taille à lire dans chaque buffer (None = jusqu'à la fin)
-                None, // strides : override du stride défini dans le pipeline (None = utilise celui du pipeline)
-            );
+            self.triangle_model.vertex_buffer.bind(frame.command_buffer);
 
             self.context.device.cmd_draw(
                 frame.command_buffer,
@@ -314,7 +365,7 @@ impl Drop for Renderer {
             }
             self.context
                 .device
-                .destroy_command_pool(self.command_pool, None);
+                .destroy_command_pool(self.frame_command_pool, None);
             self.context.device.destroy_pipeline(self.pipeline, None);
             self.context
                 .device

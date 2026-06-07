@@ -1,8 +1,8 @@
-use std::sync::Arc;
-
+use super::buffer::Buffer;
 use anyhow::Result;
 use ash::vk;
 use glam::{Vec2, Vec3};
+use std::sync::Arc;
 
 use crate::app::engine::rendering_context::RenderingContext;
 
@@ -41,101 +41,50 @@ impl Vertex {
 }
 
 pub struct Model {
-    pub vertices: Vec<Vertex>,
-    pub vertex_buffer: vk::Buffer,
-    pub vertex_buffer_memory: vk::DeviceMemory,
     context: Arc<RenderingContext>,
+    pub vertices: Vec<Vertex>,
+    staging_buffer: Buffer,
+    pub vertex_buffer: Buffer,
 }
 
 impl Model {
     pub fn new(context: Arc<RenderingContext>, vertices: Vec<Vertex>) -> Result<Self> {
-        let (vertex_buffer, vertex_buffer_memory) =
-            Model::create_vertex_buffer(&context, &vertices)?;
+        let staging_buffer = Buffer::new(
+            context.clone(),
+            std::mem::size_of_val(vertices.as_slice()) as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
 
-        unsafe {
-            let data = context.device.map_memory(
-                vertex_buffer_memory,
-                0,
-                std::mem::size_of_val(vertices.as_slice()) as u64,
-                vk::MemoryMapFlags::empty(),
-            )? as *mut Vertex;
-            std::ptr::copy_nonoverlapping(vertices.as_ptr(), data, vertices.len());
-            context.device.unmap_memory(vertex_buffer_memory);
-        }
+        staging_buffer.map_and_unmap(vertices.as_slice())?;
+
+        let vertex_buffer = Buffer::new(
+            context.clone(),
+            std::mem::size_of_val(vertices.as_slice()) as u64,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
 
         Ok(Self {
-            vertices,
-            vertex_buffer,
-            vertex_buffer_memory,
             context,
+            vertices,
+            staging_buffer,
+            vertex_buffer,
         })
     }
 
-    fn create_vertex_buffer(
-        context: &RenderingContext,
-        vertices: &[Vertex],
-    ) -> Result<(vk::Buffer, vk::DeviceMemory)> {
-        let vertex_buffer = unsafe {
-            context.device.create_buffer(
-                &vk::BufferCreateInfo::default()
-                    .size(std::mem::size_of_val(vertices) as u64)
-                    .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                    .sharing_mode(vk::SharingMode::EXCLUSIVE),
-                None,
-            )?
-        };
-
-        let memory_requirements =
-            unsafe { context.device.get_buffer_memory_requirements(vertex_buffer) };
-
-        let vertex_buffer_memory = unsafe {
-            context.device.allocate_memory(
-                &vk::MemoryAllocateInfo::default()
-                    .allocation_size(memory_requirements.size)
-                    .memory_type_index(Model::find_memory_type(
-                        context,
-                        memory_requirements.memory_type_bits,
-                        vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    )?),
-                None,
-            )?
-        };
+    pub fn copy_from_staging_to_device(&self, command_buffer: &vk::CommandBuffer) {
         unsafe {
-            context
-                .device
-                .bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0)?;
-        }
-        Ok((vertex_buffer, vertex_buffer_memory))
-    }
-
-    fn find_memory_type(
-        context: &RenderingContext,
-        type_filter: u32,
-        properties: vk::MemoryPropertyFlags,
-    ) -> Result<u32> {
-        let memory_properties = unsafe {
-            context
-                .instance
-                .get_physical_device_memory_properties(context.physical_device.handle)
-        };
-        (0..memory_properties.memory_type_count)
-            .find(|&i| {
-                (type_filter & (1 << i) != 0)
-                    && (memory_properties.memory_types[i as usize].property_flags & properties)
-                        == properties
-            })
-            .ok_or_else(|| anyhow::anyhow!("Aucun type mémoire compatible trouvé"))
-    }
-}
-
-impl Drop for Model {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = self.context.device.device_wait_idle();
-            self.context.device.destroy_buffer(self.vertex_buffer, None);
-            self.context
-                .device
-                .free_memory(self.vertex_buffer_memory, None);
+            self.context.device.cmd_copy_buffer(
+                *command_buffer,
+                self.staging_buffer.buffer,
+                self.vertex_buffer.buffer,
+                &[vk::BufferCopy {
+                    src_offset: 0,
+                    dst_offset: 0,
+                    size: std::mem::size_of_val(self.vertices.as_slice()) as u64,
+                }],
+            );
         }
     }
 }
