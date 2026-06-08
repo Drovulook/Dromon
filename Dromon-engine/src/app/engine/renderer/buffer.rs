@@ -86,19 +86,6 @@ impl Buffer {
         }
         Ok(())
     }
-
-    pub fn bind(&self, command_buffer: vk::CommandBuffer) {
-        unsafe {
-            self.context.device.cmd_bind_vertex_buffers2(
-                command_buffer, // le command buffer en cours d'enregistrement
-                0,              // first_binding : index du premier binding (slot 0)
-                &[self.buffer], // buffers : liste des buffers à binder
-                &[0], // offsets : offset en bytes dans chaque buffer (0 = depuis le début)
-                None, // sizes : taille à lire dans chaque buffer (None = jusqu'à la fin)
-                None, // strides : override du stride défini dans le pipeline (None = utilise celui du pipeline)
-            );
-        }
-    }
 }
 
 impl Drop for Buffer {

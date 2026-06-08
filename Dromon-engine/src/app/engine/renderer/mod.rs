@@ -2,7 +2,7 @@ mod buffer;
 pub mod model;
 mod swapchain;
 
-use crate::app::engine::renderer::model::{Model, TRIANGLE_VERTICES, Vertex};
+use crate::app::engine::renderer::model::{Model, TRIANGLE_INDICES, TRIANGLE_VERTICES, Vertex};
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::logger::Logger;
@@ -119,7 +119,11 @@ impl Renderer {
                 );
             }
 
-            let triangle_model = Model::new(context.clone(), TRIANGLE_VERTICES.to_vec())?;
+            let triangle_model = Model::new(
+                context.clone(),
+                TRIANGLE_VERTICES.to_vec(),
+                TRIANGLE_INDICES.to_vec(),
+            )?;
 
             Renderer::initialize(context.clone(), &triangle_model)?;
 
@@ -302,12 +306,14 @@ impl Renderer {
                 self.pipeline,
             );
 
-            self.triangle_model.vertex_buffer.bind(frame.command_buffer);
+            self.triangle_model.bind_index_buffer(frame.command_buffer);
+            self.triangle_model.bind_vertex_buffer(frame.command_buffer);
 
-            self.context.device.cmd_draw(
+            self.context.device.cmd_draw_indexed(
                 frame.command_buffer,
-                self.triangle_model.vertices.len() as u32,
+                self.triangle_model.indices.len() as u32,
                 1,
+                0,
                 0,
                 0,
             );
