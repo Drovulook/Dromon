@@ -1,6 +1,7 @@
 mod buffer;
 pub mod model;
 mod swapchain;
+mod uniform_buffer;
 
 use crate::app::engine::renderer::model::{Model, TRIANGLE_INDICES, TRIANGLE_VERTICES, Vertex};
 use crate::app::engine::renderer::swapchain::ImageLayoutState;

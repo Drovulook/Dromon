@@ -1,13 +1,14 @@
 use super::buffer::Buffer;
 use anyhow::Result;
 use ash::vk;
+use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
 use std::sync::Arc;
 
 use crate::app::engine::rendering_context::RenderingContext;
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
     pos: Vec2,
     color: Vec3,
