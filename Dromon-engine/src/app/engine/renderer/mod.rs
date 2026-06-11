@@ -5,7 +5,9 @@ mod uniform_buffer;
 
 use crate::app::engine::renderer::model::{Model, TRIANGLE_INDICES, TRIANGLE_VERTICES, Vertex};
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
+use crate::app::engine::renderer::uniform_buffer::{UniformBuffer, create_descriptor_set_layout};
 use crate::app::engine::rendering_context::RenderingContext;
+use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
@@ -15,6 +17,7 @@ use winit::window::Window;
 struct Frame {
     command_buffer: vk::CommandBuffer,
     in_flight_fence: vk::Fence,
+    uniform_buffer: UniformBuffer,
 }
 
 pub struct Renderer {
@@ -30,6 +33,7 @@ pub struct Renderer {
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
     triangle_model: Model,
+    descriptor_set_layout: vk::DescriptorSetLayout,
 }
 
 const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
@@ -51,10 +55,14 @@ impl Renderer {
         let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;
         let fragment_shader = load_shader_module(context.as_ref(), "frag.spv")?;
 
+        let descriptor_set_layout = create_descriptor_set_layout(&context)?;
+
         unsafe {
-            let pipeline_layout = context
-                .device
-                .create_pipeline_layout(&vk::PipelineLayoutCreateInfo::default(), None)?;
+            let pipeline_layout = context.device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::default()
+                    .set_layouts(&[create_descriptor_set_layout(&context)?]),
+                None,
+            )?;
 
             let pipeline = context.create_graphics_pipeline(
                 vertex_shader,
@@ -91,9 +99,11 @@ impl Renderer {
                     &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
                     None,
                 )?;
+                let uniform_buffer = uniform_buffer::UniformBuffer::new(context.clone())?;
                 frames.push(Frame {
                     command_buffer,
                     in_flight_fence,
+                    uniform_buffer,
                 });
             }
 
@@ -141,6 +151,7 @@ impl Renderer {
                 swapchain,
                 context,
                 triangle_model,
+                descriptor_set_layout,
             })
         }
     }
@@ -204,7 +215,8 @@ impl Renderer {
         self.swapchain.is_dirty = true;
     }
 
-    pub fn render(&mut self) -> Result<()> {
+    pub fn render(&mut self, timer: &Timer) -> Result<()> {
+        let _ = timer; // utilisé bientôt pour animer l'UBO
         let frame = &self.frames[self.frame_index];
 
         unsafe {
@@ -309,6 +321,7 @@ impl Renderer {
 
             self.triangle_model.bind_index_buffer(frame.command_buffer);
             self.triangle_model.bind_vertex_buffer(frame.command_buffer);
+            frame.uniform_buffer.update(timer);
 
             self.context.device.cmd_draw_indexed(
                 frame.command_buffer,
@@ -377,6 +390,9 @@ impl Drop for Renderer {
             self.context
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.context
+                .device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None)
         }
     }
 }

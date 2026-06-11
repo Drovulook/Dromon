@@ -86,6 +86,22 @@ impl Buffer {
         }
         Ok(())
     }
+
+    pub fn map(&self, size: vk::DeviceSize) -> Result<*mut std::ffi::c_void> {
+        let ptr = unsafe {
+            self.context.device.map_memory(
+                self.buffer_memory,
+                0,
+                size,
+                vk::MemoryMapFlags::empty(),
+            )?
+        };
+        Ok(ptr)
+    }
+
+    pub fn unmap(&self) {
+        unsafe { self.context.device.unmap_memory(self.buffer_memory) };
+    }
 }
 
 impl Drop for Buffer {
