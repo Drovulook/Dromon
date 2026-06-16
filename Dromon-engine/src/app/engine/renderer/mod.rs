@@ -1,11 +1,13 @@
 mod buffer;
+mod descriptors;
 pub mod model;
 mod swapchain;
 mod uniform_buffer;
 
+use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::model::{Model, TRIANGLE_INDICES, TRIANGLE_VERTICES, Vertex};
 use crate::app::engine::renderer::swapchain::ImageLayoutState;
-use crate::app::engine::renderer::uniform_buffer::{UniformBuffer, create_descriptor_set_layout};
+use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
@@ -33,7 +35,7 @@ pub struct Renderer {
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
     triangle_model: Model,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_handler: DescriptorHandler,
 }
 
 const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
@@ -52,32 +54,7 @@ impl Renderer {
         let mut swapchain = swapchain::Swapchain::new(context.clone(), window.clone(), logger)?;
         swapchain.update_size()?;
 
-        let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;
-        let fragment_shader = load_shader_module(context.as_ref(), "frag.spv")?;
-
-        let descriptor_set_layout = create_descriptor_set_layout(&context)?;
-
         unsafe {
-            let pipeline_layout = context.device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::default()
-                    .set_layouts(&[create_descriptor_set_layout(&context)?]),
-                None,
-            )?;
-
-            let pipeline = context.create_graphics_pipeline(
-                vertex_shader,
-                fragment_shader,
-                pipeline_layout,
-                &[Vertex::get_binding_description()],
-                &Vertex::get_attribute_descriptions(),
-                swapchain.extent,
-                swapchain.format,
-                vk::PipelineCache::default(),
-            )?;
-
-            context.device.destroy_shader_module(vertex_shader, None);
-            context.device.destroy_shader_module(fragment_shader, None);
-
             let frame_command_pool = context.device.create_command_pool(
                 &vk::CommandPoolCreateInfo::default()
                     .queue_family_index(context.queue_families.graphics)
@@ -107,6 +84,14 @@ impl Renderer {
                 });
             }
 
+            // creating descriptor sets
+            let uniform_buffer_handles: Vec<vk::Buffer> = frames
+                .iter()
+                .map(|frame| frame.uniform_buffer.get_handle())
+                .collect();
+            let descriptor_handler =
+                DescriptorHandler::new(context.clone(), uniform_buffer_handles)?;
+
             let image_count = swapchain.images.len();
 
             // N+1 sémaphores en rotation : garantit qu'on ne réutilise pas un sémaphore
@@ -130,6 +115,28 @@ impl Renderer {
                 );
             }
 
+            let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;
+            let fragment_shader = load_shader_module(context.as_ref(), "frag.spv")?;
+            let pipeline_layout = context.device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::default()
+                    .set_layouts(&[descriptor_handler.ubo_descriptor_set_layout]),
+                None,
+            )?;
+
+            let pipeline = context.create_graphics_pipeline(
+                vertex_shader,
+                fragment_shader,
+                pipeline_layout,
+                &[Vertex::get_binding_description()],
+                &Vertex::get_attribute_descriptions(),
+                swapchain.extent,
+                swapchain.format,
+                vk::PipelineCache::default(),
+            )?;
+
+            context.device.destroy_shader_module(vertex_shader, None);
+            context.device.destroy_shader_module(fragment_shader, None);
+
             let triangle_model = Model::new(
                 context.clone(),
                 TRIANGLE_VERTICES.to_vec(),
@@ -151,7 +158,7 @@ impl Renderer {
                 swapchain,
                 context,
                 triangle_model,
-                descriptor_set_layout,
+                descriptor_handler,
             })
         }
     }
@@ -321,7 +328,20 @@ impl Renderer {
 
             self.triangle_model.bind_index_buffer(frame.command_buffer);
             self.triangle_model.bind_vertex_buffer(frame.command_buffer);
-            frame.uniform_buffer.update(timer);
+            frame.uniform_buffer.update(
+                timer,
+                self.swapchain.extent.width as f32,
+                self.swapchain.extent.height as f32,
+            );
+
+            self.context.device.cmd_bind_descriptor_sets(
+                frame.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_handler.ubo_descriptor_sets[self.frame_index]],
+                &[],
+            );
 
             self.context.device.cmd_draw_indexed(
                 frame.command_buffer,
@@ -390,9 +410,6 @@ impl Drop for Renderer {
             self.context
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.context
-                .device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None)
         }
     }
 }

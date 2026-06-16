@@ -176,4 +176,4 @@ pub const TRIANGLE_VERTICES: &[Vertex] = &[
     },
 ];
 
-pub const TRIANGLE_INDICES: &[u32] = &[0, 1, 2, 2, 3, 1];
+pub const TRIANGLE_INDICES: &[u32] = &[0, 1, 2, 2, 3, 0];

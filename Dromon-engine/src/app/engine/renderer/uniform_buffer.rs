@@ -4,7 +4,7 @@ use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use std::ffi::c_void;
 use std::sync::Arc;
 
@@ -14,23 +14,6 @@ struct UniformBufferObject {
     model: Mat4,
     view: Mat4,
     proj: Mat4,
-}
-
-pub fn create_descriptor_set_layout(context: &RenderingContext) -> Result<vk::DescriptorSetLayout> {
-    let ubo_layout_binding = vk::DescriptorSetLayoutBinding::default()
-        .binding(0)
-        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-        .descriptor_count(1)
-        .stage_flags(vk::ShaderStageFlags::VERTEX);
-
-    let layout = unsafe {
-        context.device.create_descriptor_set_layout(
-            &vk::DescriptorSetLayoutCreateInfo::default().bindings(&[ubo_layout_binding]),
-            None,
-        )
-    }?;
-
-    Ok(layout)
 }
 
 pub struct UniformBuffer {
@@ -56,12 +39,27 @@ impl UniformBuffer {
         })
     }
 
-    pub fn update(&self, time: &Timer) {
-        let ubo = UniformBufferObject {
+    pub fn get_handle(&self) -> vk::Buffer {
+        self.buffer.buffer
+    }
+
+    pub fn update(&self, time: &Timer, swapchain_width: f32, swapchain_height: f32) {
+        let mut ubo = UniformBufferObject {
             model: Mat4::from_rotation_z(time.elapsed_secs() * 90.0_f32.to_radians()),
-            view: Mat4::IDENTITY,
-            proj: Mat4::IDENTITY,
+            view: Mat4::look_at_rh(
+                Vec3::new(2.0, 2.0, 2.0), // eye (position de la caméra)
+                Vec3::new(0.0, 0.0, 0.0), // center (point regardé)
+                Vec3::new(0.0, 0.0, 1.0), // up (vecteur « haut »)
+            ),
+            proj: Mat4::perspective_rh(
+                45.0_f32.to_radians(),                            // fov vertical (en radians)
+                swapchain_width as f32 / swapchain_height as f32, // aspect ratio
+                0.1,                                              // near plane
+                10.0,                                             // far plane
+            ),
         };
+        ubo.proj.y_axis.y *= -1.0;
+
         unsafe {
             std::ptr::copy_nonoverlapping(
                 &ubo as *const UniformBufferObject,
