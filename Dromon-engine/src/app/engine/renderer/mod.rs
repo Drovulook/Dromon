@@ -2,6 +2,7 @@ mod buffer;
 mod descriptors;
 pub mod model;
 mod swapchain;
+mod texture;
 mod uniform_buffer;
 
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
