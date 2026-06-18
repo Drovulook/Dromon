@@ -7,14 +7,15 @@ mod uniform_buffer;
 
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::model::{Model, TRIANGLE_INDICES, TRIANGLE_VERTICES, Vertex};
-use crate::app::engine::renderer::swapchain::ImageLayoutState;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
+use crate::app::engine::rendering_context::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
+use texture::TextureHandler;
 use winit::window::Window;
 
 struct Frame {
@@ -37,6 +38,7 @@ pub struct Renderer {
     context: Arc<RenderingContext>,
     triangle_model: Model,
     descriptor_handler: DescriptorHandler,
+    texture_handler: TextureHandler,
 }
 
 const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
@@ -52,7 +54,8 @@ impl Renderer {
         window: Arc<Window>,
         logger: Arc<Logger>,
     ) -> Result<Self> {
-        let mut swapchain = swapchain::Swapchain::new(context.clone(), window.clone(), logger)?;
+        let mut swapchain =
+            swapchain::Swapchain::new(context.clone(), window.clone(), logger.clone())?;
         swapchain.update_size()?;
 
         unsafe {
@@ -144,7 +147,9 @@ impl Renderer {
                 TRIANGLE_INDICES.to_vec(),
             )?;
 
-            Renderer::initialize(context.clone(), &triangle_model)?;
+            let texture_handler = TextureHandler::new(context.clone(), logger.clone())?;
+
+            Renderer::initialize(context.clone(), &triangle_model, &texture_handler)?;
 
             Ok(Self {
                 in_flight_frames_count,
@@ -160,11 +165,16 @@ impl Renderer {
                 context,
                 triangle_model,
                 descriptor_handler,
+                texture_handler,
             })
         }
     }
 
-    fn initialize(context: Arc<RenderingContext>, model: &Model) -> Result<()> {
+    fn initialize(
+        context: Arc<RenderingContext>,
+        model: &Model,
+        texture_handler: &TextureHandler,
+    ) -> Result<()> {
         //create transfer command pool and buffer
         let transfer_command_pool = unsafe {
             context.device.create_command_pool(
@@ -192,9 +202,44 @@ impl Renderer {
             )
         }?;
 
-        // all transfer commands go here
+        ////////// all transfer commands go here
         model.copy_from_staging_to_device(&transfer_command_buffer);
-        //
+
+        context.transition_image_layout(
+            transfer_command_buffer,
+            &[(
+                texture_handler.texture_image,
+                ImageLayoutState::default(),
+                ImageLayoutState {
+                    access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                    layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    stage_mask: vk::PipelineStageFlags2::COPY,
+                    queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                },
+            )],
+        );
+
+        texture_handler.copy_buffer_to_image(&transfer_command_buffer)?;
+
+        context.transition_image_layout(
+            transfer_command_buffer,
+            &[(
+                texture_handler.texture_image,
+                ImageLayoutState {
+                    access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                    layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    stage_mask: vk::PipelineStageFlags2::COPY,
+                    queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                },
+                ImageLayoutState {
+                    access_mask: vk::AccessFlags2::SHADER_READ,
+                    layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                    queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                },
+            )],
+        );
+        //////////
 
         unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
 
@@ -284,7 +329,7 @@ impl Renderer {
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
 
-            self.swapchain.transition_image_layout(
+            self.context.transition_image_layout(
                 frame.command_buffer,
                 &[(
                     self.swapchain.images[image_index as usize],
@@ -355,7 +400,7 @@ impl Renderer {
 
             self.context.device.cmd_end_rendering(frame.command_buffer);
 
-            self.swapchain.transition_image_layout(
+            self.context.transition_image_layout(
                 frame.command_buffer,
                 &[(
                     self.swapchain.images[image_index as usize],

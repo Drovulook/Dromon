@@ -32,8 +32,7 @@ impl Buffer {
             context.device.allocate_memory(
                 &vk::MemoryAllocateInfo::default()
                     .allocation_size(memory_requirements.size)
-                    .memory_type_index(Buffer::find_memory_type(
-                        &context,
+                    .memory_type_index(context.find_memory_type(
                         memory_requirements.memory_type_bits,
                         memory_properties,
                     )?),
@@ -52,25 +51,6 @@ impl Buffer {
             buffer,
             buffer_memory,
         })
-    }
-
-    fn find_memory_type(
-        context: &RenderingContext,
-        type_filter: u32,
-        properties: vk::MemoryPropertyFlags,
-    ) -> Result<u32> {
-        let memory_properties = unsafe {
-            context
-                .instance
-                .get_physical_device_memory_properties(context.physical_device.handle)
-        };
-        (0..memory_properties.memory_type_count)
-            .find(|&i| {
-                (type_filter & (1 << i) != 0)
-                    && (memory_properties.memory_types[i as usize].property_flags & properties)
-                        == properties
-            })
-            .ok_or_else(|| anyhow::anyhow!("Aucun type mémoire compatible trouvé"))
     }
 
     pub fn map_and_unmap<T: Copy>(&self, buffer_data: &[T]) -> Result<()> {

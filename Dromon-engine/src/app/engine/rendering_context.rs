@@ -8,12 +8,15 @@
  * - Extension VK_KHR_swapchain disponible
  * - La compatibility_surface est temporaire : détruite après filtrage des devices
  */
+mod commands;
+mod pipeline_creation;
+mod resources;
+
 use super::debug_messenger::DebugMessenger;
 use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
 use std::ffi::CStr;
-use std::io;
 use std::{collections::HashSet, sync::Arc};
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
@@ -68,6 +71,25 @@ pub struct SwapchainSurface {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
     pub formats: Vec<vk::SurfaceFormatKHR>,
     pub present_modes: Vec<vk::PresentModeKHR>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ImageLayoutState {
+    pub access_mask: vk::AccessFlags2,
+    pub layout: vk::ImageLayout,
+    pub stage_mask: vk::PipelineStageFlags2,
+    pub queue_family_index: u32,
+}
+
+impl Default for ImageLayoutState {
+    fn default() -> Self {
+        Self {
+            access_mask: vk::AccessFlags2::NONE,
+            layout: vk::ImageLayout::UNDEFINED,
+            stage_mask: vk::PipelineStageFlags2::ALL_COMMANDS,
+            queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+        }
+    }
 }
 
 pub mod queue_family_picker {
@@ -271,188 +293,6 @@ impl RenderingContext {
                 debug_messenger,
                 swapchain_extensions,
             })
-        }
-    }
-
-    /// # Safety
-    /// The window should outlive the surface
-    pub unsafe fn create_surface(&self, window: Arc<Window>) -> Result<SwapchainSurface> {
-        let raw_display_handle = window.display_handle()?.as_raw();
-        let raw_window_handle = window.window_handle()?.as_raw();
-        unsafe {
-            let handle = ash_window::create_surface(
-                &self.entry,
-                &self.instance,
-                raw_display_handle,
-                raw_window_handle,
-                None,
-            )?;
-            let capabilities = self
-                .surface_extensions
-                .get_physical_device_surface_capabilities(self.physical_device.handle, handle)?;
-
-            let formats = self
-                .surface_extensions
-                .get_physical_device_surface_formats(self.physical_device.handle, handle)?;
-
-            let present_modes = self
-                .surface_extensions
-                .get_physical_device_surface_present_modes(self.physical_device.handle, handle)?;
-
-            Ok(SwapchainSurface {
-                handle,
-                capabilities,
-                formats,
-                present_modes,
-            })
-        }
-    }
-
-    pub fn create_image_view(
-        &self,
-        image: vk::Image,
-        format: vk::Format,
-        aspect_flags: vk::ImageAspectFlags,
-    ) -> Result<vk::ImageView> {
-        let image_view = unsafe {
-            self.device.create_image_view(
-                &vk::ImageViewCreateInfo::default()
-                    .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(format)
-                    .components(vk::ComponentMapping::default())
-                    .subresource_range(
-                        vk::ImageSubresourceRange::default()
-                            .aspect_mask(aspect_flags)
-                            .base_mip_level(0)
-                            .level_count(1)
-                            .base_array_layer(0)
-                            .layer_count(1),
-                    ),
-                None,
-            )
-        }?;
-        Ok(image_view)
-    }
-
-    pub fn create_shader_module(&self, code: &[u8]) -> Result<vk::ShaderModule> {
-        let code = ash::util::read_spv(&mut io::Cursor::new(code))?;
-        let create_info = vk::ShaderModuleCreateInfo::default().code(&code);
-        let shader_module = unsafe { self.device.create_shader_module(&create_info, None)? };
-        Ok(shader_module)
-    }
-
-    pub fn create_graphics_pipeline(
-        &self,
-        vertex_shader: vk::ShaderModule,
-        fragment_shader: vk::ShaderModule,
-        pipeline_layout: vk::PipelineLayout,
-        vertex_bindings: &[vk::VertexInputBindingDescription],
-        vertex_attributes: &[vk::VertexInputAttributeDescription],
-        extent: vk::Extent2D,
-        format: vk::Format,
-        pipeline_cache: vk::PipelineCache,
-    ) -> Result<vk::Pipeline> {
-        let entry_point = CStr::from_bytes_with_nul(b"main\0")?;
-        unsafe {
-            Ok(self
-                .device
-                .create_graphics_pipelines(
-                    pipeline_cache,
-                    &[vk::GraphicsPipelineCreateInfo::default()
-                        .stages(&[
-                            vk::PipelineShaderStageCreateInfo::default()
-                                .stage(vk::ShaderStageFlags::VERTEX)
-                                .module(vertex_shader)
-                                .name(entry_point),
-                            vk::PipelineShaderStageCreateInfo::default()
-                                .stage(vk::ShaderStageFlags::FRAGMENT)
-                                .module(fragment_shader)
-                                .name(entry_point),
-                        ])
-                        .vertex_input_state(
-                            &vk::PipelineVertexInputStateCreateInfo::default()
-                                .vertex_binding_descriptions(vertex_bindings)
-                                .vertex_attribute_descriptions(vertex_attributes),
-                        )
-                        .input_assembly_state(
-                            &vk::PipelineInputAssemblyStateCreateInfo::default()
-                                .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-                                .primitive_restart_enable(false),
-                        )
-                        .viewport_state(
-                            &vk::PipelineViewportStateCreateInfo::default()
-                                // .viewports(&[vk::Viewport::default()
-                                //     .x(0.0)
-                                //     .y(0.0)
-                                //     .width(extent.width as f32)
-                                //     .height(extent.height as f32)
-                                //     .min_depth(0.0)
-                                //     .max_depth(1.0)])
-                                // .scissors(&[vk::Rect2D::default()
-                                //     .offset(vk::Offset2D::default())
-                                //     .extent(extent)]),
-                                .viewport_count(1)
-                                .scissor_count(1),
-                        )
-                        .rasterization_state(
-                            &vk::PipelineRasterizationStateCreateInfo::default()
-                                .polygon_mode(vk::PolygonMode::FILL)
-                                .cull_mode(vk::CullModeFlags::BACK)
-                                .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-                                .depth_clamp_enable(false)
-                                .rasterizer_discard_enable(false)
-                                .depth_bias_enable(false)
-                                .line_width(1.0),
-                        )
-                        .multisample_state(
-                            &vk::PipelineMultisampleStateCreateInfo::default()
-                                .rasterization_samples(vk::SampleCountFlags::TYPE_1),
-                        )
-                        .color_blend_state(
-                            &vk::PipelineColorBlendStateCreateInfo::default()
-                                .logic_op_enable(false)
-                                .attachments(&[vk::PipelineColorBlendAttachmentState::default()
-                                    .color_write_mask(vk::ColorComponentFlags::RGBA)
-                                    .blend_enable(false)]),
-                        )
-                        .dynamic_state(
-                            &vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&[
-                                vk::DynamicState::VIEWPORT,
-                                vk::DynamicState::SCISSOR,
-                            ]),
-                        )
-                        .layout(pipeline_layout)
-                        .push_next(
-                            &mut vk::PipelineRenderingCreateInfo::default()
-                                .color_attachment_formats(&[format]),
-                        )],
-                    None,
-                )
-                .map_err(|(_, e)| e)?[0])
-        }
-    }
-
-    pub fn begin_rendering(
-        &self,
-        command_buffer: vk::CommandBuffer,
-        image_view: vk::ImageView,
-        clear_color: vk::ClearColorValue,
-        render_area: vk::Rect2D,
-    ) {
-        unsafe {
-            self.device.cmd_begin_rendering(
-                command_buffer,
-                &vk::RenderingInfo::default()
-                    .layer_count(1)
-                    .color_attachments(&[vk::RenderingAttachmentInfo::default()
-                        .image_view(image_view)
-                        .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .clear_value(vk::ClearValue { color: clear_color })
-                        .load_op(vk::AttachmentLoadOp::CLEAR)
-                        .store_op(vk::AttachmentStoreOp::STORE)])
-                    .render_area(render_area),
-            );
         }
     }
 }
