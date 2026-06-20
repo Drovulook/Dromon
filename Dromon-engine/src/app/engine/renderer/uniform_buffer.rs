@@ -45,7 +45,7 @@ impl UniformBuffer {
 
     pub fn update(&self, time: &Timer, swapchain_width: f32, swapchain_height: f32) {
         let mut ubo = UniformBufferObject {
-            model: Mat4::from_rotation_z(time.elapsed_secs() * 90.0_f32.to_radians()),
+            model: Mat4::from_rotation_z(time.elapsed_secs() * 90.0_f32.to_radians() * 0.6),
             view: Mat4::look_at_rh(
                 Vec3::new(2.0, 2.0, 2.0), // eye (position de la caméra)
                 Vec3::new(0.0, 0.0, 0.0), // center (point regardé)

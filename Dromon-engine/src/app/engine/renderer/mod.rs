@@ -88,13 +88,19 @@ impl Renderer {
                 });
             }
 
+            let texture_handler = TextureHandler::new(context.clone(), logger.clone())?;
+
             // creating descriptor sets
             let uniform_buffer_handles: Vec<vk::Buffer> = frames
                 .iter()
                 .map(|frame| frame.uniform_buffer.get_handle())
                 .collect();
-            let descriptor_handler =
-                DescriptorHandler::new(context.clone(), uniform_buffer_handles)?;
+            let descriptor_handler = DescriptorHandler::new(
+                context.clone(),
+                uniform_buffer_handles,
+                &texture_handler.texture_image_view,
+                &texture_handler.texture_sampler,
+            )?;
 
             let image_count = swapchain.images.len();
 
@@ -146,8 +152,6 @@ impl Renderer {
                 TRIANGLE_VERTICES.to_vec(),
                 TRIANGLE_INDICES.to_vec(),
             )?;
-
-            let texture_handler = TextureHandler::new(context.clone(), logger.clone())?;
 
             Renderer::initialize(context.clone(), &triangle_model, &texture_handler)?;
 

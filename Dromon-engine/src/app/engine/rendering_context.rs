@@ -255,6 +255,9 @@ impl RenderingContext {
                 physical_device.handle,
                 &vk::DeviceCreateInfo::default()
                     .queue_create_infos(&queue_create_infos)
+                    .enabled_features(
+                        &vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true),
+                    )
                     .enabled_extension_names(&[ash::khr::swapchain::NAME.as_ptr()])
                     .push_next(
                         &mut vk::PhysicalDeviceVulkan11Features::default()

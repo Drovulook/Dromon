@@ -15,6 +15,8 @@ pub struct TextureHandler {
     image_height: u32,
     pub texture_image: vk::Image,
     pub texture_image_memory: vk::DeviceMemory,
+    pub texture_image_view: vk::ImageView,
+    pub texture_sampler: vk::Sampler,
 }
 
 impl TextureHandler {
@@ -52,6 +54,14 @@ impl TextureHandler {
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
 
+        let texture_image_view = context.create_image_view(
+            &texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageAspectFlags::COLOR,
+        )?;
+
+        let texture_sampler = Self::create_texture_sampler(&context)?;
+
         Ok(Self {
             context,
             logger,
@@ -60,7 +70,32 @@ impl TextureHandler {
             staging_buffer,
             texture_image,
             texture_image_memory,
+            texture_image_view,
+            texture_sampler,
         })
+    }
+
+    fn create_texture_sampler(context: &RenderingContext) -> Result<(vk::Sampler)> {
+        let properties = context.physical_device.properties;
+        let sampler_info = vk::SamplerCreateInfo::default()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_BORDER)
+            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_BORDER)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_BORDER)
+            .anisotropy_enable(true)
+            .max_anisotropy(properties.limits.max_sampler_anisotropy)
+            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+            .unnormalized_coordinates(false)
+            .compare_enable(false)
+            .compare_op(vk::CompareOp::ALWAYS)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .mip_lod_bias(0.0)
+            .min_lod(0.0)
+            .max_lod(0.0);
+
+        let sampler = unsafe { context.device.create_sampler(&sampler_info, None) }?;
+        Ok(sampler)
     }
 
     pub fn copy_buffer_to_image(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
@@ -92,5 +127,22 @@ impl TextureHandler {
             );
         }
         Ok(())
+    }
+}
+
+impl Drop for TextureHandler {
+    fn drop(&mut self) {
+        unsafe {
+            self.context
+                .device
+                .destroy_image_view(self.texture_image_view, None);
+            self.context.device.destroy_image(self.texture_image, None);
+            self.context
+                .device
+                .free_memory(self.texture_image_memory, None);
+            self.context
+                .device
+                .destroy_sampler(self.texture_sampler, None);
+        }
     }
 }

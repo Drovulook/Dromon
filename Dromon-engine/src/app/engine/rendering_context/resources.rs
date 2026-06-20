@@ -45,14 +45,14 @@ impl RenderingContext {
 
     pub fn create_image_view(
         &self,
-        image: vk::Image,
+        image: &vk::Image,
         format: vk::Format,
         aspect_flags: vk::ImageAspectFlags,
     ) -> Result<vk::ImageView> {
         let image_view = unsafe {
             self.device.create_image_view(
                 &vk::ImageViewCreateInfo::default()
-                    .image(image)
+                    .image(*image)
                     .view_type(vk::ImageViewType::TYPE_2D)
                     .format(format)
                     .components(vk::ComponentMapping::default())

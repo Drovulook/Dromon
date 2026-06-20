@@ -1,3 +1,8 @@
 [workspace]
 members = ["Dromon-engine", "Dromon-cli"]
 resolver = "2"
+
+# Optimise les dépendances (image, ash, glam…) même en build debug,
+# tout en gardant le reste du code non optimisé (compilation rapide + debug).
+[profile.dev.package."*"]
+opt-level = 3

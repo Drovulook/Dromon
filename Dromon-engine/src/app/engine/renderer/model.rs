@@ -1,17 +1,18 @@
 use super::buffer::Buffer;
+use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
+use std::mem::offset_of;
 use std::sync::Arc;
-
-use crate::app::engine::rendering_context::RenderingContext;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
     pos: Vec2,
     color: Vec3,
+    texCoord: Vec2,
 }
 
 impl Vertex {
@@ -23,19 +24,25 @@ impl Vertex {
         }
     }
 
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
+    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
         [
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 0,
                 format: vk::Format::R32G32_SFLOAT,
-                offset: 0,
+                offset: offset_of!(Vertex, pos) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 1,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: 8,
+                offset: offset_of!(Vertex, color) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: 2,
+                format: vk::Format::R32G32_SFLOAT,
+                offset: offset_of!(Vertex, texCoord) as u32,
             },
         ]
     }
@@ -161,18 +168,22 @@ pub const TRIANGLE_VERTICES: &[Vertex] = &[
     Vertex {
         pos: Vec2::new(-0.5, -0.5),
         color: Vec3::new(1.0, 0.0, 0.0),
+        texCoord: Vec2::new(1.0, 0.0),
     },
     Vertex {
         pos: Vec2::new(0.5, -0.5),
         color: Vec3::new(0.0, 1.0, 0.0),
+        texCoord: Vec2::new(0.0, 0.0),
     },
     Vertex {
         pos: Vec2::new(0.5, 0.5),
         color: Vec3::new(0.0, 0.0, 1.0),
+        texCoord: Vec2::new(0.0, 1.0),
     },
     Vertex {
         pos: Vec2::new(-0.5, 0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
+        texCoord: Vec2::new(1.0, 1.0),
     },
 ];
 

@@ -108,7 +108,7 @@ impl Swapchain {
                 .get_swapchain_images(self.handle)?;
             for image in &self.images {
                 self.image_views.push(self.context.create_image_view(
-                    *image,
+                    &image,
                     self.format,
                     vk::ImageAspectFlags::COLOR,
                 )?);
