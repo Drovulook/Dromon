@@ -1,16 +1,23 @@
 use crate::app::engine::rendering_context::{RenderingContext, SwapchainSurface};
 use crate::app::logger::Logger;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use ash::vk;
 use std::sync::Arc;
 use winit::window::Window;
 
 pub struct Swapchain {
     pub desired_image_count: u32,
-    pub format: vk::Format,
     pub extent: vk::Extent2D,
-    pub image_views: Vec<vk::ImageView>,
-    pub images: Vec<vk::Image>,
+    // color images
+    pub color_format: vk::Format,
+    pub color_image_views: Vec<vk::ImageView>,
+    pub color_images: Vec<vk::Image>,
+    // depth image
+    pub depth_format: vk::Format,
+    pub depth_image: vk::Image,
+    depth_image_memory: vk::DeviceMemory,
+    pub depth_image_view: vk::ImageView,
+    //
     handle: vk::SwapchainKHR,
     surface: SwapchainSurface,
     window: Arc<Window>,
@@ -26,7 +33,17 @@ impl Swapchain {
         logger: Arc<Logger>,
     ) -> Result<Self> {
         let surface = unsafe { context.create_surface(window.clone())? };
-        let format = vk::Format::B8G8R8A8_SRGB;
+        let color_format = vk::Format::B8G8R8A8_SRGB;
+        let depth_format = Self::find_supported_format(
+            &context,
+            &[
+                vk::Format::D32_SFLOAT,
+                vk::Format::D32_SFLOAT_S8_UINT,
+                vk::Format::D24_UNORM_S8_UINT,
+            ],
+            vk::ImageTiling::OPTIMAL,
+            vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
+        )?;
         let extent = if surface.capabilities.current_extent.width != u32::MAX {
             surface.capabilities.current_extent
         } else {
@@ -47,10 +64,14 @@ impl Swapchain {
 
         Ok(Self {
             desired_image_count,
-            format,
             extent,
-            image_views: Default::default(),
-            images: Default::default(),
+            color_format,
+            color_image_views: Default::default(),
+            color_images: Default::default(),
+            depth_format,
+            depth_image: Default::default(),
+            depth_image_memory: Default::default(),
+            depth_image_view: Default::default(),
             handle: Default::default(),
             surface,
             window,
@@ -79,7 +100,7 @@ impl Swapchain {
                 &vk::SwapchainCreateInfoKHR::default()
                     .surface(self.surface.handle)
                     .min_image_count(self.desired_image_count)
-                    .image_format(self.format)
+                    .image_format(self.color_format)
                     .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
                     .image_extent(self.extent)
                     .image_array_layers(1)
@@ -93,29 +114,82 @@ impl Swapchain {
                 None,
             )?;
 
-            for image_view in self.image_views.drain(..) {
+            // color images + swapchain
+            for image_view in self.color_image_views.drain(..) {
                 self.context.device.destroy_image_view(image_view, None);
             }
-            self.images.clear();
+            self.color_images.clear();
             self.context
                 .swapchain_extensions
                 .destroy_swapchain(self.handle, None);
-
             self.handle = new_swapchain;
-            self.images = self
+            self.color_images = self
                 .context
                 .swapchain_extensions
                 .get_swapchain_images(self.handle)?;
-            for image in &self.images {
-                self.image_views.push(self.context.create_image_view(
+            for image in &self.color_images {
+                self.color_image_views.push(self.context.create_image_view(
                     &image,
-                    self.format,
+                    self.color_format,
                     vk::ImageAspectFlags::COLOR,
                 )?);
             }
+
+            // depth image
+            self.context
+                .device
+                .destroy_image_view(self.depth_image_view, None);
+            self.context.device.destroy_image(self.depth_image, None);
+            self.context
+                .device
+                .free_memory(self.depth_image_memory, None);
+
+            let (depth_image, depth_image_memory) = self.context.create_image(
+                self.extent.width,
+                self.extent.height,
+                self.depth_format,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
+            let depth_image_view = self.context.create_image_view(
+                &depth_image,
+                self.depth_format,
+                vk::ImageAspectFlags::DEPTH,
+            )?;
+            self.depth_image = depth_image;
+            self.depth_image_memory = depth_image_memory;
+            self.depth_image_view = depth_image_view;
         }
         self.is_dirty = false;
         Ok(())
+    }
+
+    fn find_supported_format(
+        context: &RenderingContext,
+        candidates: &[vk::Format],
+        tiling: vk::ImageTiling,
+        features: vk::FormatFeatureFlags,
+    ) -> Result<vk::Format> {
+        for &format in candidates {
+            let props = unsafe {
+                context
+                    .instance
+                    .get_physical_device_format_properties(context.physical_device.handle, format)
+            };
+
+            let supported = match tiling {
+                vk::ImageTiling::LINEAR => props.linear_tiling_features,
+                vk::ImageTiling::OPTIMAL => props.optimal_tiling_features,
+                _ => vk::FormatFeatureFlags::empty(),
+            };
+
+            if supported.contains(features) {
+                return Ok(format);
+            }
+        }
+
+        Err(anyhow!("Unsupported format"))
     }
 
     pub fn acquire_next_image(&mut self, image_available_semaphore: vk::Semaphore) -> Result<u32> {
@@ -166,9 +240,19 @@ impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
             let _ = self.context.device.device_wait_idle();
-            for image_view in self.image_views.drain(..) {
+            // color images
+            for image_view in self.color_image_views.drain(..) {
                 self.context.device.destroy_image_view(image_view, None);
             }
+            // depth image
+            self.context
+                .device
+                .destroy_image_view(self.depth_image_view, None);
+            self.context.device.destroy_image(self.depth_image, None);
+            self.context
+                .device
+                .free_memory(self.depth_image_memory, None);
+
             self.context
                 .swapchain_extensions
                 .destroy_swapchain(self.handle, None);

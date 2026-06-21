@@ -10,6 +10,7 @@ impl RenderingContext {
         &self,
         command_buffer: vk::CommandBuffer,
         image_view: vk::ImageView,
+        depth_image_view: vk::ImageView,
         clear_color: vk::ClearColorValue,
         render_area: vk::Rect2D,
     ) {
@@ -24,6 +25,19 @@ impl RenderingContext {
                         .clear_value(vk::ClearValue { color: clear_color })
                         .load_op(vk::AttachmentLoadOp::CLEAR)
                         .store_op(vk::AttachmentStoreOp::STORE)])
+                    .depth_attachment(
+                        &vk::RenderingAttachmentInfo::default()
+                            .image_view(depth_image_view)
+                            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+                            .clear_value(vk::ClearValue {
+                                depth_stencil: vk::ClearDepthStencilValue {
+                                    depth: 1.0,
+                                    stencil: 0,
+                                },
+                            })
+                            .load_op(vk::AttachmentLoadOp::CLEAR)
+                            .store_op(vk::AttachmentStoreOp::DONT_CARE),
+                    )
                     .render_area(render_area),
             );
         }
@@ -37,12 +51,12 @@ impl RenderingContext {
         let barriers = states
             .iter()
             .map(|(image, old_layout, new_layout)| {
-                let aspect_flag =
-                    if new_layout.layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
-                        vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
-                    } else {
-                        vk::ImageAspectFlags::COLOR
-                    };
+                let aspect_flag = if new_layout.layout == vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL
+                {
+                    vk::ImageAspectFlags::DEPTH
+                } else {
+                    vk::ImageAspectFlags::COLOR
+                };
                 vk::ImageMemoryBarrier2::default()
                     .src_stage_mask(old_layout.stage_mask)
                     .dst_stage_mask(new_layout.stage_mask)

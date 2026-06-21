@@ -10,7 +10,7 @@ use std::sync::Arc;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
-    pos: Vec2,
+    pos: Vec3,
     color: Vec3,
     texCoord: Vec2,
 }
@@ -29,7 +29,7 @@ impl Vertex {
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 0,
-                format: vk::Format::R32G32_SFLOAT,
+                format: vk::Format::R32G32B32_SFLOAT,
                 offset: offset_of!(Vertex, pos) as u32,
             },
             vk::VertexInputAttributeDescription {
@@ -166,25 +166,46 @@ impl Model {
 
 pub const TRIANGLE_VERTICES: &[Vertex] = &[
     Vertex {
-        pos: Vec2::new(-0.5, -0.5),
+        pos: Vec3::new(-0.5, -0.5, 0.0),
         color: Vec3::new(1.0, 0.0, 0.0),
         texCoord: Vec2::new(1.0, 0.0),
     },
     Vertex {
-        pos: Vec2::new(0.5, -0.5),
+        pos: Vec3::new(0.5, -0.5, 0.0),
         color: Vec3::new(0.0, 1.0, 0.0),
         texCoord: Vec2::new(0.0, 0.0),
     },
     Vertex {
-        pos: Vec2::new(0.5, 0.5),
+        pos: Vec3::new(0.5, 0.5, 0.0),
         color: Vec3::new(0.0, 0.0, 1.0),
         texCoord: Vec2::new(0.0, 1.0),
     },
     Vertex {
-        pos: Vec2::new(-0.5, 0.5),
+        pos: Vec3::new(-0.5, 0.5, 0.0),
+        color: Vec3::new(1.0, 1.0, 1.0),
+        texCoord: Vec2::new(1.0, 1.0),
+    },
+    // second square
+    Vertex {
+        pos: Vec3::new(-0.5, -0.5, -0.5),
+        color: Vec3::new(1.0, 0.0, 0.0),
+        texCoord: Vec2::new(1.0, 0.0),
+    },
+    Vertex {
+        pos: Vec3::new(0.5, -0.5, -0.5),
+        color: Vec3::new(0.0, 1.0, 0.0),
+        texCoord: Vec2::new(0.0, 0.0),
+    },
+    Vertex {
+        pos: Vec3::new(0.5, 0.5, -0.5),
+        color: Vec3::new(0.0, 0.0, 1.0),
+        texCoord: Vec2::new(0.0, 1.0),
+    },
+    Vertex {
+        pos: Vec3::new(-0.5, 0.5, -0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
         texCoord: Vec2::new(1.0, 1.0),
     },
 ];
 
-pub const TRIANGLE_INDICES: &[u32] = &[0, 1, 2, 2, 3, 0];
+pub const TRIANGLE_INDICES: &[u32] = &[0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
