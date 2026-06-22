@@ -6,3 +6,5 @@ links.md
 /__pycache__
 
 /Dromon-engine/res/shaders/*.spv
+/Dromon-engine/res/models/
+/Dromon-engine/res/textures/

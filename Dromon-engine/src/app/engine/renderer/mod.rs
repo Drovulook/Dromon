@@ -1,12 +1,14 @@
 mod buffer;
 mod descriptors;
 pub mod model;
+mod object;
 mod swapchain;
 mod texture;
 mod uniform_buffer;
 
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::model::{Model, TRIANGLE_INDICES, TRIANGLE_VERTICES, Vertex};
+use crate::app::engine::renderer::model::{Model, Vertex};
+use crate::app::engine::renderer::object::{Object, ObjectTransform};
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::rendering_context::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
@@ -36,7 +38,7 @@ pub struct Renderer {
     pipeline_layout: vk::PipelineLayout,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
-    triangle_model: Model,
+    dromon_model: Model,
     descriptor_handler: DescriptorHandler,
     texture_handler: TextureHandler,
 }
@@ -88,7 +90,39 @@ impl Renderer {
                 });
             }
 
-            let texture_handler = TextureHandler::new(context.clone(), logger.clone())?;
+            const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
+            const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
+
+            // Deux bateaux : un à l'origine, un décalé de +2 en X.
+            let ship = Object::new(
+                GLTF_PATH,
+                TEXTURE_PATH,
+                ObjectTransform {
+                    translation: glam::Vec3::new(0.0, -1.0, 0.0),
+                    ..Default::default()
+                },
+            );
+            let ship2 = Object::new(
+                GLTF_PATH,
+                TEXTURE_PATH,
+                ObjectTransform {
+                    translation: glam::Vec3::new(0.0, 1.0, 0.0),
+                    ..Default::default()
+                },
+            );
+
+            let texture_handler =
+                TextureHandler::new(context.clone(), logger.clone(), &ship.texture_path)?;
+
+            // On charge chaque bateau (meshes fusionnés + transform appliqué),
+            // puis on concatène les deux en un seul buffer.
+            let (mut vertices, mut indices) = ship.load_scene()?;
+            let (vertices2, indices2) = ship2.load_scene()?;
+            let base = vertices.len() as u32;
+            vertices.extend(vertices2);
+            indices.extend(indices2.iter().map(|i| i + base));
+
+            let dromon_model = Model::new(context.clone(), vertices, indices)?;
 
             // creating descriptor sets
             let uniform_buffer_handles: Vec<vk::Buffer> = frames
@@ -148,13 +182,7 @@ impl Renderer {
             context.device.destroy_shader_module(vertex_shader, None);
             context.device.destroy_shader_module(fragment_shader, None);
 
-            let triangle_model = Model::new(
-                context.clone(),
-                TRIANGLE_VERTICES.to_vec(),
-                TRIANGLE_INDICES.to_vec(),
-            )?;
-
-            Renderer::initialize(context.clone(), &triangle_model, &texture_handler)?;
+            Renderer::initialize(context.clone(), &dromon_model, &texture_handler)?;
 
             Ok(Self {
                 in_flight_frames_count,
@@ -168,7 +196,7 @@ impl Renderer {
                 pipeline_layout,
                 swapchain,
                 context,
-                triangle_model,
+                dromon_model,
                 descriptor_handler,
                 texture_handler,
             })
@@ -400,8 +428,8 @@ impl Renderer {
                 self.pipeline,
             );
 
-            self.triangle_model.bind_index_buffer(frame.command_buffer);
-            self.triangle_model.bind_vertex_buffer(frame.command_buffer);
+            self.dromon_model.bind_index_buffer(frame.command_buffer);
+            self.dromon_model.bind_vertex_buffer(frame.command_buffer);
             frame.uniform_buffer.update(
                 timer,
                 self.swapchain.extent.width as f32,
@@ -419,7 +447,7 @@ impl Renderer {
 
             self.context.device.cmd_draw_indexed(
                 frame.command_buffer,
-                self.triangle_model.indices.len() as u32,
+                self.dromon_model.indices.len() as u32,
                 1,
                 0,
                 0,

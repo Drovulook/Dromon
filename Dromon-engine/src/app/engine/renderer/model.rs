@@ -10,9 +10,9 @@ use std::sync::Arc;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
-    pos: Vec3,
-    color: Vec3,
-    texCoord: Vec2,
+    pub pos: Vec3,
+    pub color: Vec3,
+    pub texCoord: Vec2,
 }
 
 impl Vertex {

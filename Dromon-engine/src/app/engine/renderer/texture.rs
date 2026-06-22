@@ -20,10 +20,10 @@ pub struct TextureHandler {
 }
 
 impl TextureHandler {
-    pub fn new(context: Arc<RenderingContext>, logger: Arc<Logger>) -> Result<Self> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/res/textures/texture.jpg");
+    pub fn new(context: Arc<RenderingContext>, logger: Arc<Logger>, path: &str) -> Result<Self> {
+        let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
-        let img = ImageReader::open(path)?.decode()?.to_rgba8();
+        let img = ImageReader::open(full_path)?.decode()?.to_rgba8();
         let (image_width, image_height) = img.dimensions();
         let pixels: &[u8] = &img; // RgbaImage se déréférence en &[u8]
 
