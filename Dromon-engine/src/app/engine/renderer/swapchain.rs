@@ -132,6 +132,7 @@ impl Swapchain {
                     &image,
                     self.color_format,
                     vk::ImageAspectFlags::COLOR,
+                    1,
                 )?);
             }
 
@@ -147,6 +148,7 @@ impl Swapchain {
             let (depth_image, depth_image_memory) = self.context.create_image(
                 self.extent.width,
                 self.extent.height,
+                1,
                 self.depth_format,
                 vk::ImageTiling::OPTIMAL,
                 vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -156,6 +158,7 @@ impl Swapchain {
                 &depth_image,
                 self.depth_format,
                 vk::ImageAspectFlags::DEPTH,
+                1,
             )?;
             self.depth_image = depth_image;
             self.depth_image_memory = depth_image_memory;

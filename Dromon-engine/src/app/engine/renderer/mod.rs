@@ -257,27 +257,18 @@ impl Renderer {
                     queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                 },
             )],
+            texture_handler.mip_levels,
         );
 
         texture_handler.copy_buffer_to_image(&transfer_command_buffer)?;
 
-        context.transition_image_layout(
+        context.generate_mipmaps(
             transfer_command_buffer,
-            &[(
-                texture_handler.texture_image,
-                ImageLayoutState {
-                    access_mask: vk::AccessFlags2::TRANSFER_WRITE,
-                    layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    stage_mask: vk::PipelineStageFlags2::COPY,
-                    queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                },
-                ImageLayoutState {
-                    access_mask: vk::AccessFlags2::SHADER_READ,
-                    layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                    queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                },
-            )],
+            &texture_handler.texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            texture_handler.image_width,
+            texture_handler.image_height,
+            texture_handler.mip_levels,
         );
         //////////
 
@@ -389,6 +380,7 @@ impl Renderer {
                     undefined_color_image_state,
                     renderable_color_image_state,
                 )],
+                1,
             );
 
             self.context.transition_image_layout(
@@ -398,6 +390,7 @@ impl Renderer {
                     undefined_depth_image_state,
                     renderable_depth_image_state,
                 )],
+                1,
             );
 
             self.context.begin_rendering(
@@ -470,6 +463,7 @@ impl Renderer {
                     renderable_color_image_state,
                     present_color_image_state,
                 )],
+                1,
             );
 
             self.context

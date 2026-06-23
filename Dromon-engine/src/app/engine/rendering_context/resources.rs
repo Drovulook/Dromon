@@ -48,6 +48,7 @@ impl RenderingContext {
         image: &vk::Image,
         format: vk::Format,
         aspect_flags: vk::ImageAspectFlags,
+        mip_levels: u32,
     ) -> Result<vk::ImageView> {
         let image_view = unsafe {
             self.device.create_image_view(
@@ -60,7 +61,7 @@ impl RenderingContext {
                         vk::ImageSubresourceRange::default()
                             .aspect_mask(aspect_flags)
                             .base_mip_level(0)
-                            .level_count(1)
+                            .level_count(mip_levels)
                             .base_array_layer(0)
                             .layer_count(1),
                     ),
@@ -74,6 +75,7 @@ impl RenderingContext {
         &self,
         width: u32,
         height: u32,
+        mip_levels: u32,
         format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
@@ -89,7 +91,7 @@ impl RenderingContext {
                         height,
                         depth: 1,
                     })
-                    .mip_levels(1)
+                    .mip_levels(mip_levels)
                     .array_layers(1)
                     .samples(vk::SampleCountFlags::TYPE_1)
                     .tiling(tiling)

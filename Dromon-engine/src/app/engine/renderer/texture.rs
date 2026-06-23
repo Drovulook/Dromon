@@ -11,8 +11,9 @@ pub struct TextureHandler {
     context: Arc<RenderingContext>,
     logger: Arc<Logger>,
     staging_buffer: Buffer,
-    image_width: u32,
-    image_height: u32,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub mip_levels: u32,
     pub texture_image: vk::Image,
     pub texture_image_memory: vk::DeviceMemory,
     pub texture_image_view: vk::ImageView,
@@ -34,6 +35,8 @@ impl TextureHandler {
             pixels.len(),
         ));
 
+        let mip_levels = ((image_width.max(image_height) as f32).log2().floor() as u32) + 1;
+
         let image_size = pixels.len() as vk::DeviceSize;
 
         // staging bugger
@@ -48,9 +51,12 @@ impl TextureHandler {
         let (texture_image, texture_image_memory) = context.create_image(
             image_width,
             image_height,
+            mip_levels,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC // for generating mipmaps
+                | vk::ImageUsageFlags::SAMPLED,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
 
@@ -58,6 +64,7 @@ impl TextureHandler {
             &texture_image,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageAspectFlags::COLOR,
+            mip_levels,
         )?;
 
         let texture_sampler = Self::create_texture_sampler(&context)?;
@@ -66,6 +73,7 @@ impl TextureHandler {
             context,
             logger,
             image_width,
+            mip_levels,
             image_height,
             staging_buffer,
             texture_image,
@@ -75,14 +83,14 @@ impl TextureHandler {
         })
     }
 
-    fn create_texture_sampler(context: &RenderingContext) -> Result<(vk::Sampler)> {
+    fn create_texture_sampler(context: &RenderingContext) -> Result<vk::Sampler> {
         let properties = context.physical_device.properties;
         let sampler_info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_BORDER)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_BORDER)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_BORDER)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
             .anisotropy_enable(true)
             .max_anisotropy(properties.limits.max_sampler_anisotropy)
             .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
@@ -92,7 +100,7 @@ impl TextureHandler {
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .mip_lod_bias(0.0)
             .min_lod(0.0)
-            .max_lod(0.0);
+            .max_lod(vk::LOD_CLAMP_NONE);
 
         let sampler = unsafe { context.device.create_sampler(&sampler_info, None) }?;
         Ok(sampler)

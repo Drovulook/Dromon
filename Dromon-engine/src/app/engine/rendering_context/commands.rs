@@ -47,6 +47,7 @@ impl RenderingContext {
         &self,
         command_buffer: vk::CommandBuffer,
         states: &[(vk::Image, ImageLayoutState, ImageLayoutState)],
+        mip_levels: u32,
     ) {
         let barriers = states
             .iter()
@@ -71,7 +72,7 @@ impl RenderingContext {
                         vk::ImageSubresourceRange::default()
                             .aspect_mask(aspect_flag)
                             .base_mip_level(0)
-                            .level_count(1)
+                            .level_count(mip_levels)
                             .base_array_layer(0)
                             .layer_count(1),
                     )
@@ -84,5 +85,140 @@ impl RenderingContext {
                 &vk::DependencyInfo::default().image_memory_barriers(&barriers),
             );
         }
+    }
+
+    pub fn generate_mipmaps(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        image: &vk::Image,
+        image_format: vk::Format,
+        text_width: u32,
+        text_height: u32,
+        mip_levels: u32,
+    ) -> Result<()> {
+        let props = unsafe {
+            self.instance
+                .get_physical_device_format_properties(self.physical_device.handle, image_format)
+        };
+
+        if !props
+            .optimal_tiling_features
+            .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
+        {
+            return Err(anyhow::anyhow!(
+                "texture image format does not support linear blitting"
+            ));
+        }
+
+        let mut barrier = vk::ImageMemoryBarrier2::default()
+            .image(*image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            );
+
+        let mut mip_width = text_width as i32;
+        let mut mip_height = text_height as i32;
+
+        for i in 1..mip_levels {
+            // transition to TRANSFER_SRC_OPTIMAL
+            barrier.subresource_range.base_mip_level = i - 1;
+            barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+            barrier.new_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            barrier.src_access_mask = vk::AccessFlags2::TRANSFER_WRITE;
+            barrier.dst_access_mask = vk::AccessFlags2::TRANSFER_READ;
+            barrier.src_stage_mask = vk::PipelineStageFlags2::TRANSFER;
+            barrier.dst_stage_mask = vk::PipelineStageFlags2::TRANSFER;
+            unsafe {
+                self.device.cmd_pipeline_barrier2(
+                    command_buffer,
+                    &vk::DependencyInfo::default().image_memory_barriers(&[barrier]),
+                );
+            }
+
+            // blit
+            let blit = vk::ImageBlit::default()
+                .src_offsets([
+                    vk::Offset3D { x: 0, y: 0, z: 0 },
+                    vk::Offset3D {
+                        x: mip_width,
+                        y: mip_height,
+                        z: 1,
+                    },
+                ])
+                .dst_offsets([
+                    vk::Offset3D { x: 0, y: 0, z: 0 },
+                    vk::Offset3D {
+                        x: if mip_width > 1 { mip_width / 2 } else { 1 },
+                        y: if mip_height > 1 { mip_height / 2 } else { 1 },
+                        z: 1,
+                    },
+                ])
+                .src_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .mip_level(i - 1)
+                        .base_array_layer(0)
+                        .layer_count(1),
+                )
+                .dst_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .mip_level(i)
+                        .base_array_layer(0)
+                        .layer_count(1),
+                );
+            unsafe {
+                self.device.cmd_blit_image(
+                    command_buffer,
+                    *image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    *image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[blit],
+                    vk::Filter::LINEAR,
+                );
+            }
+
+            // transition to SHADER_READ_ONLY_OPTIMAL
+            barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+            barrier.src_access_mask = vk::AccessFlags2::TRANSFER_READ;
+            barrier.dst_access_mask = vk::AccessFlags2::SHADER_READ;
+            barrier.src_stage_mask = vk::PipelineStageFlags2::TRANSFER;
+            barrier.dst_stage_mask = vk::PipelineStageFlags2::FRAGMENT_SHADER;
+            unsafe {
+                self.device.cmd_pipeline_barrier2(
+                    command_buffer,
+                    &vk::DependencyInfo::default().image_memory_barriers(&[barrier]),
+                );
+            }
+            if mip_width > 1 {
+                mip_width /= 2;
+            }
+            if mip_height > 1 {
+                mip_height /= 2;
+            }
+        }
+
+        // transition to SHADER_READ_ONLY_OPTIMAL for the last mip level
+        barrier.subresource_range.base_mip_level = mip_levels - 1;
+        barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+        barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        barrier.src_access_mask = vk::AccessFlags2::TRANSFER_WRITE;
+        barrier.dst_access_mask = vk::AccessFlags2::SHADER_READ;
+        barrier.src_stage_mask = vk::PipelineStageFlags2::TRANSFER;
+        barrier.dst_stage_mask = vk::PipelineStageFlags2::FRAGMENT_SHADER;
+        unsafe {
+            self.device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo::default().image_memory_barriers(&[barrier]),
+            );
+        }
+
+        Ok(())
     }
 }
