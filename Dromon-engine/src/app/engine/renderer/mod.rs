@@ -99,6 +99,7 @@ impl Renderer {
                 TEXTURE_PATH,
                 ObjectTransform {
                     translation: glam::Vec3::new(0.0, -1.0, 0.0),
+                    rotation: glam::Vec3::new(0.0, 0.0, std::f32::consts::PI),
                     ..Default::default()
                 },
             );
@@ -117,6 +118,12 @@ impl Renderer {
             // On charge chaque bateau (meshes fusionnés + transform appliqué),
             // puis on concatène les deux en un seul buffer.
             let (mut vertices, mut indices) = ship.load_scene()?;
+
+            logger.info(&format!(
+                "{} vertices, {} indices",
+                vertices.len(),
+                indices.len()
+            ));
             let (vertices2, indices2) = ship2.load_scene()?;
             let base = vertices.len() as u32;
             vertices.extend(vertices2);
