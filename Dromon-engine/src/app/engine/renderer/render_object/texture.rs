@@ -13,6 +13,7 @@ pub struct Texture {
     pub texture_image: vk::Image,
     pub texture_image_memory: vk::DeviceMemory,
     pub texture_image_view: vk::ImageView,
+    pub descriptor_set: vk::DescriptorSet,
 }
 
 impl Texture {
@@ -25,6 +26,7 @@ impl Texture {
         texture_image: vk::Image,
         texture_image_memory: vk::DeviceMemory,
         texture_image_view: vk::ImageView,
+        descriptor_set: vk::DescriptorSet,
     ) -> Texture {
         Texture {
             context,
@@ -35,6 +37,7 @@ impl Texture {
             texture_image,
             texture_image_memory,
             texture_image_view,
+            descriptor_set,
         }
     }
 }

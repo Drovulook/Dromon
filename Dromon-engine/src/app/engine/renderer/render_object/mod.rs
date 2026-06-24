@@ -6,8 +6,9 @@ mod transform;
 
 use crate::app::{
     engine::{
-        renderer::render_object::{
-            mesh_handler::MeshHandler, texture_handler::TextureHandler, transform::Transform,
+        renderer::{
+            descriptors::DescriptorHandler,
+            render_object::{mesh_handler::MeshHandler, texture_handler::TextureHandler},
         },
         rendering_context::RenderingContext,
     },
@@ -16,8 +17,10 @@ use crate::app::{
 use anyhow::Result;
 use ash::vk;
 use mesh::Mesh;
+pub use mesh::Vertex;
 use std::{collections::HashMap, sync::Arc};
 use texture::Texture;
+pub use transform::Transform;
 
 pub struct RenderObjectResourceManager {
     context: Arc<RenderingContext>,
@@ -32,13 +35,18 @@ impl RenderObjectResourceManager {
     pub fn new(
         context: Arc<RenderingContext>,
         logger: Arc<Logger>,
+        descriptor_handler: Arc<DescriptorHandler>,
     ) -> Result<RenderObjectResourceManager> {
         Ok(RenderObjectResourceManager {
             context: context.clone(),
             logger: logger.clone(),
             textures: HashMap::new(),
             meshes: HashMap::new(),
-            texture_handler: TextureHandler::new(context.clone(), logger.clone())?,
+            texture_handler: TextureHandler::new(
+                context.clone(),
+                logger.clone(),
+                descriptor_handler,
+            )?,
             mesh_handler: MeshHandler::new(context, logger),
         })
     }

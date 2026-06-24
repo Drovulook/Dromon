@@ -4,7 +4,7 @@ use crate::app::engine::renderer::render_object::mesh::Vertex;
 use crate::app::{engine::rendering_context::RenderingContext, logger::Logger};
 use anyhow::{Context, Result};
 use ash::vk;
-use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use std::path::Path;
 use std::sync::Arc;
 

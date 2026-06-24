@@ -1,6 +1,8 @@
 use crate::app::{
     engine::{
-        renderer::{buffer::Buffer, render_object::texture::Texture},
+        renderer::{
+            buffer::Buffer, descriptors::DescriptorHandler, render_object::texture::Texture,
+        },
         rendering_context::{ImageLayoutState, RenderingContext},
     },
     logger::Logger,
@@ -14,15 +16,21 @@ pub struct TextureHandler {
     pub context: Arc<RenderingContext>,
     pub logger: Arc<Logger>,
     pub texture_sampler: vk::Sampler,
+    descriptor_handler: Arc<DescriptorHandler>,
 }
 
 impl TextureHandler {
-    pub fn new(context: Arc<RenderingContext>, logger: Arc<Logger>) -> Result<TextureHandler> {
+    pub fn new(
+        context: Arc<RenderingContext>,
+        logger: Arc<Logger>,
+        descriptor_handler: Arc<DescriptorHandler>,
+    ) -> Result<TextureHandler> {
         let texture_sampler = Self::create_texture_sampler(&context)?;
         Ok(TextureHandler {
             context,
             logger,
             texture_sampler,
+            descriptor_handler,
         })
     }
 
@@ -96,6 +104,11 @@ impl TextureHandler {
             mip_levels,
         )?;
 
+        // create one descriptor set (with one descriptor) per texture
+        let descriptor_set = self
+            .descriptor_handler
+            .create_texture_descriptor_set(&texture_image_view, &self.texture_sampler)?;
+
         Ok(Texture::new(
             self.context.clone(),
             image_width,
@@ -105,6 +118,7 @@ impl TextureHandler {
             texture_image,
             texture_image_memory,
             texture_image_view,
+            descriptor_set,
         ))
     }
 

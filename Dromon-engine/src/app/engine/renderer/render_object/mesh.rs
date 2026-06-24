@@ -92,6 +92,7 @@ impl Mesh {
                 None, // strides : override du stride défini dans le pipeline (None = utilise celui du pipeline)
             );
             self.context.device.cmd_bind_index_buffer(
+                // HACK: utiliser ...buffers2 ?
                 command_buffer,
                 self.index_buffer.buffer,
                 0,

@@ -1,24 +1,20 @@
 mod buffer;
 mod descriptors;
-pub mod model;
-mod object;
 mod render_object;
 mod swapchain;
-mod texture;
 mod uniform_buffer;
 
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::model::{Model, Vertex};
-use crate::app::engine::renderer::object::{Object, ObjectTransform};
+use crate::app::engine::renderer::render_object::{RenderObject, RenderObjectResourceManager};
+use crate::app::engine::renderer::render_object::{Transform, Vertex};
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::rendering_context::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ash::vk;
 use std::sync::Arc;
-use texture::TextureHandler;
 use winit::window::Window;
 
 struct Frame {
@@ -39,9 +35,9 @@ pub struct Renderer {
     pipeline_layout: vk::PipelineLayout,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
-    dromon_model: Model,
-    descriptor_handler: DescriptorHandler,
-    texture_handler: TextureHandler,
+    descriptor_handler: Arc<DescriptorHandler>,
+    render_object_resource_manager: render_object::RenderObjectResourceManager,
+    render_object_list: Vec<RenderObject>,
 }
 
 const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
@@ -91,58 +87,52 @@ impl Renderer {
                 });
             }
 
-            ////////// 3D models //////////
-            const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
-            const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
-
-            let ship = Object::new(
-                GLTF_PATH,
-                TEXTURE_PATH,
-                ObjectTransform {
-                    translation: glam::Vec3::new(0.0, -1.0, 0.0),
-                    rotation: glam::Vec3::new(0.0, 0.0, std::f32::consts::PI),
-                    ..Default::default()
-                },
-            );
-            let ship2 = Object::new(
-                GLTF_PATH,
-                TEXTURE_PATH,
-                ObjectTransform {
-                    translation: glam::Vec3::new(0.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            );
-
-            let texture_handler =
-                TextureHandler::new(context.clone(), logger.clone(), &ship.texture_path)?;
-
-            // On charge chaque bateau (meshes fusionnés + transform appliqué),
-            // puis on concatène les deux en un seul buffer.
-            let (mut vertices, mut indices) = ship.load_scene()?;
-
-            logger.info(&format!(
-                "{} vertices, {} indices",
-                vertices.len(),
-                indices.len()
-            ));
-            let (vertices2, indices2) = ship2.load_scene()?;
-            let base = vertices.len() as u32;
-            vertices.extend(vertices2);
-            indices.extend(indices2.iter().map(|i| i + base));
-
-            let dromon_model = Model::new(context.clone(), vertices, indices)?;
-
             // creating descriptor sets
             let uniform_buffer_handles: Vec<vk::Buffer> = frames
                 .iter()
                 .map(|frame| frame.uniform_buffer.get_handle())
                 .collect();
-            let descriptor_handler = DescriptorHandler::new(
+            let descriptor_handler = Arc::new(DescriptorHandler::new(
                 context.clone(),
                 uniform_buffer_handles,
-                &texture_handler.texture_image_view,
-                &texture_handler.texture_sampler,
+            )?);
+
+            ////////// 3D models //////////
+            const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
+            const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
+
+            let mut rorm = render_object::RenderObjectResourceManager::new(
+                context.clone(),
+                logger.clone(),
+                descriptor_handler.clone(),
             )?;
+            rorm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
+            rorm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
+            rorm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string())?;
+            rorm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string())?;
+
+            let mut render_object_list = Vec::new();
+
+            render_object_list.push(RenderObject::new(
+                rorm.get_mesh("mesh1")
+                    .context("mesh \"mesh1\" introuvable")?,
+                rorm.get_texture("texture1")
+                    .context("texture \"texture1\" introuvable")?,
+                Transform {
+                    translation: glam::Vec3::new(0.0, 1.0, 0.0),
+                    ..Default::default()
+                },
+            ));
+            render_object_list.push(RenderObject::new(
+                rorm.get_mesh("mesh2")
+                    .context("mesh \"mesh2\" introuvable")?,
+                rorm.get_texture("texture2")
+                    .context("texture \"texture2\" introuvable")?,
+                Transform {
+                    translation: glam::Vec3::new(0.0, -1.0, 0.0),
+                    ..Default::default()
+                },
+            ));
 
             let image_count = swapchain.color_images.len();
 
@@ -169,9 +159,23 @@ impl Renderer {
 
             let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;
             let fragment_shader = load_shader_module(context.as_ref(), "frag.spv")?;
+            // Push constant : la matrice « model » (Mat4 = 64 octets), poussée
+            // par objet dans le command buffer. Visible côté vertex shader.
+            let push_constant_ranges = [vk::PushConstantRange::default()
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .offset(0)
+                .size(std::mem::size_of::<glam::Mat4>() as u32)];
+
             let pipeline_layout = context.device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
-                    .set_layouts(&[descriptor_handler.ubo_descriptor_set_layout]),
+                    .set_layouts(&[
+                        // set 0 : UBO caméra (par frame)
+                        descriptor_handler.world_descriptor_set_layout,
+                        // set 1 : texture (par matériau) — toutes les textures partagent
+                        // CE layout ; on bind un set différent par objet au moment du draw.
+                        descriptor_handler.texture_descriptor_set_layout,
+                    ])
+                    .push_constant_ranges(&push_constant_ranges),
                 None,
             )?;
 
@@ -191,7 +195,7 @@ impl Renderer {
             context.device.destroy_shader_module(vertex_shader, None);
             context.device.destroy_shader_module(fragment_shader, None);
 
-            Renderer::initialize(context.clone(), &dromon_model, &texture_handler)?;
+            Renderer::initialize(context.clone(), &rorm)?;
 
             Ok(Self {
                 in_flight_frames_count,
@@ -205,17 +209,16 @@ impl Renderer {
                 pipeline_layout,
                 swapchain,
                 context,
-                dromon_model,
                 descriptor_handler,
-                texture_handler,
+                render_object_resource_manager: rorm,
+                render_object_list,
             })
         }
     }
 
     fn initialize(
         context: Arc<RenderingContext>,
-        model: &Model,
-        texture_handler: &TextureHandler,
+        rorm: &RenderObjectResourceManager,
     ) -> Result<()> {
         //create transfer command pool and buffer
         let transfer_command_pool = unsafe {
@@ -245,33 +248,7 @@ impl Renderer {
         }?;
 
         ////////// all transfer commands go here
-        model.copy_from_staging_to_device(&transfer_command_buffer);
-
-        context.transition_image_layout(
-            transfer_command_buffer,
-            &[(
-                texture_handler.texture_image,
-                ImageLayoutState::default(),
-                ImageLayoutState {
-                    access_mask: vk::AccessFlags2::TRANSFER_WRITE,
-                    layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    stage_mask: vk::PipelineStageFlags2::COPY,
-                    queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                },
-            )],
-            texture_handler.mip_levels,
-        );
-
-        texture_handler.copy_buffer_to_image(&transfer_command_buffer)?;
-
-        context.generate_mipmaps(
-            transfer_command_buffer,
-            &texture_handler.texture_image,
-            vk::Format::R8G8B8A8_SRGB,
-            texture_handler.image_width,
-            texture_handler.image_height,
-            texture_handler.mip_levels,
-        )?;
+        rorm.initialize(&transfer_command_buffer)?;
         //////////
 
         unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
@@ -302,7 +279,6 @@ impl Renderer {
     }
 
     pub fn render(&mut self, timer: &Timer) -> Result<()> {
-        let _ = timer; // utilisé bientôt pour animer l'UBO
         let frame = &self.frames[self.frame_index];
 
         unsafe {
@@ -440,31 +416,53 @@ impl Renderer {
                 self.pipeline,
             );
 
-            self.dromon_model.bind_index_buffer(frame.command_buffer);
-            self.dromon_model.bind_vertex_buffer(frame.command_buffer);
             frame.uniform_buffer.update(
                 timer,
                 self.swapchain.extent.width as f32,
                 self.swapchain.extent.height as f32,
             );
 
+            // set 0: UBO caméra
             self.context.device.cmd_bind_descriptor_sets(
                 frame.command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                &[self.descriptor_handler.ubo_descriptor_sets[self.frame_index]],
+                &[self.descriptor_handler.world_descriptor_sets[self.frame_index]],
                 &[],
             );
 
-            self.context.device.cmd_draw_indexed(
-                frame.command_buffer,
-                self.dromon_model.indices.len() as u32,
-                1,
-                0,
-                0,
-                0,
-            );
+            for render_object in &self.render_object_list {
+                // set 1 : la texture de CET objet
+                self.context.device.cmd_bind_descriptor_sets(
+                    frame.command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    1, // first_set = 1
+                    &[render_object.texture.descriptor_set],
+                    &[],
+                );
+                // push constant : la matrice « model » de CET objet (transform → Mat4).
+                let spin = glam::Mat4::from_rotation_z(timer.elapsed_secs() * 0.6);
+                let model_matrix = render_object.transform.to_matrix() * spin;
+                self.context.device.cmd_push_constants(
+                    frame.command_buffer,
+                    self.pipeline_layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    0,
+                    bytemuck::bytes_of(&model_matrix),
+                );
+                render_object.mesh.bind(frame.command_buffer);
+
+                self.context.device.cmd_draw_indexed(
+                    frame.command_buffer,
+                    render_object.mesh.indices.len() as u32,
+                    1,
+                    0,
+                    0,
+                    0,
+                );
+            }
 
             self.context.device.cmd_end_rendering(frame.command_buffer);
 

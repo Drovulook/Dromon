@@ -4,12 +4,21 @@ struct VSInput {
   float2 inTexCoord;
 }
 
+// set 0, binding 0 : données « caméra », mises à jour une fois par frame.
 struct UniformBuffer {
-    float4x4 model;
     float4x4 view;
     float4x4 proj;
 };
+[[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;
+
+// Push constant : la matrice « model » propre à CHAQUE objet, poussée juste
+// avant son draw (pas de descriptor, transfert direct dans le command buffer).
+struct PushConstants {
+    float4x4 model;
+};
+[[vk::push_constant]]
+ConstantBuffer<PushConstants> pc;
 
 struct VSOutput {
   float4 pos : SV_Position;
@@ -17,12 +26,14 @@ struct VSOutput {
   float2 fragTexCoord;
 }
 
+// set 1, binding 0 : la texture du matériau (un descriptor set par texture).
+[[vk::binding(0, 1)]]
 Sampler2D texture;
 
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
   VSOutput output;
-  output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
+  output.pos = mul(ubo.proj, mul(ubo.view, mul(pc.model, float4(input.inPosition, 1.0))));
   output.color = input.inColor;
   output.fragTexCoord = input.inTexCoord;
   return output;
