@@ -76,6 +76,7 @@ impl RenderingContext {
         width: u32,
         height: u32,
         mip_levels: u32,
+        num_samples: vk::SampleCountFlags,
         format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
@@ -93,7 +94,7 @@ impl RenderingContext {
                     })
                     .mip_levels(mip_levels)
                     .array_layers(1)
-                    .samples(vk::SampleCountFlags::TYPE_1)
+                    .samples(num_samples)
                     .tiling(tiling)
                     .usage(usage)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE),
@@ -137,5 +138,33 @@ impl RenderingContext {
                         == properties
             })
             .ok_or_else(|| anyhow::anyhow!("Aucun type mémoire compatible trouvé"))
+    }
+
+    pub fn get_max_usable_sample_count(&self) -> vk::SampleCountFlags {
+        let physical_device_properties = unsafe {
+            self.instance
+                .get_physical_device_properties(self.physical_device.handle)
+        };
+        let counts = physical_device_properties
+            .limits
+            .framebuffer_color_sample_counts
+            & physical_device_properties
+                .limits
+                .framebuffer_depth_sample_counts;
+        if counts.contains(vk::SampleCountFlags::TYPE_64) {
+            vk::SampleCountFlags::TYPE_64
+        } else if counts.contains(vk::SampleCountFlags::TYPE_32) {
+            vk::SampleCountFlags::TYPE_32
+        } else if counts.contains(vk::SampleCountFlags::TYPE_16) {
+            vk::SampleCountFlags::TYPE_16
+        } else if counts.contains(vk::SampleCountFlags::TYPE_8) {
+            vk::SampleCountFlags::TYPE_8
+        } else if counts.contains(vk::SampleCountFlags::TYPE_4) {
+            vk::SampleCountFlags::TYPE_4
+        } else if counts.contains(vk::SampleCountFlags::TYPE_2) {
+            vk::SampleCountFlags::TYPE_2
+        } else {
+            vk::SampleCountFlags::TYPE_1
+        }
     }
 }

@@ -10,8 +10,14 @@ pub struct Swapchain {
     pub extent: vk::Extent2D,
     // color images
     pub color_format: vk::Format,
-    pub color_image_views: Vec<vk::ImageView>,
     pub color_images: Vec<vk::Image>,
+    pub color_image_views: Vec<vk::ImageView>,
+    // MSAA
+    msaa_samples: vk::SampleCountFlags,
+    pub msaa_color_image: vk::Image, // HACK: le vrai nombre d'images intermédiaires est in_flight_frames_count
+    msaa_color_image_memory: vk::DeviceMemory,
+    pub msaa_color_image_view: vk::ImageView,
+
     // depth image
     pub depth_format: vk::Format,
     pub depth_image: vk::Image,
@@ -62,12 +68,19 @@ impl Swapchain {
             },
         );
 
+        let msaa_samples = context.get_max_usable_sample_count();
+        logger.info(&format!("MSAA count: {:?}", msaa_samples));
+
         Ok(Self {
             desired_image_count,
             extent,
             color_format,
-            color_image_views: Default::default(),
             color_images: Default::default(),
+            color_image_views: Default::default(),
+            msaa_samples,
+            msaa_color_image: Default::default(),
+            msaa_color_image_memory: Default::default(),
+            msaa_color_image_view: Default::default(),
             depth_format,
             depth_image: Default::default(),
             depth_image_memory: Default::default(),
@@ -136,6 +149,36 @@ impl Swapchain {
                 )?);
             }
 
+            // MSAA color image
+            self.context
+                .device
+                .destroy_image_view(self.msaa_color_image_view, None);
+            self.context
+                .device
+                .destroy_image(self.msaa_color_image, None);
+            self.context
+                .device
+                .free_memory(self.msaa_color_image_memory, None);
+            let (msaa_color_image, msaa_color_image_memory) = self.context.create_image(
+                self.extent.width,
+                self.extent.height,
+                1,
+                self.msaa_samples,
+                self.color_format,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
+            self.msaa_color_image = msaa_color_image;
+            self.msaa_color_image_memory = msaa_color_image_memory;
+            let msaa_color_image_view = self.context.create_image_view(
+                &msaa_color_image,
+                self.color_format,
+                vk::ImageAspectFlags::COLOR,
+                1,
+            )?;
+            self.msaa_color_image_view = msaa_color_image_view;
+
             // depth image
             self.context
                 .device
@@ -144,11 +187,11 @@ impl Swapchain {
             self.context
                 .device
                 .free_memory(self.depth_image_memory, None);
-
             let (depth_image, depth_image_memory) = self.context.create_image(
                 self.extent.width,
                 self.extent.height,
                 1,
+                self.msaa_samples,
                 self.depth_format,
                 vk::ImageTiling::OPTIMAL,
                 vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -247,6 +290,18 @@ impl Drop for Swapchain {
             for image_view in self.color_image_views.drain(..) {
                 self.context.device.destroy_image_view(image_view, None);
             }
+
+            // MSAA color image
+            self.context
+                .device
+                .destroy_image_view(self.msaa_color_image_view, None);
+            self.context
+                .device
+                .destroy_image(self.msaa_color_image, None);
+            self.context
+                .device
+                .free_memory(self.msaa_color_image_memory, None);
+
             // depth image
             self.context
                 .device

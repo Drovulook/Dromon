@@ -34,6 +34,7 @@ pub struct RenderingContext {
     pub surface_extensions: ash::khr::surface::Instance,
     pub instance: ash::Instance,
     pub entry: ash::Entry,
+    pub logger: Arc<Logger>,
 }
 
 type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, QueueFamilies)>;
@@ -41,7 +42,6 @@ type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, Queu
 pub struct ContextAttributes<'window> {
     pub compatibility_window: &'window Window,
     pub queue_family_picker: QueueFamilyPicker,
-    pub logger: Arc<Logger>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,7 +140,7 @@ const DEBUG_UTILS_EXT: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_EXT_debug_utils\0") };
 
 impl RenderingContext {
-    pub fn new(attributes: ContextAttributes) -> Result<Self> {
+    pub fn new(logger: Arc<Logger>, attributes: ContextAttributes) -> Result<Self> {
         unsafe {
             // TODO: créer entry et instance une seule fois, pas une fois / renderer
             let entry = ash::Entry::load()?;
@@ -178,7 +178,7 @@ impl RenderingContext {
             let debug_messenger = Some(DebugMessenger::new(
                 &entry,
                 &instance,
-                Some(attributes.logger.clone()),
+                Some(logger.clone()),
             )?);
             #[cfg(not(debug_assertions))]
             let debug_messenger: Option<DebugMessenger> = None;
@@ -295,6 +295,7 @@ impl RenderingContext {
                 entry,
                 debug_messenger,
                 swapchain_extensions,
+                logger,
             })
         }
     }

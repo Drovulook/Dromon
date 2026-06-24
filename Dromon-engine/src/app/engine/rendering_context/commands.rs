@@ -10,6 +10,7 @@ impl RenderingContext {
         &self,
         command_buffer: vk::CommandBuffer,
         image_view: vk::ImageView,
+        resolve_image_view: vk::ImageView, // image finale
         depth_image_view: vk::ImageView,
         clear_color: vk::ClearColorValue,
         render_area: vk::Rect2D,
@@ -22,9 +23,12 @@ impl RenderingContext {
                     .color_attachments(&[vk::RenderingAttachmentInfo::default()
                         .image_view(image_view)
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                        .resolve_mode(vk::ResolveModeFlags::AVERAGE) // ← moyenne des 8 samples
+                        .resolve_image_view(resolve_image_view) // ← vers la swapchain
+                        .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .clear_value(vk::ClearValue { color: clear_color })
                         .load_op(vk::AttachmentLoadOp::CLEAR)
-                        .store_op(vk::AttachmentStoreOp::STORE)])
+                        .store_op(vk::AttachmentStoreOp::DONT_CARE)])
                     .depth_attachment(
                         &vk::RenderingAttachmentInfo::default()
                             .image_view(depth_image_view)

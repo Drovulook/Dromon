@@ -23,6 +23,7 @@ impl RenderingContext {
         extent: vk::Extent2D,
         color_format: vk::Format,
         depth_format: vk::Format,
+        msaa_samples: vk::SampleCountFlags,
         pipeline_cache: vk::PipelineCache,
     ) -> Result<vk::Pipeline> {
         let entry_point = CStr::from_bytes_with_nul(b"main\0")?;
@@ -79,7 +80,7 @@ impl RenderingContext {
                         )
                         .multisample_state(
                             &vk::PipelineMultisampleStateCreateInfo::default()
-                                .rasterization_samples(vk::SampleCountFlags::TYPE_1),
+                                .rasterization_samples(msaa_samples),
                         )
                         .depth_stencil_state(
                             &vk::PipelineDepthStencilStateCreateInfo::default()

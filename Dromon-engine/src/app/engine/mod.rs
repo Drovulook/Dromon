@@ -38,18 +38,21 @@ impl Engine {
 
         let primary_window_id = primary_window.id();
 
-        let rendering_context = Arc::new(RenderingContext::new(ContextAttributes {
-            compatibility_window: &primary_window,
-            queue_family_picker: queue_family_picker::single_queue_family,
-            logger: logger.clone(),
-        })?);
+        let rendering_context = Arc::new(RenderingContext::new(
+            logger.clone(),
+            ContextAttributes {
+                compatibility_window: &primary_window,
+                queue_family_picker: queue_family_picker::single_queue_family,
+            },
+        )?);
 
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
 
         let renderers = windows
             .iter()
             .map(|(id, window)| {
-                let renderer = Renderer::new(rendering_context.clone(), window.clone(), logger.clone())?;
+                let renderer =
+                    Renderer::new(rendering_context.clone(), window.clone(), logger.clone())?;
                 Ok((*id, renderer))
             })
             .collect::<Result<HashMap<_, _>>>()?;

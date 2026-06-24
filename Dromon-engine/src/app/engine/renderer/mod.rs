@@ -183,6 +183,7 @@ impl Renderer {
                 swapchain.extent,
                 swapchain.color_format,
                 swapchain.depth_format,
+                context.get_max_usable_sample_count(),
                 vk::PipelineCache::default(),
             )?;
 
@@ -269,7 +270,7 @@ impl Renderer {
             texture_handler.image_width,
             texture_handler.image_height,
             texture_handler.mip_levels,
-        );
+        )?;
         //////////
 
         unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
@@ -375,11 +376,20 @@ impl Renderer {
 
             self.context.transition_image_layout(
                 frame.command_buffer,
-                &[(
-                    self.swapchain.color_images[image_index as usize],
-                    undefined_color_image_state,
-                    renderable_color_image_state,
-                )],
+                &[
+                    (
+                        // image MSAA : cible de rendu (attachment couleur principal)
+                        self.swapchain.msaa_color_image,
+                        undefined_color_image_state,
+                        renderable_color_image_state,
+                    ),
+                    (
+                        // image swapchain : cible de resolve
+                        self.swapchain.color_images[image_index as usize],
+                        undefined_color_image_state,
+                        renderable_color_image_state,
+                    ),
+                ],
                 1,
             );
 
@@ -395,6 +405,7 @@ impl Renderer {
 
             self.context.begin_rendering(
                 frame.command_buffer,
+                self.swapchain.msaa_color_image_view,
                 self.swapchain.color_image_views[image_index as usize],
                 self.swapchain.depth_image_view,
                 vk::ClearColorValue {
