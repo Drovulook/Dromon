@@ -2,6 +2,7 @@ mod buffer;
 mod descriptors;
 pub mod model;
 mod object;
+mod render_object;
 mod swapchain;
 mod texture;
 mod uniform_buffer;
@@ -90,10 +91,10 @@ impl Renderer {
                 });
             }
 
+            ////////// 3D models //////////
             const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
             const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
 
-            // Deux bateaux : un à l'origine, un décalé de +2 en X.
             let ship = Object::new(
                 GLTF_PATH,
                 TEXTURE_PATH,
