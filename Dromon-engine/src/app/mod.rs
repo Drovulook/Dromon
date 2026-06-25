@@ -18,7 +18,11 @@ pub struct App {
 
 impl App {
     pub fn new(logger: Arc<Logger>) -> Self {
-        Self { engine: None, logger, pending_error: None }
+        Self {
+            engine: None,
+            logger,
+            pending_error: None,
+        }
     }
 }
 
@@ -27,7 +31,8 @@ impl ApplicationHandler for App {
         match Engine::new(event_loop, self.logger.clone()) {
             Ok(engine) => self.engine = Some(engine),
             Err(e) => {
-                self.logger.error(&format!("Impossible d'initialiser le moteur : {e:#}"));
+                self.logger
+                    .error(&format!("Impossible d'initialiser le moteur : {e:#}"));
                 self.pending_error = Some(e);
                 event_loop.exit();
             }
@@ -52,10 +57,23 @@ impl ApplicationHandler for App {
     ) {
         if let Some(engine) = &mut self.engine {
             if let Err(e) = engine.window_event(event_loop, window_id, event) {
-                self.logger.error(&format!("Erreur fatale dans la boucle d'événements : {e:#}"));
+                self.logger.error(&format!(
+                    "Erreur fatale dans la boucle d'événements : {e:#}"
+                ));
                 self.pending_error = Some(e);
                 event_loop.exit();
             }
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        if let Some(engine) = &mut self.engine {
+            engine.device_event(event_loop, window_id, event);
         }
     }
 }

@@ -1,9 +1,10 @@
+mod debug_messenger;
+mod inputs;
 pub mod renderer;
+mod rendering_context;
 pub mod timer;
 
-mod debug_messenger;
-mod rendering_context;
-
+use crate::app::engine::inputs::base_event_subscriber;
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
 };
@@ -25,6 +26,7 @@ pub struct Engine {
     windows: HashMap<WindowId, Arc<Window>>,
     primary_window_id: WindowId,
     rendering_context: Arc<RenderingContext>,
+    input_manager: inputs::InputManager,
     logger: Arc<Logger>,
     timer: Timer,
 }
@@ -46,6 +48,9 @@ impl Engine {
             },
         )?);
 
+        let mut input_manager = inputs::InputManager::new();
+        base_event_subscriber(&mut input_manager, logger.clone());
+
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
 
         let renderers = windows
@@ -64,6 +69,7 @@ impl Engine {
             windows,
             primary_window_id,
             rendering_context,
+            input_manager,
             logger,
             timer: Timer::new(),
         })
@@ -81,6 +87,7 @@ impl Engine {
         window_id: WindowId,
         event: winit::event::WindowEvent,
     ) -> Result<()> {
+        self.input_manager.handle_window_event(&event);
         match event {
             winit::event::WindowEvent::CloseRequested => {
                 if window_id == self.primary_window_id {
@@ -93,8 +100,9 @@ impl Engine {
 
             winit::event::WindowEvent::RedrawRequested => {
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
-                    renderer.render(&self.timer)?;
+                    renderer.render(&self.timer, self.input_manager.input_state())?;
                 }
+                self.input_manager.end_frame();
                 self.timer.tick();
                 self.logger.fps(self.timer.fps());
             }
@@ -114,6 +122,15 @@ impl Engine {
             _ => {}
         }
         Ok(())
+    }
+
+    pub fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        self.input_manager.handle_device_event(&event);
     }
 
     pub fn create_window(

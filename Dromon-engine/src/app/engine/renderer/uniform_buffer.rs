@@ -1,10 +1,9 @@
 use super::buffer::Buffer;
-use crate::app::engine::Timer;
 use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 use std::ffi::c_void;
 use std::sync::Arc;
 
@@ -42,21 +41,8 @@ impl UniformBuffer {
         self.buffer.buffer
     }
 
-    pub fn update(&self, _time: &Timer, swapchain_width: f32, swapchain_height: f32) {
-        let mut ubo = UniformBufferObject {
-            view: Mat4::look_at_rh(
-                Vec3::new(2.0, 2.0, 2.0), // eye (position de la caméra)
-                Vec3::new(0.0, 0.0, 0.0), // center (point regardé)
-                Vec3::new(0.0, 0.0, 1.0), // up (vecteur « haut »)
-            ),
-            proj: Mat4::perspective_rh(
-                45.0_f32.to_radians(),                            // fov vertical (en radians)
-                swapchain_width as f32 / swapchain_height as f32, // aspect ratio
-                0.1,                                              // near plane
-                10.0,                                             // far plane
-            ),
-        };
-        ubo.proj.y_axis.y *= -1.0;
+    pub fn update(&self, view: Mat4, proj: Mat4) {
+        let ubo = UniformBufferObject { view, proj };
 
         unsafe {
             std::ptr::copy_nonoverlapping(

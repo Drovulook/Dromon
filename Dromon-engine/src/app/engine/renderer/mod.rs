@@ -1,13 +1,16 @@
 mod buffer;
+mod camera;
 mod descriptors;
 mod render_object;
 mod swapchain;
 mod uniform_buffer;
+mod world;
 
+use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::render_object::{RenderObject, RenderObjectResourceManager};
-use crate::app::engine::renderer::render_object::{Transform, Vertex};
+use crate::app::engine::renderer::render_object::Vertex;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
+use crate::app::engine::renderer::world::World;
 use crate::app::engine::rendering_context::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
@@ -23,6 +26,42 @@ struct Frame {
     uniform_buffer: UniformBuffer,
 }
 
+impl ImageLayoutState {
+    // color image
+    pub const UNDEFINED_COLOR_IMAGE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::empty(),
+        layout: vk::ImageLayout::UNDEFINED,
+        stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+    pub const RENDERABLE_COLOR_IMAGE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+    pub const PRESENT_COLOR_IMAGE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::empty(),
+        layout: vk::ImageLayout::PRESENT_SRC_KHR,
+        stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+
+    // depth image
+    pub const UNDEFINED_DEPTH_IMAGE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::empty(),
+        layout: vk::ImageLayout::UNDEFINED,
+        stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+    pub const RENDERABLE_DEPTH_IMAGE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+        layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+        stage_mask: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+}
+
 pub struct Renderer {
     in_flight_frames_count: usize,
     frame_index: usize,
@@ -36,8 +75,7 @@ pub struct Renderer {
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
     descriptor_handler: Arc<DescriptorHandler>,
-    render_object_resource_manager: render_object::RenderObjectResourceManager,
-    render_object_list: Vec<RenderObject>,
+    world: World,
 }
 
 const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
@@ -97,42 +135,7 @@ impl Renderer {
                 uniform_buffer_handles,
             )?);
 
-            ////////// 3D models //////////
-            const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
-            const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
-
-            let mut rorm = render_object::RenderObjectResourceManager::new(
-                context.clone(),
-                logger.clone(),
-                descriptor_handler.clone(),
-            )?;
-            rorm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
-            rorm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
-            rorm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string())?;
-            rorm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string())?;
-
-            let mut render_object_list = Vec::new();
-
-            render_object_list.push(RenderObject::new(
-                rorm.get_mesh("mesh1")
-                    .context("mesh \"mesh1\" introuvable")?,
-                rorm.get_texture("texture1")
-                    .context("texture \"texture1\" introuvable")?,
-                Transform {
-                    translation: glam::Vec3::new(0.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            ));
-            render_object_list.push(RenderObject::new(
-                rorm.get_mesh("mesh2")
-                    .context("mesh \"mesh2\" introuvable")?,
-                rorm.get_texture("texture2")
-                    .context("texture \"texture2\" introuvable")?,
-                Transform {
-                    translation: glam::Vec3::new(0.0, -1.0, 0.0),
-                    ..Default::default()
-                },
-            ));
+            let world = World::new(logger.clone(), context.clone(), descriptor_handler.clone())?;
 
             let image_count = swapchain.color_images.len();
 
@@ -195,7 +198,7 @@ impl Renderer {
             context.device.destroy_shader_module(vertex_shader, None);
             context.device.destroy_shader_module(fragment_shader, None);
 
-            Renderer::initialize(context.clone(), &rorm)?;
+            Renderer::initialize(context.clone(), &world)?;
 
             Ok(Self {
                 in_flight_frames_count,
@@ -210,16 +213,12 @@ impl Renderer {
                 swapchain,
                 context,
                 descriptor_handler,
-                render_object_resource_manager: rorm,
-                render_object_list,
+                world,
             })
         }
     }
 
-    fn initialize(
-        context: Arc<RenderingContext>,
-        rorm: &RenderObjectResourceManager,
-    ) -> Result<()> {
+    fn initialize(context: Arc<RenderingContext>, world: &World) -> Result<()> {
         //create transfer command pool and buffer
         let transfer_command_pool = unsafe {
             context.device.create_command_pool(
@@ -248,7 +247,7 @@ impl Renderer {
         }?;
 
         ////////// all transfer commands go here
-        rorm.initialize(&transfer_command_buffer)?;
+        world.initialize(&transfer_command_buffer)?;
         //////////
 
         unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
@@ -278,7 +277,14 @@ impl Renderer {
         self.swapchain.is_dirty = true;
     }
 
-    pub fn render(&mut self, timer: &Timer) -> Result<()> {
+    pub fn render(&mut self, timer: &Timer, input_state: &InputState) -> Result<()> {
+        // ratio largeur/hauteur de la fenêtre, pour la projection de la caméra.
+        // `.max(1)` évite une division par zéro quand la fenêtre est minimisée.
+        let aspect =
+            self.swapchain.extent.width as f32 / self.swapchain.extent.height.max(1) as f32;
+        self.world.update_world_data(timer, input_state, aspect);
+        self.world.update_render_objects(timer);
+
         let frame = &self.frames[self.frame_index];
 
         unsafe {
@@ -310,40 +316,6 @@ impl Renderer {
 
             let render_finished_semaphore = self.render_finished_semaphores[image_index as usize];
 
-            // color image
-            let undefined_color_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags2::empty(),
-                layout: vk::ImageLayout::UNDEFINED,
-                stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
-                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            };
-            let renderable_color_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            };
-            let present_color_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags2::empty(),
-                layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            };
-
-            // depth image
-            let undefined_depth_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags2::empty(),
-                layout: vk::ImageLayout::UNDEFINED,
-                stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
-                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            };
-            let renderable_depth_image_state = ImageLayoutState {
-                access_mask: vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-                stage_mask: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS,
-                queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            };
-
             // Commands
             self.context.device.begin_command_buffer(
                 frame.command_buffer,
@@ -357,14 +329,14 @@ impl Renderer {
                     (
                         // image MSAA : cible de rendu (attachment couleur principal)
                         self.swapchain.msaa_color_image,
-                        undefined_color_image_state,
-                        renderable_color_image_state,
+                        ImageLayoutState::UNDEFINED_COLOR_IMAGE_STATE,
+                        ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
                     ),
                     (
                         // image swapchain : cible de resolve
                         self.swapchain.color_images[image_index as usize],
-                        undefined_color_image_state,
-                        renderable_color_image_state,
+                        ImageLayoutState::UNDEFINED_COLOR_IMAGE_STATE,
+                        ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
                     ),
                 ],
                 1,
@@ -374,8 +346,8 @@ impl Renderer {
                 frame.command_buffer,
                 &[(
                     self.swapchain.depth_image,
-                    undefined_depth_image_state,
-                    renderable_depth_image_state,
+                    ImageLayoutState::UNDEFINED_DEPTH_IMAGE_STATE,
+                    ImageLayoutState::RENDERABLE_DEPTH_IMAGE_STATE,
                 )],
                 1,
             );
@@ -416,11 +388,10 @@ impl Renderer {
                 self.pipeline,
             );
 
-            frame.uniform_buffer.update(
-                timer,
-                self.swapchain.extent.width as f32,
-                self.swapchain.extent.height as f32,
-            );
+            // matrices view/proj fournies par la caméra du monde
+            frame
+                .uniform_buffer
+                .update(self.world.camera.view, self.world.camera.proj);
 
             // set 0: UBO caméra
             self.context.device.cmd_bind_descriptor_sets(
@@ -432,7 +403,7 @@ impl Renderer {
                 &[],
             );
 
-            for render_object in &self.render_object_list {
+            for render_object in &self.world.render_objects {
                 // set 1 : la texture de CET objet
                 self.context.device.cmd_bind_descriptor_sets(
                     frame.command_buffer,
@@ -442,15 +413,12 @@ impl Renderer {
                     &[render_object.texture.descriptor_set],
                     &[],
                 );
-                // push constant : la matrice « model » de CET objet (transform → Mat4).
-                let spin = glam::Mat4::from_rotation_z(timer.elapsed_secs() * 0.6);
-                let model_matrix = render_object.transform.to_matrix() * spin;
                 self.context.device.cmd_push_constants(
                     frame.command_buffer,
                     self.pipeline_layout,
                     vk::ShaderStageFlags::VERTEX,
                     0,
-                    bytemuck::bytes_of(&model_matrix),
+                    bytemuck::bytes_of(&render_object.transform.to_matrix()),
                 );
                 render_object.mesh.bind(frame.command_buffer);
 
@@ -470,8 +438,8 @@ impl Renderer {
                 frame.command_buffer,
                 &[(
                     self.swapchain.color_images[image_index as usize],
-                    renderable_color_image_state,
-                    present_color_image_state,
+                    ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
+                    ImageLayoutState::PRESENT_COLOR_IMAGE_STATE,
                 )],
                 1,
             );
