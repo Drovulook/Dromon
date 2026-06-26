@@ -4,7 +4,7 @@ use crate::app::engine::renderer::render_object::mesh::Vertex;
 use crate::app::{engine::rendering_context::RenderingContext, logger::Logger};
 use anyhow::{Context, Result};
 use ash::vk;
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -18,8 +18,8 @@ impl MeshHandler {
         MeshHandler { context, logger }
     }
 
-    pub fn create_model(&self, model_path: &str) -> Result<Mesh> {
-        let (vertices, indices) = self.load_scene(model_path)?;
+    pub fn create_model(&self, model_path: &str, smooth: bool) -> Result<Mesh> {
+        let (vertices, indices) = self.load_scene(model_path, smooth)?;
         let (vertex_staging_buffer, vertex_buffer) = Self::create_staging_and_device_buffer(
             self.context.clone(),
             vertices.as_slice(),
@@ -44,7 +44,7 @@ impl MeshHandler {
 
     /// Charge la scène glTF ENTIÈRE et la fusionne en une seule paire
     /// (vertices, indices).
-    pub fn load_scene(&self, model_path: &str) -> Result<(Vec<Vertex>, Vec<u32>)> {
+    pub fn load_scene(&self, model_path: &str, smooth: bool) -> Result<(Vec<Vertex>, Vec<u32>)> {
         let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), model_path);
         let full_path = Path::new(&full_path);
 
@@ -71,12 +71,15 @@ impl MeshHandler {
             Self::append_node(node, y_up_to_z_up, &buffers, &mut vertices, &mut indices);
         }
 
+        // Lissage optionnel : le modèle est exporté en flat shading (une normale
+        // par facette, vertices dupliqués aux coutures). On recalcule des normales
+        // LISSES en moyennant celles qui partagent une même position.
+        if smooth {
+            Self::smooth_normals(&mut vertices);
+        }
+
         // --- Recentrage + mise à l'échelle (étape de confort, retirable) ---
         Self::normalize(&mut vertices);
-
-        // On applique le transform propre à cet Object (placement dans la scène).
-        // Il vient APRÈS le recentrage : le modèle normalisé (~2 unités, centré
-        // sur l'origine) est ensuite positionné/orienté/redimensionné par l'utilisateur.
 
         Ok((vertices, indices))
     }
@@ -110,19 +113,33 @@ impl MeshHandler {
                     .map(|tc| tc.into_f32().collect())
                     .unwrap_or_default();
 
+                // Normales par vertex (attribut NORMAL du .bin). Peut manquer sur
+                // certaines primitives : on retombe alors sur +Z (faute de mieux).
+                let normals: Vec<[f32; 3]> = reader
+                    .read_normals()
+                    .map(|n| n.collect())
+                    .unwrap_or_default();
+
+                // Une normale ne se transforme pas comme un point : il faut la
+                // matrice normale = inverse-transposée de la partie 3x3 de world.
+                let normal_matrix = Mat3::from_mat4(world).inverse().transpose();
+
                 // base = nombre de vertices déjà accumulés. Les indices de CETTE
                 // primitive sont relatifs à ses propres vertices : on les décale
-                // pour qu'ils pointent vers la bonne zone du Vec global.
                 let base = vertices.len() as u32;
 
                 for (i, pos) in positions.iter().enumerate() {
                     // transform_point3 applique rotation + échelle + translation.
                     let world_pos = world.transform_point3(Vec3::from(*pos));
                     let uv = tex_coords.get(i).copied().unwrap_or([0.0, 0.0]);
+                    let normal = normals.get(i).copied().unwrap_or([0.0, 0.0, 1.0]);
+                    // On renormalise : la matrice normale ne préserve pas la longueur.
+                    let world_normal = (normal_matrix * Vec3::from(normal)).normalize();
                     vertices.push(Vertex {
                         pos: world_pos,
                         color: Vec3::ONE,
                         texCoord: Vec2::from(uv),
+                        normal: world_normal,
                     });
                 }
 
@@ -144,6 +161,33 @@ impl MeshHandler {
 
         for child in node.children() {
             Self::append_node(child, world, buffers, vertices, indices);
+        }
+    }
+
+    fn smooth_normals(vertices: &mut [Vertex]) {
+        use std::collections::HashMap;
+
+        const QUANT: f32 = 1.0e4;
+        let key = |p: Vec3| -> [i32; 3] {
+            [
+                (p.x * QUANT).round() as i32,
+                (p.y * QUANT).round() as i32,
+                (p.z * QUANT).round() as i32,
+            ]
+        };
+
+        // Somme des normales par position partagée.
+        let mut sums: HashMap<[i32; 3], Vec3> = HashMap::new();
+        for v in vertices.iter() {
+            *sums.entry(key(v.pos)).or_insert(Vec3::ZERO) += v.normal;
+        }
+
+        // Réassigne à chaque vertex la normale moyenne (renormalisée) de sa
+        // position.
+        for v in vertices.iter_mut() {
+            if let Some(&sum) = sums.get(&key(v.pos)) {
+                v.normal = sum.normalize_or_zero();
+            }
         }
     }
 

@@ -19,11 +19,18 @@ use crate::app::{
 const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
 const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
 
+pub struct DirectionalLight {
+    pub direction: glam::Vec3,
+    pub color: glam::Vec3,
+    pub intensity: f32,
+}
+
 pub struct World {
     pub logger: Arc<Logger>,
     pub rorm: RenderObjectResourceManager,
     pub render_objects: Vec<RenderObject>,
     pub camera: Camera,
+    pub light: DirectionalLight,
 }
 
 impl World {
@@ -36,8 +43,8 @@ impl World {
             RenderObjectResourceManager::new(context, logger.clone(), descriptor_handler)?;
         rorm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
         rorm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
-        rorm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string())?;
-        rorm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string())?;
+        rorm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string(), true)?;
+        rorm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string(), true)?;
 
         let render_objects = vec![
             RenderObject::new(
@@ -67,6 +74,11 @@ impl World {
             rorm,
             render_objects,
             camera: Camera::default(),
+            light: DirectionalLight {
+                direction: glam::Vec3::new(-0.3, -0.5, -1.0),
+                color: glam::Vec3::ONE,
+                intensity: 1.0,
+            },
         })
     }
 

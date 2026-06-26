@@ -62,12 +62,12 @@ impl RenderObjectResourceManager {
         Ok(())
     }
 
-    pub fn add_mesh(&mut self, name: String, path: String) -> Result<()> {
+    pub fn add_mesh(&mut self, name: String, path: String, smooth: bool) -> Result<()> {
         if self.meshes.contains_key(&name) {
             self.logger.warn(&format!("mesh {} already exists", name));
             return Ok(());
         }
-        let model = self.mesh_handler.create_model(&path)?;
+        let model = self.mesh_handler.create_model(&path, smooth)?;
         self.meshes.insert(name, Arc::new(model));
         Ok(())
     }

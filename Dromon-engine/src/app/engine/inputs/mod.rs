@@ -74,6 +74,11 @@ impl InputManager {
                 };
                 self.dispatch(InputEvent::Scroll { delta: scroll });
             }
+            // Perte de focus : on purge l'état, sinon une touche tenue au
+            // moment du changement de focus reste « bloquée » (release perdu).
+            WindowEvent::Focused(false) => {
+                self.input_state.clear();
+            }
             _ => {}
         }
     }

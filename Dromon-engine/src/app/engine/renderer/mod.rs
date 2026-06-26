@@ -162,12 +162,14 @@ impl Renderer {
 
             let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;
             let fragment_shader = load_shader_module(context.as_ref(), "frag.spv")?;
-            // Push constant : la matrice « model » (Mat4 = 64 octets), poussée
-            // par objet dans le command buffer. Visible côté vertex shader.
+            // Push constant : deux Mat4 (2 × 64 = 128 octets, la taille minimale
+            // garantie par Vulkan), poussées par objet. La 1re est la matrice
+            // « model » ; la 2de est la matrice normale (inverse-transposée de
+            // model, calculée côté CPU car Slang n'a pas inverse()).
             let push_constant_ranges = [vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
-                .size(std::mem::size_of::<glam::Mat4>() as u32)];
+                .size(2 * std::mem::size_of::<glam::Mat4>() as u32)];
 
             let pipeline_layout = context.device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
@@ -388,10 +390,15 @@ impl Renderer {
                 self.pipeline,
             );
 
-            // matrices view/proj fournies par la caméra du monde
-            frame
-                .uniform_buffer
-                .update(self.world.camera.view, self.world.camera.proj);
+            // matrices view/proj fournies par la caméra du monde,
+            // + paramètres de la lumière directionnelle de la scène
+            frame.uniform_buffer.update(
+                self.world.camera.view,
+                self.world.camera.proj,
+                self.world.light.direction,
+                self.world.light.color,
+                self.world.light.intensity,
+            );
 
             // set 0: UBO caméra
             self.context.device.cmd_bind_descriptor_sets(
@@ -413,12 +420,30 @@ impl Renderer {
                     &[render_object.texture.descriptor_set],
                     &[],
                 );
+                // Matrice model (placement de l'objet dans le monde).
+                let model = render_object.transform.to_matrix();
+                // Matrice normale = inverse-transposée de la partie 3x3 du model.
+                // Gère correctement rotation ET scale non-uniforme. On la stocke
+                // dans une Mat4 (from_mat3 complète avec une 4e ligne/col identité)
+                // pour respecter l'alignement 16 octets du push constant.
+                let normal_matrix = glam::Mat4::from_mat3(
+                    glam::Mat3::from_mat4(model).inverse().transpose(),
+                );
+                // offset 0 : model
                 self.context.device.cmd_push_constants(
                     frame.command_buffer,
                     self.pipeline_layout,
                     vk::ShaderStageFlags::VERTEX,
                     0,
-                    bytemuck::bytes_of(&render_object.transform.to_matrix()),
+                    bytemuck::bytes_of(&model),
+                );
+                // offset 64 : matrice normale (juste après les 64 octets de model)
+                self.context.device.cmd_push_constants(
+                    frame.command_buffer,
+                    self.pipeline_layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    std::mem::size_of::<glam::Mat4>() as u32,
+                    bytemuck::bytes_of(&normal_matrix),
                 );
                 render_object.mesh.bind(frame.command_buffer);
 

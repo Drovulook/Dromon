@@ -25,6 +25,7 @@ pub struct Camera {
     pub move_speed: f32,
     pub rotation_sensitivity: f32,
     pub zoom_speed: f32,
+    pub boost_factor: f32, // multiplicateur appliqué tant qu'Alt est maintenue
 }
 
 impl Default for Camera {
@@ -40,8 +41,9 @@ impl Default for Camera {
             proj: Mat4::IDENTITY,
             is_primary: true,
             move_speed: 3.0,
-            rotation_sensitivity: 0.003,
+            rotation_sensitivity: 0.002,
             zoom_speed: 0.05,
+            boost_factor: 4.0,
         };
         // au démarrage, on regarde l'origine (déduit yaw/pitch de la direction)
         camera.look_at(Vec3::ZERO);
@@ -71,15 +73,23 @@ impl Camera {
     pub fn update(&mut self, input: &InputState, timer: &Timer, aspect: f32) {
         let dt = timer.delta_secs();
 
+        // Alt maintenue → on amplifie déplacement, rotation et zoom.
+        let boost = if input.is_held(KeyCode::AltLeft) {
+            self.boost_factor
+        } else {
+            1.0
+        };
+
         // Tant que R est maintenue, la souris ne fait plus pivoter la caméra.
         if !input.is_held(KeyCode::KeyR) {
             let (dx, dy) = input.mouse_delta();
-            self.yaw -= dx as f32 * self.rotation_sensitivity;
-            self.pitch -= dy as f32 * self.rotation_sensitivity;
+            self.yaw -= dx as f32 * self.rotation_sensitivity * boost;
+            self.pitch -= dy as f32 * self.rotation_sensitivity * boost;
             self.pitch = self.pitch.clamp(-MAX_PITCH, MAX_PITCH);
         }
 
-        self.fov_y = (self.fov_y - input.scroll_delta() * self.zoom_speed).clamp(MIN_FOV, MAX_FOV);
+        self.fov_y =
+            (self.fov_y - input.scroll_delta() * self.zoom_speed * boost).clamp(MIN_FOV, MAX_FOV);
 
         let front = self.front();
         let world_up = Vec3::Z;
@@ -107,7 +117,7 @@ impl Camera {
 
         // normalize() évite d'aller plus vite en diagonale (front + right).
         if direction != Vec3::ZERO {
-            self.position += direction.normalize() * self.move_speed * dt;
+            self.position += direction.normalize() * self.move_speed * boost * dt;
         }
 
         self.recompute_matrices(aspect);

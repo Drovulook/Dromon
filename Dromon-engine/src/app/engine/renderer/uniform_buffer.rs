@@ -3,7 +3,7 @@ use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
-use glam::Mat4;
+use glam::{Mat4, Vec3, Vec4};
 use std::ffi::c_void;
 use std::sync::Arc;
 
@@ -12,6 +12,11 @@ use std::sync::Arc;
 struct UniformBufferObject {
     view: Mat4,
     proj: Mat4,
+    // On stocke en Vec4 (et non Vec3) à cause des règles d'alignement std140
+    // des uniform buffers Vulkan : un vec3 est aligné sur 16 octets mais n'en
+    // occupe que 12
+    light_direction: Vec4,
+    light_color: Vec4,
 }
 
 pub struct UniformBuffer {
@@ -41,8 +46,20 @@ impl UniformBuffer {
         self.buffer.buffer
     }
 
-    pub fn update(&self, view: Mat4, proj: Mat4) {
-        let ubo = UniformBufferObject { view, proj };
+    pub fn update(
+        &self,
+        view: Mat4,
+        proj: Mat4,
+        light_direction: Vec3,
+        light_color: Vec3,
+        light_intensity: f32,
+    ) {
+        let ubo = UniformBufferObject {
+            view,
+            proj,
+            light_direction: light_direction.extend(0.0),
+            light_color: light_color.extend(light_intensity),
+        };
 
         unsafe {
             std::ptr::copy_nonoverlapping(

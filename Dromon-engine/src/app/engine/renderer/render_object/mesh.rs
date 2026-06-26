@@ -12,6 +12,7 @@ pub struct Vertex {
     pub pos: Vec3,
     pub color: Vec3,
     pub texCoord: Vec2,
+    pub normal: Vec3,
 }
 
 impl Vertex {
@@ -23,7 +24,7 @@ impl Vertex {
         }
     }
 
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
+    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 4] {
         [
             vk::VertexInputAttributeDescription {
                 binding: 0,
@@ -42,6 +43,12 @@ impl Vertex {
                 location: 2,
                 format: vk::Format::R32G32_SFLOAT,
                 offset: offset_of!(Vertex, texCoord) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: 3,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(Vertex, normal) as u32,
             },
         ]
     }
@@ -107,42 +114,50 @@ pub const SQUARE_VERTICES: &[Vertex] = &[
         pos: Vec3::new(-0.5, -0.5, 0.0),
         color: Vec3::new(1.0, 0.0, 0.0),
         texCoord: Vec2::new(1.0, 0.0),
+        normal: Vec3::Z,
     },
     Vertex {
         pos: Vec3::new(0.5, -0.5, 0.0),
         color: Vec3::new(0.0, 1.0, 0.0),
         texCoord: Vec2::new(0.0, 0.0),
+        normal: Vec3::Z,
     },
     Vertex {
         pos: Vec3::new(0.5, 0.5, 0.0),
         color: Vec3::new(0.0, 0.0, 1.0),
         texCoord: Vec2::new(0.0, 1.0),
+        normal: Vec3::Z,
     },
     Vertex {
         pos: Vec3::new(-0.5, 0.5, 0.0),
         color: Vec3::new(1.0, 1.0, 1.0),
         texCoord: Vec2::new(1.0, 1.0),
+        normal: Vec3::Z,
     },
     // second square
     Vertex {
         pos: Vec3::new(-0.5, -0.5, -0.5),
         color: Vec3::new(1.0, 0.0, 0.0),
         texCoord: Vec2::new(1.0, 0.0),
+        normal: Vec3::NEG_Z,
     },
     Vertex {
         pos: Vec3::new(0.5, -0.5, -0.5),
         color: Vec3::new(0.0, 1.0, 0.0),
         texCoord: Vec2::new(0.0, 0.0),
+        normal: Vec3::NEG_Z,
     },
     Vertex {
         pos: Vec3::new(0.5, 0.5, -0.5),
         color: Vec3::new(0.0, 0.0, 1.0),
         texCoord: Vec2::new(0.0, 1.0),
+        normal: Vec3::NEG_Z,
     },
     Vertex {
         pos: Vec3::new(-0.5, 0.5, -0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
         texCoord: Vec2::new(1.0, 1.0),
+        normal: Vec3::NEG_Z,
     },
 ];
 

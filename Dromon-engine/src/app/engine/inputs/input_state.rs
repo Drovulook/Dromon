@@ -65,4 +65,11 @@ impl InputState {
         self.mouse_delta = (0.0, 0.0);
         self.scroll_delta = 0.0;
     }
+
+    // appelé quand la fenêtre perd le focus, (pour éviter que la caméra continue à se déplacer par
+    // ex)
+    pub(super) fn clear(&mut self) {
+        self.held.clear();
+        self.end_frame();
+    }
 }
