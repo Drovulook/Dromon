@@ -73,25 +73,6 @@ pub struct SwapchainSurface {
     pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct ImageLayoutState {
-    pub access_mask: vk::AccessFlags2,
-    pub layout: vk::ImageLayout,
-    pub stage_mask: vk::PipelineStageFlags2,
-    pub queue_family_index: u32,
-}
-
-impl Default for ImageLayoutState {
-    fn default() -> Self {
-        Self {
-            access_mask: vk::AccessFlags2::NONE,
-            layout: vk::ImageLayout::UNDEFINED,
-            stage_mask: vk::PipelineStageFlags2::ALL_COMMANDS,
-            queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        }
-    }
-}
-
 pub mod queue_family_picker {
     use crate::app::engine::rendering_context::{PhysicalDevice, QueueFamilies};
     use anyhow::Context as AnyhowContext;

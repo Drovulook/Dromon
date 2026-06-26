@@ -1,6 +1,5 @@
-use crate::app::engine::rendering_context::ImageLayoutState;
-
 use super::RenderingContext;
+use crate::app::engine::renderer::image_layout_state::ImageLayoutState;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -62,24 +61,7 @@ impl RenderingContext {
                 } else {
                     vk::ImageAspectFlags::COLOR
                 };
-                vk::ImageMemoryBarrier2::default()
-                    .src_stage_mask(old_layout.stage_mask)
-                    .dst_stage_mask(new_layout.stage_mask)
-                    .src_access_mask(old_layout.access_mask)
-                    .dst_access_mask(new_layout.access_mask)
-                    .old_layout(old_layout.layout)
-                    .new_layout(new_layout.layout)
-                    .src_queue_family_index(old_layout.queue_family_index)
-                    .dst_queue_family_index(new_layout.queue_family_index)
-                    .image(*image)
-                    .subresource_range(
-                        vk::ImageSubresourceRange::default()
-                            .aspect_mask(aspect_flag)
-                            .base_mip_level(0)
-                            .level_count(mip_levels)
-                            .base_array_layer(0)
-                            .layer_count(1),
-                    )
+                Self::build_image_barrier(*image, *old_layout, *new_layout, aspect_flag, mip_levels)
             })
             .collect::<Vec<_>>();
 
@@ -87,6 +69,90 @@ impl RenderingContext {
             self.device.cmd_pipeline_barrier2(
                 command_buffer,
                 &vk::DependencyInfo::default().image_memory_barriers(&barriers),
+            );
+        }
+    }
+
+    /// Variante de `transition_image_layout` avec l'aspect d'image fourni
+    /// explicitement. Nécessaire pour la shadow map : on la transitionne vers
+    /// SHADER_READ_ONLY_OPTIMAL en gardant l'aspect DEPTH
+    pub fn transition_image_layout_aspect(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        states: &[(vk::Image, ImageLayoutState, ImageLayoutState)],
+        mip_levels: u32,
+        aspect_mask: vk::ImageAspectFlags,
+    ) {
+        let barriers = states
+            .iter()
+            .map(|(image, old_layout, new_layout)| {
+                Self::build_image_barrier(*image, *old_layout, *new_layout, aspect_mask, mip_levels)
+            })
+            .collect::<Vec<_>>();
+
+        unsafe {
+            self.device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo::default().image_memory_barriers(&barriers),
+            );
+        }
+    }
+
+    fn build_image_barrier(
+        image: vk::Image,
+        old_layout: ImageLayoutState,
+        new_layout: ImageLayoutState,
+        aspect_mask: vk::ImageAspectFlags,
+        mip_levels: u32,
+    ) -> vk::ImageMemoryBarrier2<'static> {
+        vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(old_layout.stage_mask)
+            .dst_stage_mask(new_layout.stage_mask)
+            .src_access_mask(old_layout.access_mask)
+            .dst_access_mask(new_layout.access_mask)
+            .old_layout(old_layout.layout)
+            .new_layout(new_layout.layout)
+            .src_queue_family_index(old_layout.queue_family_index)
+            .dst_queue_family_index(new_layout.queue_family_index)
+            .image(image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(aspect_mask)
+                    .base_mip_level(0)
+                    .level_count(mip_levels)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            )
+    }
+
+    /// Démarre la passe d'ombre : rendu « depth-only » dans la shadow map. Pas de
+    /// color attachment ni de resolve (contrairement à la passe principale). Le
+    /// store_op est STORE — il FAUT conserver la profondeur pour la relire ensuite.
+    pub fn begin_shadow_rendering(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        depth_image_view: vk::ImageView,
+        render_area: vk::Rect2D,
+    ) {
+        unsafe {
+            self.device.cmd_begin_rendering(
+                command_buffer,
+                &vk::RenderingInfo::default()
+                    .layer_count(1)
+                    .depth_attachment(
+                        &vk::RenderingAttachmentInfo::default()
+                            .image_view(depth_image_view)
+                            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+                            .clear_value(vk::ClearValue {
+                                depth_stencil: vk::ClearDepthStencilValue {
+                                    depth: 1.0,
+                                    stencil: 0,
+                                },
+                            })
+                            .load_op(vk::AttachmentLoadOp::CLEAR)
+                            .store_op(vk::AttachmentStoreOp::STORE),
+                    )
+                    .render_area(render_area),
             );
         }
     }

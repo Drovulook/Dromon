@@ -23,7 +23,6 @@ use texture::Texture;
 pub use transform::Transform;
 
 pub struct RenderObjectResourceManager {
-    context: Arc<RenderingContext>,
     logger: Arc<Logger>,
     pub textures: HashMap<String, Arc<Texture>>,
     pub meshes: HashMap<String, Arc<Mesh>>,
@@ -38,7 +37,6 @@ impl RenderObjectResourceManager {
         descriptor_handler: Arc<DescriptorHandler>,
     ) -> Result<RenderObjectResourceManager> {
         Ok(RenderObjectResourceManager {
-            context: context.clone(),
             logger: logger.clone(),
             textures: HashMap::new(),
             meshes: HashMap::new(),

@@ -1,5 +1,5 @@
 use super::RenderingContext;
-use crate::app::engine::rendering_context::{ImageLayoutState, SwapchainSurface};
+use crate::app::engine::rendering_context::SwapchainSurface;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;

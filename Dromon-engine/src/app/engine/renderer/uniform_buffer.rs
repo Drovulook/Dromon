@@ -12,7 +12,9 @@ use std::sync::Arc;
 struct UniformBufferObject {
     view: Mat4,
     proj: Mat4,
-    // On stocke en Vec4 (et non Vec3) à cause des règles d'alignement std140
+    // Matrice « view*proj » de la lumière (projection orthographique depuis le
+    // soleil).
+    light_view_proj: Mat4,
     // des uniform buffers Vulkan : un vec3 est aligné sur 16 octets mais n'en
     // occupe que 12
     light_direction: Vec4,
@@ -50,6 +52,7 @@ impl UniformBuffer {
         &self,
         view: Mat4,
         proj: Mat4,
+        light_view_proj: Mat4,
         light_direction: Vec3,
         light_color: Vec3,
         light_intensity: f32,
@@ -57,6 +60,7 @@ impl UniformBuffer {
         let ubo = UniformBufferObject {
             view,
             proj,
+            light_view_proj,
             light_direction: light_direction.extend(0.0),
             light_color: light_color.extend(light_intensity),
         };

@@ -1,17 +1,22 @@
 mod buffer;
 mod camera;
 mod descriptors;
+pub mod image_layout_state;
 mod render_object;
+mod renderer_initialize;
+mod renderer_record_pass;
+mod shadow_map;
 mod swapchain;
 mod uniform_buffer;
 mod world;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
+use crate::app::engine::renderer::image_layout_state::ImageLayoutState;
 use crate::app::engine::renderer::render_object::Vertex;
+use crate::app::engine::renderer::shadow_map::ShadowMap;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::renderer::world::World;
-use crate::app::engine::rendering_context::ImageLayoutState;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
@@ -26,42 +31,6 @@ struct Frame {
     uniform_buffer: UniformBuffer,
 }
 
-impl ImageLayoutState {
-    // color image
-    pub const UNDEFINED_COLOR_IMAGE_STATE: Self = Self {
-        access_mask: vk::AccessFlags2::empty(),
-        layout: vk::ImageLayout::UNDEFINED,
-        stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
-        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-    };
-    pub const RENDERABLE_COLOR_IMAGE_STATE: Self = Self {
-        access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-    };
-    pub const PRESENT_COLOR_IMAGE_STATE: Self = Self {
-        access_mask: vk::AccessFlags2::empty(),
-        layout: vk::ImageLayout::PRESENT_SRC_KHR,
-        stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-    };
-
-    // depth image
-    pub const UNDEFINED_DEPTH_IMAGE_STATE: Self = Self {
-        access_mask: vk::AccessFlags2::empty(),
-        layout: vk::ImageLayout::UNDEFINED,
-        stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
-        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-    };
-    pub const RENDERABLE_DEPTH_IMAGE_STATE: Self = Self {
-        access_mask: vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
-        layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-        stage_mask: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS,
-        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-    };
-}
-
 pub struct Renderer {
     in_flight_frames_count: usize,
     frame_index: usize,
@@ -72,6 +41,10 @@ pub struct Renderer {
     frame_command_pool: vk::CommandPool,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
+    // Passe d'ombre : sa pipeline depth-only et l'image cible. La pipeline réutilise
+    // le `pipeline_layout` principal (compatible : même set 0 + push constants).
+    shadow_pipeline: vk::Pipeline,
+    shadow_map: ShadowMap,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
     descriptor_handler: Arc<DescriptorHandler>,
@@ -125,6 +98,10 @@ impl Renderer {
                 });
             }
 
+            // Shadow map : créée avant les descriptor sets car son image view et son
+            // sampler sont écrits dans le descriptor set 2 dès la construction.
+            let shadow_map = ShadowMap::new(context.clone())?;
+
             // creating descriptor sets
             let uniform_buffer_handles: Vec<vk::Buffer> = frames
                 .iter()
@@ -133,6 +110,8 @@ impl Renderer {
             let descriptor_handler = Arc::new(DescriptorHandler::new(
                 context.clone(),
                 uniform_buffer_handles,
+                shadow_map.image_view,
+                shadow_map.sampler,
             )?);
 
             let world = World::new(logger.clone(), context.clone(), descriptor_handler.clone())?;
@@ -179,6 +158,8 @@ impl Renderer {
                         // set 1 : texture (par matériau) — toutes les textures partagent
                         // CE layout ; on bind un set différent par objet au moment du draw.
                         descriptor_handler.texture_descriptor_set_layout,
+                        // set 2 : shadow map (unique, partagée par toutes les frames)
+                        descriptor_handler.shadow_descriptor_set_layout,
                     ])
                     .push_constant_ranges(&push_constant_ranges),
                 None,
@@ -200,6 +181,22 @@ impl Renderer {
             context.device.destroy_shader_module(vertex_shader, None);
             context.device.destroy_shader_module(fragment_shader, None);
 
+            // Pipeline de la passe d'ombre : réutilise le pipeline_layout principal
+            // (set 0 + push constants suffisent au shadow vertex shader). Même format
+            // de profondeur que la shadow map.
+            let shadow_vertex_shader = load_shader_module(context.as_ref(), "shadow_vert.spv")?;
+            let shadow_pipeline = context.create_shadow_pipeline(
+                shadow_vertex_shader,
+                pipeline_layout,
+                &[Vertex::get_binding_description()],
+                &Vertex::get_attribute_descriptions(),
+                shadow_map.format,
+                vk::PipelineCache::default(),
+            )?;
+            context
+                .device
+                .destroy_shader_module(shadow_vertex_shader, None);
+
             Renderer::initialize(context.clone(), &world)?;
 
             Ok(Self {
@@ -212,67 +209,14 @@ impl Renderer {
                 frame_command_pool,
                 pipeline,
                 pipeline_layout,
+                shadow_pipeline,
+                shadow_map,
                 swapchain,
                 context,
                 descriptor_handler,
                 world,
             })
         }
-    }
-
-    fn initialize(context: Arc<RenderingContext>, world: &World) -> Result<()> {
-        //create transfer command pool and buffer
-        let transfer_command_pool = unsafe {
-            context.device.create_command_pool(
-                &vk::CommandPoolCreateInfo::default()
-                    // TODO : utiliser la famille de commandes appropriée
-                    .queue_family_index(context.queue_families.graphics)
-                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
-                None,
-            )
-        }?;
-        let transfer_command_buffer = unsafe {
-            context.device.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(transfer_command_pool)
-                    .level(vk::CommandBufferLevel::PRIMARY)
-                    .command_buffer_count(1),
-            )
-        }?[0];
-
-        unsafe {
-            context.device.begin_command_buffer(
-                transfer_command_buffer,
-                &vk::CommandBufferBeginInfo::default()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )
-        }?;
-
-        ////////// all transfer commands go here
-        world.initialize(&transfer_command_buffer)?;
-        //////////
-
-        unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
-
-        // submit
-        let graphics_queue = context.queues[context.queue_families.graphics as usize];
-        unsafe {
-            context.device.queue_submit(
-                graphics_queue,
-                &[vk::SubmitInfo::default().command_buffers(&[transfer_command_buffer])],
-                vk::Fence::null(),
-            )
-        }?;
-        unsafe { context.device.queue_wait_idle(graphics_queue) }?;
-
-        // cleanup
-        unsafe {
-            context
-                .device
-                .destroy_command_pool(transfer_command_pool, None)
-        };
-
-        Ok(())
     }
 
     pub fn resize(&mut self) {
@@ -325,149 +269,22 @@ impl Renderer {
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
 
-            self.context.transition_image_layout(
-                frame.command_buffer,
-                &[
-                    (
-                        // image MSAA : cible de rendu (attachment couleur principal)
-                        self.swapchain.msaa_color_image,
-                        ImageLayoutState::UNDEFINED_COLOR_IMAGE_STATE,
-                        ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
-                    ),
-                    (
-                        // image swapchain : cible de resolve
-                        self.swapchain.color_images[image_index as usize],
-                        ImageLayoutState::UNDEFINED_COLOR_IMAGE_STATE,
-                        ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
-                    ),
-                ],
-                1,
-            );
-
-            self.context.transition_image_layout(
-                frame.command_buffer,
-                &[(
-                    self.swapchain.depth_image,
-                    ImageLayoutState::UNDEFINED_DEPTH_IMAGE_STATE,
-                    ImageLayoutState::RENDERABLE_DEPTH_IMAGE_STATE,
-                )],
-                1,
-            );
-
-            self.context.begin_rendering(
-                frame.command_buffer,
-                self.swapchain.msaa_color_image_view,
-                self.swapchain.color_image_views[image_index as usize],
-                self.swapchain.depth_image_view,
-                vk::ClearColorValue {
-                    float32: [0.0015, 0.0, 0.0015, 1.0],
-                },
-                vk::Rect2D::default().extent(self.swapchain.extent),
-            );
-
-            self.context.device.cmd_set_viewport(
-                frame.command_buffer,
-                0,
-                &[vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: self.swapchain.extent.width as f32,
-                    height: self.swapchain.extent.height as f32,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                }],
-            );
-
-            self.context.device.cmd_set_scissor(
-                frame.command_buffer,
-                0,
-                &[vk::Rect2D::default().extent(self.swapchain.extent)],
-            );
-
-            self.context.device.cmd_bind_pipeline(
-                frame.command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline,
-            );
-
-            // matrices view/proj fournies par la caméra du monde,
-            // + paramètres de la lumière directionnelle de la scène
+            // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
+            // passe principale lisent la même `light_view_proj` depuis le set 0.
             frame.uniform_buffer.update(
                 self.world.camera.view,
                 self.world.camera.proj,
+                self.world.light.view_proj(),
                 self.world.light.direction,
                 self.world.light.color,
                 self.world.light.intensity,
             );
 
-            // set 0: UBO caméra
-            self.context.device.cmd_bind_descriptor_sets(
-                frame.command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &[self.descriptor_handler.world_descriptor_sets[self.frame_index]],
-                &[],
-            );
+            // 1re passe : on remplit la shadow map depuis le point de vue de la lumière.
+            self.record_shadow_pass(frame.command_buffer, self.frame_index);
 
-            for render_object in &self.world.render_objects {
-                // set 1 : la texture de CET objet
-                self.context.device.cmd_bind_descriptor_sets(
-                    frame.command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline_layout,
-                    1, // first_set = 1
-                    &[render_object.texture.descriptor_set],
-                    &[],
-                );
-                // Matrice model (placement de l'objet dans le monde).
-                let model = render_object.transform.to_matrix();
-                // Matrice normale = inverse-transposée de la partie 3x3 du model.
-                // Gère correctement rotation ET scale non-uniforme. On la stocke
-                // dans une Mat4 (from_mat3 complète avec une 4e ligne/col identité)
-                // pour respecter l'alignement 16 octets du push constant.
-                let normal_matrix = glam::Mat4::from_mat3(
-                    glam::Mat3::from_mat4(model).inverse().transpose(),
-                );
-                // offset 0 : model
-                self.context.device.cmd_push_constants(
-                    frame.command_buffer,
-                    self.pipeline_layout,
-                    vk::ShaderStageFlags::VERTEX,
-                    0,
-                    bytemuck::bytes_of(&model),
-                );
-                // offset 64 : matrice normale (juste après les 64 octets de model)
-                self.context.device.cmd_push_constants(
-                    frame.command_buffer,
-                    self.pipeline_layout,
-                    vk::ShaderStageFlags::VERTEX,
-                    std::mem::size_of::<glam::Mat4>() as u32,
-                    bytemuck::bytes_of(&normal_matrix),
-                );
-                render_object.mesh.bind(frame.command_buffer);
-
-                self.context.device.cmd_draw_indexed(
-                    frame.command_buffer,
-                    render_object.mesh.indices.len() as u32,
-                    1,
-                    0,
-                    0,
-                    0,
-                );
-            }
-
-            self.context.device.cmd_end_rendering(frame.command_buffer);
-
-            self.context.transition_image_layout(
-                frame.command_buffer,
-                &[(
-                    self.swapchain.color_images[image_index as usize],
-                    ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
-                    ImageLayoutState::PRESENT_COLOR_IMAGE_STATE,
-                )],
-                1,
-            );
+            // 2nde passe : on dessine le monde.
+            self.record_render_pass(frame, image_index);
 
             self.context
                 .device
@@ -513,6 +330,9 @@ impl Drop for Renderer {
                 .device
                 .destroy_command_pool(self.frame_command_pool, None);
             self.context.device.destroy_pipeline(self.pipeline, None);
+            self.context
+                .device
+                .destroy_pipeline(self.shadow_pipeline, None);
             self.context
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
