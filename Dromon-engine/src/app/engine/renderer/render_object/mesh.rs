@@ -8,18 +8,18 @@ use std::sync::Arc;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct Vertex {
+pub struct ObjectVertex {
     pub pos: Vec3,
     pub color: Vec3,
     pub texCoord: Vec2,
     pub normal: Vec3,
 }
 
-impl Vertex {
+impl ObjectVertex {
     pub fn get_binding_description() -> vk::VertexInputBindingDescription {
         vk::VertexInputBindingDescription {
             binding: 0,
-            stride: std::mem::size_of::<Vertex>() as u32,
+            stride: std::mem::size_of::<ObjectVertex>() as u32,
             input_rate: vk::VertexInputRate::VERTEX,
         }
     }
@@ -30,25 +30,25 @@ impl Vertex {
                 binding: 0,
                 location: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Vertex, pos) as u32,
+                offset: offset_of!(ObjectVertex, pos) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 1,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Vertex, color) as u32,
+                offset: offset_of!(ObjectVertex, color) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 2,
                 format: vk::Format::R32G32_SFLOAT,
-                offset: offset_of!(Vertex, texCoord) as u32,
+                offset: offset_of!(ObjectVertex, texCoord) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 3,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Vertex, normal) as u32,
+                offset: offset_of!(ObjectVertex, normal) as u32,
             },
         ]
     }
@@ -57,7 +57,7 @@ impl Vertex {
 pub struct Mesh {
     context: Arc<RenderingContext>,
 
-    pub vertices: Vec<Vertex>,
+    pub vertices: Vec<ObjectVertex>,
     pub vertex_staging_buffer: Buffer, // HACK: à terme, il faudra que ce buffer soit temporairement
     // détenu par le handler, puis supprimé à la fin de initialize
     pub vertex_buffer: Buffer,
@@ -70,7 +70,7 @@ pub struct Mesh {
 impl Mesh {
     pub fn new(
         context: Arc<RenderingContext>,
-        vertices: Vec<Vertex>,
+        vertices: Vec<ObjectVertex>,
         vertex_staging_buffer: Buffer,
         vertex_buffer: Buffer,
         indices: Vec<u32>,
@@ -109,51 +109,51 @@ impl Mesh {
     }
 }
 
-pub const SQUARE_VERTICES: &[Vertex] = &[
-    Vertex {
+pub const SQUARE_VERTICES: &[ObjectVertex] = &[
+    ObjectVertex {
         pos: Vec3::new(-0.5, -0.5, 0.0),
         color: Vec3::new(1.0, 0.0, 0.0),
         texCoord: Vec2::new(1.0, 0.0),
         normal: Vec3::Z,
     },
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(0.5, -0.5, 0.0),
         color: Vec3::new(0.0, 1.0, 0.0),
         texCoord: Vec2::new(0.0, 0.0),
         normal: Vec3::Z,
     },
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(0.5, 0.5, 0.0),
         color: Vec3::new(0.0, 0.0, 1.0),
         texCoord: Vec2::new(0.0, 1.0),
         normal: Vec3::Z,
     },
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(-0.5, 0.5, 0.0),
         color: Vec3::new(1.0, 1.0, 1.0),
         texCoord: Vec2::new(1.0, 1.0),
         normal: Vec3::Z,
     },
     // second square
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(-0.5, -0.5, -0.5),
         color: Vec3::new(1.0, 0.0, 0.0),
         texCoord: Vec2::new(1.0, 0.0),
         normal: Vec3::NEG_Z,
     },
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(0.5, -0.5, -0.5),
         color: Vec3::new(0.0, 1.0, 0.0),
         texCoord: Vec2::new(0.0, 0.0),
         normal: Vec3::NEG_Z,
     },
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(0.5, 0.5, -0.5),
         color: Vec3::new(0.0, 0.0, 1.0),
         texCoord: Vec2::new(0.0, 1.0),
         normal: Vec3::NEG_Z,
     },
-    Vertex {
+    ObjectVertex {
         pos: Vec3::new(-0.5, 0.5, -0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
         texCoord: Vec2::new(1.0, 1.0),

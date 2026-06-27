@@ -1,6 +1,6 @@
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::camera::Camera;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
@@ -8,16 +8,13 @@ use crate::app::{
     engine::{
         renderer::{
             descriptors::DescriptorHandler,
-            render_object::{RenderObject, RenderObjectResourceManager, Transform},
+            render_object::{RenderObject, RenderObjectResourceManager},
         },
         rendering_context::RenderingContext,
         timer::Timer,
     },
     logger::Logger,
 };
-
-const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
-const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
 
 // Paramètres du « frustum » orthographique de la lumière (la boîte qui doit
 // englober toute la scène projetant des ombres). À élargir si des objets sortent
@@ -81,45 +78,22 @@ pub struct World {
 }
 
 impl World {
+    /// Crée un monde *vide* : seul le gestionnaire de ressources (`rorm`) et des
+    /// valeurs par défaut (caméra, lumière) sont initialisés. Le contenu concret
+    /// (assets + `RenderObject`) est fourni par la `Scene` via `Scene::setup`, qui
+    /// est appelée juste après la construction du `Renderer`. La scène peut aussi
+    /// modifier `world.light` à ce moment-là.
     pub fn new(
         logger: Arc<Logger>,
         context: Arc<RenderingContext>,
         descriptor_handler: Arc<DescriptorHandler>,
     ) -> Result<World> {
-        let mut rorm =
-            RenderObjectResourceManager::new(context, logger.clone(), descriptor_handler)?;
-        rorm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
-        rorm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
-        rorm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string(), true)?;
-        rorm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string(), true)?;
-
-        let render_objects = vec![
-            RenderObject::new(
-                rorm.get_mesh("mesh1")
-                    .context("mesh \"mesh1\" introuvable")?,
-                rorm.get_texture("texture1")
-                    .context("texture \"texture1\" introuvable")?,
-                Transform {
-                    translation: glam::Vec3::new(0.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            ),
-            RenderObject::new(
-                rorm.get_mesh("mesh2")
-                    .context("mesh \"mesh2\" introuvable")?,
-                rorm.get_texture("texture2")
-                    .context("texture \"texture2\" introuvable")?,
-                Transform {
-                    translation: glam::Vec3::new(0.0, -1.0, 0.0),
-                    ..Default::default()
-                },
-            ),
-        ];
+        let rorm = RenderObjectResourceManager::new(context, logger.clone(), descriptor_handler)?;
 
         Ok(World {
             logger,
             rorm,
-            render_objects,
+            render_objects: Vec::new(),
             camera: Camera::default(),
             light: DirectionalLight {
                 direction: glam::Vec3::new(-0.3, -0.5, -1.0),
@@ -136,11 +110,5 @@ impl World {
 
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {
         self.camera.update(input_state, timer, aspect);
-    }
-
-    pub fn update_render_objects(&mut self, timer: &Timer) {
-        for render_object in &mut self.render_objects {
-            render_object.transform.rotation.z += timer.delta_secs();
-        }
     }
 }

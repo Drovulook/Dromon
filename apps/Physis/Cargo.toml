@@ -1,0 +1,9 @@
+[package]
+name = "Physis"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+Dromon-engine = { path = "../../Dromon-engine" }
+anyhow = "1.0.102"
+glam = { version = "0.29", features = ["bytemuck"] }

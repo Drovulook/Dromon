@@ -8,6 +8,7 @@ use crate::app::engine::inputs::base_event_subscriber;
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
 };
+use crate::Scene;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
 use anyhow::Result;
@@ -32,7 +33,11 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(event_loop: &ActiveEventLoop, logger: Arc<Logger>) -> Result<Self> {
+    pub fn new(
+        event_loop: &ActiveEventLoop,
+        logger: Arc<Logger>,
+        scene: &mut dyn Scene,
+    ) -> Result<Self> {
         let attrs = WindowAttributes::default().with_title("Dromon");
         #[cfg(target_os = "linux")]
         let attrs = attrs.with_name("dromon", "dromon");
@@ -56,8 +61,12 @@ impl Engine {
         let renderers = windows
             .iter()
             .map(|(id, window)| {
-                let renderer =
-                    Renderer::new(rendering_context.clone(), window.clone(), logger.clone())?;
+                let renderer = Renderer::new(
+                    rendering_context.clone(),
+                    window.clone(),
+                    logger.clone(),
+                    scene,
+                )?;
                 Ok((*id, renderer))
             })
             .collect::<Result<HashMap<_, _>>>()?;
@@ -86,6 +95,7 @@ impl Engine {
         event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: winit::event::WindowEvent,
+        scene: &mut dyn Scene,
     ) -> Result<()> {
         self.input_manager.handle_window_event(&event);
         match event {
@@ -100,7 +110,7 @@ impl Engine {
 
             winit::event::WindowEvent::RedrawRequested => {
                 if let Some(renderer) = self.renderers.get_mut(&window_id) {
-                    renderer.render(&self.timer, self.input_manager.input_state())?;
+                    renderer.render(&self.timer, self.input_manager.input_state(), scene)?;
                 }
                 self.input_manager.end_frame();
                 self.timer.tick();
@@ -138,13 +148,14 @@ impl Engine {
         event_loop: &ActiveEventLoop,
         attributes: WindowAttributes,
         logger: Arc<Logger>,
+        scene: &mut dyn Scene,
     ) -> Result<WindowId> {
         let window = Arc::new(event_loop.create_window(attributes)?);
         let window_id = window.id();
         self.windows.insert(window_id, window.clone());
         self.renderers.insert(
             window_id,
-            Renderer::new(self.rendering_context.clone(), window.clone(), logger)?,
+            Renderer::new(self.rendering_context.clone(), window.clone(), logger, scene)?,
         );
         Ok(window_id)
     }

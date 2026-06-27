@@ -17,7 +17,7 @@ use crate::app::{
 use anyhow::Result;
 use ash::vk;
 use mesh::Mesh;
-pub use mesh::Vertex;
+pub use mesh::ObjectVertex;
 use std::{collections::HashMap, sync::Arc};
 use texture::Texture;
 pub use transform::Transform;

@@ -1,6 +1,6 @@
 use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::render_object::mesh::Mesh;
-use crate::app::engine::renderer::render_object::mesh::Vertex;
+use crate::app::engine::renderer::render_object::mesh::ObjectVertex;
 use crate::app::{engine::rendering_context::RenderingContext, logger::Logger};
 use anyhow::{Context, Result};
 use ash::vk;
@@ -44,7 +44,11 @@ impl MeshHandler {
 
     /// Charge la scène glTF ENTIÈRE et la fusionne en une seule paire
     /// (vertices, indices).
-    pub fn load_scene(&self, model_path: &str, smooth: bool) -> Result<(Vec<Vertex>, Vec<u32>)> {
+    pub fn load_scene(
+        &self,
+        model_path: &str,
+        smooth: bool,
+    ) -> Result<(Vec<ObjectVertex>, Vec<u32>)> {
         let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), model_path);
         let full_path = Path::new(&full_path);
 
@@ -57,7 +61,7 @@ impl MeshHandler {
             .context("chargement des buffers (scene.bin)")?;
         let document = gltf.document;
 
-        let mut vertices: Vec<Vertex> = Vec::new();
+        let mut vertices: Vec<ObjectVertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
 
         // glTF est Y-up par convention ; notre moteur est Z-up (caméra up = +Z).
@@ -90,7 +94,7 @@ impl MeshHandler {
         node: gltf::Node,
         parent: Mat4,
         buffers: &[gltf::buffer::Data],
-        vertices: &mut Vec<Vertex>,
+        vertices: &mut Vec<ObjectVertex>,
         indices: &mut Vec<u32>,
     ) {
         // transform().matrix() renvoie la matrice locale en column-major,
@@ -135,7 +139,7 @@ impl MeshHandler {
                     let normal = normals.get(i).copied().unwrap_or([0.0, 0.0, 1.0]);
                     // On renormalise : la matrice normale ne préserve pas la longueur.
                     let world_normal = (normal_matrix * Vec3::from(normal)).normalize();
-                    vertices.push(Vertex {
+                    vertices.push(ObjectVertex {
                         pos: world_pos,
                         color: Vec3::ONE,
                         texCoord: Vec2::from(uv),
@@ -164,7 +168,7 @@ impl MeshHandler {
         }
     }
 
-    fn smooth_normals(vertices: &mut [Vertex]) {
+    fn smooth_normals(vertices: &mut [ObjectVertex]) {
         use std::collections::HashMap;
 
         const QUANT: f32 = 1.0e4;
@@ -193,7 +197,7 @@ impl MeshHandler {
 
     /// Recentre le maillage sur l'origine et le met à l'échelle pour que sa plus
     /// grande dimension fasse ~2 unités. Modifie les positions en place.
-    fn normalize(vertices: &mut [Vertex]) {
+    fn normalize(vertices: &mut [ObjectVertex]) {
         if vertices.is_empty() {
             return;
         }

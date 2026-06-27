@@ -45,6 +45,13 @@ def cargo_run(
 def main():
     processes: list[subprocess.Popen] = []
 
+    # Package/binaire à lancer : tout argument `--<nom>` (hors `--use-cli`) le
+    # sélectionne, ex. `./launch.py --model_sandbox`. Défaut : model_sandbox.
+    target = "model_sandbox"
+    for arg in sys.argv[1:]:
+        if arg.startswith("--") and arg != "--use-cli":
+            target = arg[2:]
+
     try:
         if USE_CLI:
             cli = cargo_run("Dromon-cli")
@@ -57,7 +64,7 @@ def main():
             else:
                 sys.exit(1)
 
-            success, build_output = cargo_build("Dromon-engine")
+            success, build_output = cargo_build(target)
             block = "--------------------------------------------------------------------- COMPILATION ---------------------------------------------------------------------\n"
             if build_output.strip():
                 block += build_output
@@ -68,7 +75,7 @@ def main():
                 cli.wait()  # attend que l'utilisateur ferme le CLI (q / Esc)
                 sys.exit(1)
 
-            binary = os.path.join(WORKSPACE, "target", PROFILE, "Dromon-engine")
+            binary = os.path.join(WORKSPACE, "target", PROFILE, target)
             engine = subprocess.Popen([binary, "--use-cli"], cwd=WORKSPACE)
             processes.append(engine)
 
@@ -79,7 +86,7 @@ def main():
                     send_to_cli("[INFO] L'engine s'est arrêté (code {})".format(engine.returncode))
                 time.sleep(0.2)
         else:
-            engine = cargo_run("Dromon-engine")
+            engine = cargo_run(target)
             processes.append(engine)
             engine.wait()
 

@@ -5,8 +5,11 @@ use std::ffi::CStr;
 use std::io;
 use std::sync::Arc;
 
+const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
+
 impl RenderingContext {
-    pub fn create_shader_module(&self, code: &[u8]) -> Result<vk::ShaderModule> {
+    pub fn load_shader_module(&self, path: &str) -> Result<vk::ShaderModule> {
+        let code = std::fs::read(format!("{}{}", SHADERS_DIR, path))?;
         let code = ash::util::read_spv(&mut io::Cursor::new(code))?;
         let create_info = vk::ShaderModuleCreateInfo::default().code(&code);
         let shader_module = unsafe { self.device.create_shader_module(&create_info, None)? };

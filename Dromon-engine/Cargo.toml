@@ -3,6 +3,11 @@ name = "Dromon-engine"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+# Nom d'import propre côté binaires : `use dromon_engine::…` (sinon ce serait
+# `Dromon_engine`, dérivé du nom de package avec tirets convertis en underscores).
+name = "dromon_engine"
+
 [dependencies]
 anyhow = "1.0.102"
 ash = "0.38.0"

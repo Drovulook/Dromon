@@ -1,5 +1,5 @@
 [workspace]
-members = ["Dromon-engine", "Dromon-cli"]
+members = ["Dromon-engine", "Dromon-cli", "apps/model_sandbox", "apps/Physis"]
 resolver = "2"
 
 # Optimise les dépendances (image, ash, glam…) même en build debug,

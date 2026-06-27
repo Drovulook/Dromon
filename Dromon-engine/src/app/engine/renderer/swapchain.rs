@@ -13,7 +13,7 @@ pub struct Swapchain {
     pub color_images: Vec<vk::Image>,
     pub color_image_views: Vec<vk::ImageView>,
     // MSAA
-    msaa_samples: vk::SampleCountFlags,
+    pub msaa_samples: vk::SampleCountFlags,
     pub msaa_color_image: vk::Image, // HACK: le vrai nombre d'images intermédiaires est in_flight_frames_count
     msaa_color_image_memory: vk::DeviceMemory,
     pub msaa_color_image_view: vk::ImageView,

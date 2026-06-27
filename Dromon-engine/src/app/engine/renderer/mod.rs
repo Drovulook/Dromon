@@ -2,24 +2,26 @@ mod buffer;
 mod camera;
 mod descriptors;
 pub mod image_layout_state;
-mod render_object;
+pub(crate) mod render_object;
+mod render_systems;
 mod renderer_initialize;
 mod renderer_record_pass;
 mod shadow_map;
 mod swapchain;
+pub mod terrain;
 mod uniform_buffer;
-mod world;
+pub(crate) mod world;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::image_layout_state::ImageLayoutState;
-use crate::app::engine::renderer::render_object::Vertex;
+use crate::app::engine::renderer::render_systems::TerrainRenderSystem;
 use crate::app::engine::renderer::shadow_map::ShadowMap;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::renderer::world::World;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
+use crate::{Scene, app::engine::renderer::render_systems::ObjectRenderSystem};
 use anyhow::{Context, Result};
 use ash::vk;
 use std::sync::Arc;
@@ -39,11 +41,8 @@ pub struct Renderer {
     render_finished_semaphores: Vec<vk::Semaphore>,
     acquire_semaphore_index: usize,
     frame_command_pool: vk::CommandPool,
-    pipeline: vk::Pipeline,
-    pipeline_layout: vk::PipelineLayout,
-    // Passe d'ombre : sa pipeline depth-only et l'image cible. La pipeline réutilise
-    // le `pipeline_layout` principal (compatible : même set 0 + push constants).
-    shadow_pipeline: vk::Pipeline,
+    object_render_system: ObjectRenderSystem,
+    terrain_render_sytem: TerrainRenderSystem,
     shadow_map: ShadowMap,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
@@ -51,18 +50,12 @@ pub struct Renderer {
     world: World,
 }
 
-const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/shaders/");
-
-pub fn load_shader_module(context: &RenderingContext, path: &str) -> Result<vk::ShaderModule> {
-    let code = std::fs::read(format!("{}{}", SHADERS_DIR, path))?;
-    context.create_shader_module(&code)
-}
-
 impl Renderer {
     pub(crate) fn new(
         context: Arc<RenderingContext>,
         window: Arc<Window>,
         logger: Arc<Logger>,
+        scene: &mut dyn Scene,
     ) -> Result<Self> {
         let mut swapchain =
             swapchain::Swapchain::new(context.clone(), window.clone(), logger.clone())?;
@@ -114,7 +107,12 @@ impl Renderer {
                 shadow_map.sampler,
             )?);
 
-            let world = World::new(logger.clone(), context.clone(), descriptor_handler.clone())?;
+            let mut world =
+                World::new(logger.clone(), context.clone(), descriptor_handler.clone())?;
+
+            // La scène peuple le monde (assets + RenderObject) AVANT l'upload GPU
+            // (`Renderer::initialize` plus bas copie ces données vers le device).
+            scene.setup(&mut world)?;
 
             let image_count = swapchain.color_images.len();
 
@@ -139,63 +137,25 @@ impl Renderer {
                 );
             }
 
-            let vertex_shader = load_shader_module(context.as_ref(), "vert.spv")?;
-            let fragment_shader = load_shader_module(context.as_ref(), "frag.spv")?;
-            // Push constant : deux Mat4 (2 × 64 = 128 octets, la taille minimale
-            // garantie par Vulkan), poussées par objet. La 1re est la matrice
-            // « model » ; la 2de est la matrice normale (inverse-transposée de
-            // model, calculée côté CPU car Slang n'a pas inverse()).
-            let push_constant_ranges = [vk::PushConstantRange::default()
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .offset(0)
-                .size(2 * std::mem::size_of::<glam::Mat4>() as u32)];
-
-            let pipeline_layout = context.device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::default()
-                    .set_layouts(&[
-                        // set 0 : UBO caméra (par frame)
-                        descriptor_handler.world_descriptor_set_layout,
-                        // set 1 : texture (par matériau) — toutes les textures partagent
-                        // CE layout ; on bind un set différent par objet au moment du draw.
-                        descriptor_handler.texture_descriptor_set_layout,
-                        // set 2 : shadow map (unique, partagée par toutes les frames)
-                        descriptor_handler.shadow_descriptor_set_layout,
-                    ])
-                    .push_constant_ranges(&push_constant_ranges),
-                None,
-            )?;
-
-            let pipeline = context.create_graphics_pipeline(
-                vertex_shader,
-                fragment_shader,
-                pipeline_layout,
-                &[Vertex::get_binding_description()],
-                &Vertex::get_attribute_descriptions(),
-                swapchain.extent,
+            let object_render_system = ObjectRenderSystem::new(
+                context.clone(),
+                descriptor_handler.clone(),
                 swapchain.color_format,
                 swapchain.depth_format,
-                context.get_max_usable_sample_count(),
-                vk::PipelineCache::default(),
-            )?;
-
-            context.device.destroy_shader_module(vertex_shader, None);
-            context.device.destroy_shader_module(fragment_shader, None);
-
-            // Pipeline de la passe d'ombre : réutilise le pipeline_layout principal
-            // (set 0 + push constants suffisent au shadow vertex shader). Même format
-            // de profondeur que la shadow map.
-            let shadow_vertex_shader = load_shader_module(context.as_ref(), "shadow_vert.spv")?;
-            let shadow_pipeline = context.create_shadow_pipeline(
-                shadow_vertex_shader,
-                pipeline_layout,
-                &[Vertex::get_binding_description()],
-                &Vertex::get_attribute_descriptions(),
+                swapchain.msaa_samples,
+                swapchain.extent,
                 shadow_map.format,
-                vk::PipelineCache::default(),
             )?;
-            context
-                .device
-                .destroy_shader_module(shadow_vertex_shader, None);
+
+            let terrain_render_sytem = TerrainRenderSystem::new(
+                context.clone(),
+                descriptor_handler.clone(),
+                swapchain.color_format,
+                swapchain.depth_format,
+                swapchain.msaa_samples,
+                swapchain.extent,
+                shadow_map.format,
+            )?;
 
             Renderer::initialize(context.clone(), &world)?;
 
@@ -207,9 +167,8 @@ impl Renderer {
                 render_finished_semaphores,
                 acquire_semaphore_index: 0,
                 frame_command_pool,
-                pipeline,
-                pipeline_layout,
-                shadow_pipeline,
+                object_render_system,
+                terrain_render_sytem,
                 shadow_map,
                 swapchain,
                 context,
@@ -223,13 +182,19 @@ impl Renderer {
         self.swapchain.is_dirty = true;
     }
 
-    pub fn render(&mut self, timer: &Timer, input_state: &InputState) -> Result<()> {
+    pub fn render(
+        &mut self,
+        timer: &Timer,
+        input_state: &InputState,
+        scene: &mut dyn Scene,
+    ) -> Result<()> {
         // ratio largeur/hauteur de la fenêtre, pour la projection de la caméra.
         // `.max(1)` évite une division par zéro quand la fenêtre est minimisée.
         let aspect =
             self.swapchain.extent.width as f32 / self.swapchain.extent.height.max(1) as f32;
         self.world.update_world_data(timer, input_state, aspect);
-        self.world.update_render_objects(timer);
+        // La logique de jeu (déplacement/rotation des objets) est déléguée à la scène.
+        scene.update(&mut self.world, timer);
 
         let frame = &self.frames[self.frame_index];
 
@@ -329,13 +294,6 @@ impl Drop for Renderer {
             self.context
                 .device
                 .destroy_command_pool(self.frame_command_pool, None);
-            self.context.device.destroy_pipeline(self.pipeline, None);
-            self.context
-                .device
-                .destroy_pipeline(self.shadow_pipeline, None);
-            self.context
-                .device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
         }
     }
 }

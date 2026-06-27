@@ -1,4 +1,4 @@
-mod engine;
+pub(crate) mod engine;
 pub mod logger;
 mod socket_client;
 
@@ -8,18 +8,24 @@ use anyhow::Error;
 use logger::Logger;
 use winit::application::ApplicationHandler;
 
+use crate::Scene;
 use crate::app::engine::Engine;
 
 pub struct App {
     engine: Option<Engine>,
+    // La scène appartient à `App` (et non à `Engine`) pour rester stable à travers
+    // les cycles suspend/resume, où l'`Engine` est détruit puis recréé. On passe
+    // `&mut dyn Scene` aux méthodes du moteur au besoin.
+    scene: Box<dyn Scene>,
     logger: Arc<Logger>,
     pub pending_error: Option<Error>,
 }
 
 impl App {
-    pub fn new(logger: Arc<Logger>) -> Self {
+    pub fn new(logger: Arc<Logger>, scene: Box<dyn Scene>) -> Self {
         Self {
             engine: None,
+            scene,
             logger,
             pending_error: None,
         }
@@ -28,7 +34,7 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        match Engine::new(event_loop, self.logger.clone()) {
+        match Engine::new(event_loop, self.logger.clone(), self.scene.as_mut()) {
             Ok(engine) => self.engine = Some(engine),
             Err(e) => {
                 self.logger
@@ -56,7 +62,9 @@ impl ApplicationHandler for App {
         event: winit::event::WindowEvent,
     ) {
         if let Some(engine) = &mut self.engine {
-            if let Err(e) = engine.window_event(event_loop, window_id, event) {
+            if let Err(e) =
+                engine.window_event(event_loop, window_id, event, self.scene.as_mut())
+            {
                 self.logger.error(&format!(
                     "Erreur fatale dans la boucle d'événements : {e:#}"
                 ));
