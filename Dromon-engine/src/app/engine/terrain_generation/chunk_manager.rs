@@ -1,34 +1,9 @@
 pub use super::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Chunk, ISO_LEVEL, Voxel};
 pub use super::height_field::{HeightField, HeightParams};
 
+use super::material::{classify_solid, material_color};
 use glam::{IVec2, Vec3};
 use std::collections::HashMap;
-
-/// Au-dessus de cette altitude (surface monde), la couche de surface est de la
-/// neige. En-dessous de `SAND_BORDER`, c'est du sable. Entre les deux, de l'herbe.
-pub const SNOW_BORDER: f64 = 150.0;
-pub const SAND_BORDER: f64 = 10.0;
-
-// Matériaux de base (placeholders). À terme, remplacés par une vraie table de
-// matériaux (roches, minerais, terre, etc.).
-pub const MATERIAL_AIR: u16 = 0; // ID de matériau réservé à l'air (absence de matière).
-pub const MATERIAL_ROCK: u16 = 1;
-pub const MATERIAL_DIRT: u16 = 2;
-pub const MATERIAL_GRASS: u16 = 3;
-pub const MATERIAL_SNOW: u16 = 4;
-pub const MATERIAL_SAND: u16 = 5;
-
-/// Couleur de base (albédo) d'un matériau, par ID.
-pub fn material_color(material: u16) -> Vec3 {
-    match material {
-        MATERIAL_ROCK => Vec3::new(0.40, 0.38, 0.35),
-        MATERIAL_DIRT => Vec3::new(0.36, 0.25, 0.16),
-        MATERIAL_GRASS => Vec3::new(0.27, 0.42, 0.18),
-        MATERIAL_SNOW => Vec3::new(0.95, 0.96, 0.98),
-        MATERIAL_SAND => Vec3::new(0.80, 0.73, 0.52),
-        _ => Vec3::ZERO, // air / inconnu
-    }
-}
 
 /// Paramètres de génération du relief : graine + forme du champ d'altitude.
 pub struct GenParams {
@@ -87,29 +62,30 @@ impl ChunkManager {
                 let wy = (origin_y + ly as i32) as f64;
 
                 // Altitude continue de la colonne (fBm érodé, cf. `HeightField`).
+                // Mise en cache dans le chunk : le mailleur la relira (position +
+                // normales) sans recalculer le fBm. C'est le seul endroit où
+                // `height()` est évalué pour ce chunk.
                 let surface_f = self.height.height(wx, wy);
+                chunk.set_column_height(lx, ly, surface_f as f32);
+
+                // Altitude « bruitée » servant UNIQUEMENT au choix du matériau de
+                // surface : la perturbation casse les frontières horizontales
+                // rectilignes (sable/herbe/neige) sans toucher à la géométrie, qui
+                // reste calée sur `surface_f`. Cf. `HeightField::material_jitter`.
+                let mat_alt = surface_f + self.height.material_jitter(wx, wy);
 
                 for z in 0..CHUNK_HEIGHT {
                     // depth > 0 sous la surface, < 0 au-dessus.
                     let depth = surface_f - z as f64;
                     let density = depth as f32;
 
+                    // Air au-dessus de l'iso-surface ; sinon, matériau choisi par
+                    // profondeur et altitude (cf. `material::classify_solid`), avec
+                    // mélange continu de deux biomes près des bordures.
                     let voxel = if density < ISO_LEVEL {
                         Voxel::AIR
-                    } else if depth < 1.0 {
-                        // Couche de surface : matériau choisi selon l'altitude.
-                        let surface_mat = if surface_f > SNOW_BORDER {
-                            MATERIAL_SNOW
-                        } else if surface_f < SAND_BORDER {
-                            MATERIAL_SAND
-                        } else {
-                            MATERIAL_GRASS
-                        };
-                        Voxel::solid(density, surface_mat)
-                    } else if depth < 4.0 {
-                        Voxel::solid(density, MATERIAL_DIRT)
                     } else {
-                        Voxel::solid(density, MATERIAL_ROCK)
+                        classify_solid(density, depth, mat_alt)
                     };
                     // On stocke même les voxels d'air : leur densité (négative)
                     // sert à Surface Nets pour interpoler la surface.
@@ -169,13 +145,22 @@ impl ChunkManager {
         // ambitieux) prend ainsi la couleur du voxel le plus haut au lieu de créer
         // un trou noir. Avec une amplitude correctement bornée ce cas ne se
         // produit pas, mais le garde-fou évite une régression silencieuse.
-        let wz = wz.clamp(0, CHUNK_HEIGHT as i32 - 1);
+        let mut wz = wz.clamp(0, CHUNK_HEIGHT as i32 - 1);
         let size = CHUNK_SIZE as i32;
         let coord = IVec2::new(wx.div_euclid(size), wy.div_euclid(size));
         match self.chunks.get(&coord) {
             Some(chunk) => {
                 let lx = wx.rem_euclid(size) as usize;
                 let ly = wy.rem_euclid(size) as usize;
+                // `wz` vient de `column_height` arrondie en **f32**, alors que la
+                // génération décide « plein/air » en **f64**. Quand la surface est
+                // à un cheveu sous un entier, l'arrondi f32 fait viser le voxel
+                // d'AIR juste au-dessus du sol → `weights` nuls → couleur noire
+                // (les « étoiles noires »). On redescend au premier voxel plein
+                // pour lire le vrai matériau de surface.
+                while wz > 0 && chunk.get_voxel(lx, ly, wz as usize).is_air() {
+                    wz -= 1;
+                }
                 let voxel = chunk.get_voxel(lx, ly, wz as usize);
                 let mut color = Vec3::ZERO;
                 for i in 0..4 {
@@ -197,13 +182,27 @@ impl ChunkManager {
     }
 
     /// Hauteur **continue** (flottante) de la surface à la colonne monde
-    /// `(wx, wy)`, évaluée **directement depuis le bruit de Perlin** — c'est
-    /// exactement la valeur `surface_f` qui sert à remplir le champ de densité.
-    /// Toujours définie (jamais `None`) et fonction des seules coordonnées monde,
-    /// donc identique des deux côtés d'une couture de chunk (maillage sans
-    /// fissure). C'est la source de vérité du mailleur heightfield.
+    /// `(wx, wy)` — exactement la valeur `surface_f` qui a rempli le champ de
+    /// densité. Toujours définie (jamais `None`) et fonction des seules
+    /// coordonnées monde, donc identique des deux côtés d'une couture de chunk
+    /// (maillage sans fissure). C'est la source de vérité du mailleur heightfield.
+    ///
+    /// Lue dans le **cache de colonne** du chunk concerné (rempli à la
+    /// génération) — y compris pour un chunk voisin, ce qui couvre l'apron des
+    /// normales débordant d'un bord. Repli sur un calcul direct du fBm pour les
+    /// rares colonnes d'un chunk non encore généré (frange du monde) : la valeur
+    /// est alors *identique* à celle qu'aurait mise le cache, donc sans couture.
     pub fn column_height(&self, wx: i32, wy: i32) -> f32 {
-        self.height.height(wx as f64, wy as f64) as f32
+        let size = CHUNK_SIZE as i32;
+        let coord = IVec2::new(wx.div_euclid(size), wy.div_euclid(size));
+        match self.chunks.get(&coord) {
+            Some(chunk) => {
+                let lx = wx.rem_euclid(size) as usize;
+                let ly = wy.rem_euclid(size) as usize;
+                chunk.column_height(lx, ly)
+            }
+            None => self.height.height(wx as f64, wy as f64) as f32,
+        }
     }
 
     /// Hauteur **continue** de la surface (iso `density == ISO_LEVEL`) à la

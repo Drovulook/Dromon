@@ -22,6 +22,12 @@ use glam::{IVec2, Vec3};
 // colonne partagée. On maille les sommets `[0, CHUNK_SIZE]` **inclus** (la
 // colonne de débordement est exactement la 1re colonne du chunk d'à côté).
 
+/// Rayon (en voxels) du stencil de différences servant à calculer les normales.
+/// `1` = normale fidèle à chaque facette (net, mais sujet à l'aliasing de
+/// normales : le « quadrillage » sur les pentes). Plus grand = normale lissée sur
+/// une zone plus large → éclairage doux, au prix d'arêtes vives un peu adoucies.
+const NORMAL_RADIUS: i32 = 5;
+
 /// Construit le mesh de surface d'un chunk en coordonnées monde (`model` =
 /// identité au draw).
 pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, Vec<u32>) {
@@ -44,31 +50,29 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
             let h = height(wx, wy);
             let p = Vec3::new(wx as f32, wy as f32, h);
 
-            // Normale = moyenne (pondérée par l'aire) des normales des 6 triangles
-            // qui entourent réellement ce sommet dans la triangulation. Calculée à
-            // partir des hauteurs voisines (toutes via `column_height` → fonction
-            // des seules coordonnées MONDE, donc identique d'un chunk à l'autre :
-            // pas de couture). Surtout, ces normales sont COHÉRENTES avec la
-            // géométrie réelle des facettes — contrairement à un gradient par
-            // différences centrées, dont le décalage créait le damier diagonal.
-            // Les 6 triangles correspondent au découpage de quad `a–c` utilisé
-            // plus bas (voisins E, W, N, S, NE, SW).
-            let pt = |dx: i32, dy: i32| {
-                let (x, y) = (wx + dx, wy + dy);
-                Vec3::new(x as f32, y as f32, height(x, y))
-            };
-            let (e, w, north, south, ne, sw) =
-                (pt(1, 0), pt(-1, 0), pt(0, 1), pt(0, -1), pt(1, 1), pt(-1, -1));
-            // Produit vectoriel non normalisé = normale de facette pondérée par
-            // l'aire ; même enroulement que l'émission des triangles → +Z.
-            let face = |a: Vec3, b: Vec3, c: Vec3| (b - a).cross(c - a);
-            let normal = (face(p, e, ne)
-                + face(p, ne, north)
-                + face(w, p, north)
-                + face(south, e, p)
-                + face(sw, south, p)
-                + face(sw, p, w))
-            .normalize();
+            // Normale lissée. Pour un champ de hauteur z = f(x, y), la normale
+            // (orientée +Z) est `(-∂f/∂x, -∂f/∂y, 1)` normalisé. On estime la pente
+            // par différences centrées, mais en MOYENNANT plusieurs rayons
+            // `k = 1..=NORMAL_RADIUS` : la normale représente alors la pente MACRO
+            // et ignore le micro-jitter du bruit à l'échelle du voxel → fini le
+            // quadrillage d'aliasing de normales, sans aplatir la géométrie.
+            //
+            // Pourquoi moyenner plusieurs rayons (et pas juste un pas large) ? Une
+            // différence centrée de pas 1 ne relie que les voxels de parité OPPOSÉE
+            // au centre, un pas 2 que ceux de MÊME parité : dans les deux cas le
+            // réseau se scinde en deux sous-grilles découplées → c'est ce qui
+            // créait l'ancien « damier diagonal ». En mélangeant pas pairs et
+            // impairs, on recouple les sous-grilles : pas de damier.
+            let r = NORMAL_RADIUS.max(1);
+            let mut dzdx = 0.0f32;
+            let mut dzdy = 0.0f32;
+            for k in 1..=r {
+                let s = (2 * k) as f32; // dénominateur de la différence centrée
+                dzdx += (height(wx + k, wy) - height(wx - k, wy)) / s;
+                dzdy += (height(wx, wy + k) - height(wx, wy - k)) / s;
+            }
+            let inv = 1.0 / r as f32;
+            let normal = Vec3::new(-dzdx * inv, -dzdy * inv, 1.0).normalize();
 
             // Couleur du voxel plein juste sous la surface (mélange des matériaux
             // dominants → déjà résolue côté CPU, le shader n'a plus qu'à l'afficher).
@@ -85,6 +89,18 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
     // ── Triangles : 2 par cellule de la grille ─────────────────────────────
     // Enroulement choisi pour que la normale géométrique pointe vers +Z (face du
     // dessus visible), conforme au front-face CCW du pipeline.
+    //
+    // Triangulation en DAMIER : on alterne la diagonale de découpe d'une cellule
+    // à l'autre. Si toutes les cellules étaient coupées dans le même sens
+    // (diagonale `a–c`), la surface acquiert un « grain » directionnel — des
+    // chevrons réguliers le long de cette diagonale, visibles en lumière rasante
+    // (c'est le quadrillage géométrique résiduel). En alternant `a–c` / `b–d`
+    // selon la parité de la cellule, ce grain se brouille.
+    //
+    // La parité est calculée en coordonnées MONDE (`wx_cell + wy_cell`) et non
+    // locales : ainsi le motif est continu d'un chunk à l'autre, sans rupture du
+    // damier sur les coutures. (`rem_euclid(2)` car les coords monde peuvent être
+    // négatives.)
     let mut indices: Vec<u32> = Vec::with_capacity((dim - 1) * (dim - 1) * 6);
     for lx in 0..dim - 1 {
         for ly in 0..dim - 1 {
@@ -92,7 +108,16 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
             let b = grid(lx + 1, ly) as u32;
             let c = grid(lx + 1, ly + 1) as u32;
             let d = grid(lx, ly + 1) as u32;
-            indices.extend_from_slice(&[a, b, c, a, c, d]);
+
+            let wx_cell = origin_x + lx as i32;
+            let wy_cell = origin_y + ly as i32;
+            if (wx_cell + wy_cell).rem_euclid(2) == 0 {
+                // Diagonale a–c (du coin bas-gauche au coin haut-droit).
+                indices.extend_from_slice(&[a, b, c, a, c, d]);
+            } else {
+                // Diagonale b–d (du coin bas-droit au coin haut-gauche).
+                indices.extend_from_slice(&[a, b, d, b, c, d]);
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-use super::chunk_manager::MATERIAL_AIR;
+use super::material::MATERIAL_AIR;
 use glam::IVec2;
 
 /// Côté horizontal d'un chunk en voxels (axes X et Y).
@@ -72,13 +72,24 @@ pub struct Chunk {
     /// `(x, y)` sont adjacents en mémoire, ce qui rend le scan vertical
     /// (recherche de surface, meshing) cache-friendly.
     voxels: Box<[Voxel]>,
+    /// Hauteur de surface (flottante) **par colonne** `(x, y)`, indexée
+    /// `x * CHUNK_SIZE + y`. Donnée de colonne (une valeur par `(x, y)`, pas par
+    /// voxel) calculée une fois à la génération et mise en cache ici : le
+    /// mailleur la relit pour la position ET les normales au lieu de recalculer
+    /// le fBm (coûteux) à chaque sommet.
+    column_heights: Box<[f32]>,
 }
 
 impl Chunk {
     /// Crée un chunk entièrement constitué d'air.
     pub fn new(coord: IVec2) -> Chunk {
         let voxels = vec![Voxel::AIR; CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT].into_boxed_slice();
-        Chunk { coord, voxels }
+        let column_heights = vec![0.0f32; CHUNK_SIZE * CHUNK_SIZE].into_boxed_slice();
+        Chunk {
+            coord,
+            voxels,
+            column_heights,
+        }
     }
 
     /// Index plat d'un voxel local. Z varie le plus vite (colonne contiguë).
@@ -86,6 +97,24 @@ impl Chunk {
     fn index(x: usize, y: usize, z: usize) -> usize {
         debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_HEIGHT);
         (x * CHUNK_SIZE + y) * CHUNK_HEIGHT + z
+    }
+
+    /// Index plat d'une colonne locale `(x, y)`.
+    #[inline]
+    fn column_index(x: usize, y: usize) -> usize {
+        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE);
+        x * CHUNK_SIZE + y
+    }
+
+    /// Hauteur de surface en cache à la colonne **locale** `(x, y)`.
+    pub fn column_height(&self, x: usize, y: usize) -> f32 {
+        self.column_heights[Self::column_index(x, y)]
+    }
+
+    /// Renseigne la hauteur de surface en cache à la colonne **locale** `(x, y)`
+    /// (appelé par la génération).
+    pub fn set_column_height(&mut self, x: usize, y: usize, h: f32) {
+        self.column_heights[Self::column_index(x, y)] = h;
     }
 
     /// Voxel aux coordonnées **locales** au chunk.

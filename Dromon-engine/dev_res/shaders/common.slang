@@ -32,6 +32,7 @@ static const float SHADOW_MAP_TEXEL_SIZE = 1.0 / 2048.0;
 
 // Renvoie un facteur d'éclairement ∈ [0,1] : 1 = pleinement éclairé, 0 = ombré.
 float computeShadow(float4 shadowCoord, float NdotL) {
+
   // Division perspective (triviale en orthographique, où w = 1).
   float3 proj = shadowCoord.xyz / shadowCoord.w;
 

@@ -20,6 +20,7 @@
 //! jour où l'on voudra un bruit dérivable analytiquement, seul
 //! [`HeightField::noise_with_grad`] sera à remplacer.
 
+use super::utils::smootherstep;
 use noise::{NoiseFn, Perlin};
 
 /// Paramètres du champ d'altitude. Regroupe le contrôle du fBm et de l'érosion.
@@ -138,10 +139,26 @@ impl HeightField {
             // rugosité des octaves suivantes : faible en vallée (détail/pentes
             // gommés), pleine en altitude. `lowland_flatness` dose l'effet.
             if i == 0 {
-                let macro_alt = (value * erode).clamp(0.0, 1.0);
-                let r = smoothstep(0.25, 0.6, macro_alt);
-                roughness = (1.0 - self.params.lowland_flatness)
-                    + self.params.lowland_flatness * r;
+                // Altitude grossière, PERTURBÉE par une octave de bruit décorrélée
+                // (offset spatial) avant le seuil de rugosité. Sans cette
+                // perturbation, le seuil suit une courbe de niveau — lisse et
+                // régulière — de l'octave macro : la transition lisse→rugueux
+                // devient une « ligne » nette dans le paysage, pile aux iso-valeurs
+                // `edge0`/`edge1` du smoothstep. Le jitter déchiquette cette
+                // frontière → transition naturelle, sans contour visible. (Il ne
+                // touche QUE la modulation de rugosité, pas la géométrie : `sum`
+                // n'en dépend pas.)
+                const CONTROL_OFFSET: f64 = 2048.0;
+                const CONTROL_JITTER: f64 = 0.18;
+                let j = self
+                    .noise
+                    .get([(wx + CONTROL_OFFSET) * freq, (wy + CONTROL_OFFSET) * freq]);
+                let macro_alt = (value * erode + j * CONTROL_JITTER).clamp(0.0, 1.0);
+                // smootherstep (C2) plutôt que smoothstep (C1) : pas de saut de
+                // courbure aux seuils → on évite aussi le liseré d'éclairage (bande
+                // de Mach) qui trahissait les bornes.
+                let r = smootherstep(0.25, 0.6, macro_alt);
+                roughness = (1.0 - self.params.lowland_flatness) + self.params.lowland_flatness * r;
             }
 
             amp *= self.params.gain;
@@ -151,6 +168,33 @@ impl HeightField {
         // Renormalise : sans érosion la somme des `amp` ramènerait dans [-1, 1].
         // (Avec érosion le résultat est plus petit, donc toujours borné.)
         if norm > 0.0 { sum / norm } else { 0.0 }
+    }
+
+    /// Perturbation d'altitude (en voxels) à AJOUTER aux seuils de matériau de
+    /// surface (sable/herbe/neige) pour casser leurs frontières rectilignes.
+    ///
+    /// C'est un bruit de Perlin propre, fonction des seules coordonnées **monde**
+    /// (donc continu et sans couture entre chunks, comme [`HeightField::height`]),
+    /// mais **décorrélé du relief** par un grand décalage spatial : il ne suit pas
+    /// les bosses du terrain, il ondule indépendamment. Deux octaves : une basse
+    /// fréquence (grandes ondulations de la frontière) + une plus fine (dentelure
+    /// de bord), ce qui donne un contour naturel plutôt qu'une simple vague molle.
+    ///
+    /// On perturbe ainsi l'altitude *testée* (et non le seuil) : la frontière
+    /// devient l'iso-courbe de `surface + jitter` au lieu de `surface = seuil`.
+    pub fn material_jitter(&self, wx: f64, wy: f64) -> f64 {
+        // Décalage monde qui décorrèle ce bruit de l'altitude (même source Perlin).
+        const OFFSET: f64 = 4096.0;
+        // Fréquence des grandes ondulations (longueur d'onde ≈ 1/FREQ voxels).
+        const FREQ: f64 = 0.01;
+        // Amplitude verticale de la perturbation, en voxels.
+        const AMPLITUDE: f64 = 20.0;
+
+        let x = wx + OFFSET;
+        let y = wy + OFFSET;
+        let macro_n = self.noise.get([x * FREQ, y * FREQ]);
+        let detail_n = self.noise.get([x * FREQ * 4.0, y * FREQ * 4.0]);
+        (macro_n + 0.35 * detail_n) * AMPLITUDE
     }
 
     /// Valeur du bruit + gradient `(∂/∂x, ∂/∂y)` en `(x, y)` (espace bruit), par
@@ -163,11 +207,4 @@ impl HeightField {
         let ny = self.noise.get([x, y + EPS]);
         (n, (nx - n) / EPS, (ny - n) / EPS)
     }
-}
-
-/// Interpolation lisse (Hermite) : 0 sous `edge0`, 1 au-dessus de `edge1`, et une
-/// courbe en S entre les deux. Équivalent du `smoothstep` des shaders.
-fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }

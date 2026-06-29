@@ -32,7 +32,7 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         let mut camera = Self {
-            position: Vec3::new(2.0, 2.0, 50.0),
+            position: Vec3::new(2.0, 2.0, 260.0),
             yaw: 0.0,
             pitch: 0.0,
             fov_y: 45.0_f32.to_radians(),

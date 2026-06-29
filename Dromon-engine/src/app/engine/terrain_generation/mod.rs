@@ -1,7 +1,9 @@
 mod chunk;
 mod chunk_manager;
 mod height_field;
+mod material;
 mod mesher;
+mod utils;
 
 pub use chunk_manager::{ChunkManager, GenParams};
 pub use height_field::HeightParams;
