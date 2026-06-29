@@ -2,16 +2,15 @@
 
 #include "common.slang"
 
-// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1,2).
+// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1).
 struct VSInput {
   float3 inPosition;        // location 0
-  float3 inNormal;          // location 1 — gradient de densité
-  float4 inMaterialWeights; // location 2 — poids des 4 matériaux dominants
+  float4 inMaterialWeights; // location 1 — poids des 4 matériaux dominants
 }
 
 struct VSOutput {
   float4 pos : SV_Position;
-  float3 normal;
+  float3 worldPos; // position monde, pour recalculer la normale dans le frag
   float4 materialWeights;
   float4 shadowCoord;
 }
@@ -21,7 +20,7 @@ VSOutput terrainVertMain(VSInput input) {
   VSOutput output;
   float4 worldPos = mul(pc.model, float4(input.inPosition, 1.0));
   output.pos = mul(ubo.proj, mul(ubo.view, worldPos));
-  output.normal = mul((float3x3)pc.normalMatrix, input.inNormal);
+  output.worldPos = worldPos.xyz;
   output.materialWeights = input.inMaterialWeights;
   output.shadowCoord = mul(ubo.lightViewProj, worldPos);
   return output;
@@ -40,13 +39,23 @@ float4 terrainShadowVertMain(ShadowVSInput input) : SV_Position {
 
 [shader("fragment")]
 float4 terrainFragMain(VSOutput vertIn) : SV_Target {
-  // Couleur de base MINIMALE : dégradé « terre → neige » piloté par le poids du
-  // 1er matériau. Placeholder en attendant le vrai texture splatting (top-K).
-  float3 dirt = float3(0.40, 0.30, 0.20);
-  float3 snow = float3(0.90, 0.90, 0.92);
-  float3 baseColor = lerp(dirt, snow, saturate(vertIn.materialWeights.x));
+  // Normale géométrique recalculée par face depuis les dérivées d'écran de la
+  // position monde (flat shading). Évite de stocker une normale par vertex.
+  // On l'oriente vers le haut (+Z) : le terrain heightmap n'a pas de surplombs.
+  float3 N = normalize(cross(ddx(vertIn.worldPos), ddy(vertIn.worldPos)));
+  if (N.z < 0.0) {
+    N = -N;
+  }
 
-  float3 N = normalize(vertIn.normal);
+  // Couleur de base PROVISOIRE, pilotée par la pente : herbe sur les surfaces
+  // planes, roche sur les pentes raides. Placeholder en attendant le vrai
+  // texture splatting piloté par les matériaux (`materialWeights` + IDs).
+  // N.z ≈ 1 → horizontal ; N.z ≈ 0 → vertical.
+  float3 grass = float3(0.23, 0.42, 0.16);
+  float3 rock = float3(0.38, 0.36, 0.33);
+  float slope = 1.0 - saturate(N.z);
+  float3 baseColor = lerp(grass, rock, smoothstep(0.35, 0.65, slope));
+
   float3 L = normalize(-ubo.lightDirection.xyz);
   float NdotL = max(dot(N, L), 0.0);
 

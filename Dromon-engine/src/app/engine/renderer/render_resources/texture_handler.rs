@@ -2,7 +2,7 @@ use crate::app::{
     engine::{
         renderer::{
             buffer::Buffer, descriptors::DescriptorHandler, image_layout_state::ImageLayoutState,
-            render_object::texture::Texture,
+            render_resources::texture::Texture,
         },
         rendering_context::RenderingContext,
     },

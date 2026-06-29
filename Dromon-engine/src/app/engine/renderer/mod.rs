@@ -2,13 +2,12 @@ mod buffer;
 mod camera;
 mod descriptors;
 pub mod image_layout_state;
-pub(crate) mod render_object;
+pub(crate) mod render_resources;
 mod render_systems;
 mod renderer_initialize;
 mod renderer_record_pass;
 mod shadow_map;
 mod swapchain;
-pub mod terrain;
 mod uniform_buffer;
 pub(crate) mod world;
 

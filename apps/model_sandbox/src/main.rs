@@ -13,17 +13,17 @@ struct ModelSandbox;
 
 impl Scene for ModelSandbox {
     fn setup(&mut self, world: &mut World) -> Result<()> {
-        let rorm = &mut world.rorm;
-        rorm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
-        rorm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
-        rorm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string(), true)?;
-        rorm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string(), true)?;
+        let rrm = &mut world.rrm;
+        rrm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
+        rrm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
+        rrm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string(), true)?;
+        rrm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string(), true)?;
 
         let render_objects = vec![
             RenderObject::new(
-                rorm.get_mesh("mesh1")
+                rrm.get_mesh("mesh1")
                     .context("mesh \"mesh1\" introuvable")?,
-                rorm.get_texture("texture1")
+                rrm.get_texture("texture1")
                     .context("texture \"texture1\" introuvable")?,
                 Transform {
                     translation: glam::Vec3::new(0.0, 1.0, 0.0),
@@ -31,9 +31,9 @@ impl Scene for ModelSandbox {
                 },
             ),
             RenderObject::new(
-                rorm.get_mesh("mesh2")
+                rrm.get_mesh("mesh2")
                     .context("mesh \"mesh2\" introuvable")?,
-                rorm.get_texture("texture2")
+                rrm.get_texture("texture2")
                     .context("texture \"texture2\" introuvable")?,
                 Transform {
                     translation: glam::Vec3::new(0.0, -1.0, 0.0),

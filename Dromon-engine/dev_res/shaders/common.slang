@@ -26,6 +26,10 @@ ConstantBuffer<PushConstants> pc;
 [[vk::binding(0, 2)]]
 Sampler2DShadow shadowMap;
 
+// Taille d'un texel de la shadow map en coordonnées uv (= 1 / résolution).
+// ⚠ doit rester synchronisé avec SHADOW_MAP_RESOLUTION (shadow_map.rs).
+static const float SHADOW_MAP_TEXEL_SIZE = 1.0 / 2048.0;
+
 // Renvoie un facteur d'éclairement ∈ [0,1] : 1 = pleinement éclairé, 0 = ombré.
 float computeShadow(float4 shadowCoord, float NdotL) {
   // Division perspective (triviale en orthographique, où w = 1).
@@ -43,5 +47,15 @@ float computeShadow(float4 shadowCoord, float NdotL) {
   // plus on décale, pour limiter le « shadow acne ».
   float bias = max(0.0005, 0.0025 * (1.0 - NdotL));
 
-  return shadowMap.SampleCmp(uv, proj.z - bias);
+  // PCF élargi : on moyenne une grille 5×5 de texels voisins. Chaque tap est
+  // déjà filtré 2×2 par le hardware (sampler LINEAR) → bord lissé en dégradé
+  // au lieu d'un escalier net.
+  float sum = 0.0;
+  for (int x = -2; x <= 2; x++) {
+    for (int y = -2; y <= 2; y++) {
+      float2 offset = float2(x, y) * SHADOW_MAP_TEXEL_SIZE;
+      sum += shadowMap.SampleCmp(uv + offset, proj.z - bias);
+    }
+  }
+  return sum / 9.0; // moyenne des 9 échantillons
 }

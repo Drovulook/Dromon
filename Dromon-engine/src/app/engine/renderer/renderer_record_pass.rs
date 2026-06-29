@@ -52,8 +52,11 @@ impl Renderer {
                 &self.world.render_objects,
             );
 
-            self.terrain_render_sytem
-                .record_shadow_terrain(command_buffer, frame_index);
+            self.terrain_render_sytem.record_shadow_terrain(
+                command_buffer,
+                frame_index,
+                &self.world.terrain_meshes,
+            );
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -142,8 +145,11 @@ impl Renderer {
                 &self.world.render_objects,
             );
 
-            self.terrain_render_sytem
-                .record_render_terrain(frame.command_buffer, self.frame_index);
+            self.terrain_render_sytem.record_render_terrain(
+                frame.command_buffer,
+                self.frame_index,
+                &self.world.terrain_meshes,
+            );
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 

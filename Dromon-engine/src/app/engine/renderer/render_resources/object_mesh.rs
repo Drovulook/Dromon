@@ -54,7 +54,7 @@ impl ObjectVertex {
     }
 }
 
-pub struct Mesh {
+pub struct ObjectMesh {
     context: Arc<RenderingContext>,
 
     pub vertices: Vec<ObjectVertex>,
@@ -67,7 +67,7 @@ pub struct Mesh {
     pub index_buffer: Buffer,
 }
 
-impl Mesh {
+impl ObjectMesh {
     pub fn new(
         context: Arc<RenderingContext>,
         vertices: Vec<ObjectVertex>,
@@ -76,8 +76,8 @@ impl Mesh {
         indices: Vec<u32>,
         index_staging_buffer: Buffer,
         index_buffer: Buffer,
-    ) -> Mesh {
-        Mesh {
+    ) -> ObjectMesh {
+        ObjectMesh {
             context,
             vertices,
             vertex_staging_buffer,

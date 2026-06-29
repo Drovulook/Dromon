@@ -2,13 +2,14 @@ mod debug_messenger;
 mod inputs;
 pub mod renderer;
 mod rendering_context;
+pub mod terrain_generation;
 pub mod timer;
 
+use crate::Scene;
 use crate::app::engine::inputs::base_event_subscriber;
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
 };
-use crate::Scene;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
 use anyhow::Result;
@@ -155,7 +156,12 @@ impl Engine {
         self.windows.insert(window_id, window.clone());
         self.renderers.insert(
             window_id,
-            Renderer::new(self.rendering_context.clone(), window.clone(), logger, scene)?,
+            Renderer::new(
+                self.rendering_context.clone(),
+                window.clone(),
+                logger,
+                scene,
+            )?,
         );
         Ok(window_id)
     }

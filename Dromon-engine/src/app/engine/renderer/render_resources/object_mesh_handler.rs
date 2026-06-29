@@ -1,6 +1,6 @@
 use crate::app::engine::renderer::buffer::Buffer;
-use crate::app::engine::renderer::render_object::mesh::Mesh;
-use crate::app::engine::renderer::render_object::mesh::ObjectVertex;
+use crate::app::engine::renderer::render_resources::object_mesh::ObjectMesh;
+use crate::app::engine::renderer::render_resources::object_mesh::ObjectVertex;
 use crate::app::{engine::rendering_context::RenderingContext, logger::Logger};
 use anyhow::{Context, Result};
 use ash::vk;
@@ -8,17 +8,17 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::path::Path;
 use std::sync::Arc;
 
-pub struct MeshHandler {
+pub struct ObjectMeshHandler {
     pub context: Arc<RenderingContext>,
     pub logger: Arc<Logger>,
 }
 
-impl MeshHandler {
-    pub fn new(context: Arc<RenderingContext>, logger: Arc<Logger>) -> MeshHandler {
-        MeshHandler { context, logger }
+impl ObjectMeshHandler {
+    pub fn new(context: Arc<RenderingContext>, logger: Arc<Logger>) -> ObjectMeshHandler {
+        ObjectMeshHandler { context, logger }
     }
 
-    pub fn create_model(&self, model_path: &str, smooth: bool) -> Result<Mesh> {
+    pub fn create_model(&self, model_path: &str, smooth: bool) -> Result<ObjectMesh> {
         let (vertices, indices) = self.load_scene(model_path, smooth)?;
         let (vertex_staging_buffer, vertex_buffer) = Self::create_staging_and_device_buffer(
             self.context.clone(),
@@ -31,7 +31,7 @@ impl MeshHandler {
             indices.as_slice(),
             vk::BufferUsageFlags::INDEX_BUFFER,
         )?;
-        Ok(Mesh::new(
+        Ok(ObjectMesh::new(
             self.context.clone(),
             vertices,
             vertex_staging_buffer,
@@ -243,7 +243,7 @@ impl MeshHandler {
         Ok((staging_buffer, device_buffer))
     }
 
-    pub fn initialize(&self, mesh: &Mesh, command_buffer: &vk::CommandBuffer) {
+    pub fn initialize(&self, mesh: &ObjectMesh, command_buffer: &vk::CommandBuffer) {
         unsafe {
             self.context.device.cmd_copy_buffer(
                 *command_buffer,

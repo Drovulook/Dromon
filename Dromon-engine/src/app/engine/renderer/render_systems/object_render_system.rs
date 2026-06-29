@@ -1,5 +1,5 @@
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::render_object::{ObjectVertex, RenderObject};
+use crate::app::engine::renderer::render_resources::{ObjectVertex, RenderObject};
 use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::Result;
 use ash::vk;

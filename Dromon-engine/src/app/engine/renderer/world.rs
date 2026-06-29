@@ -8,13 +8,15 @@ use crate::app::{
     engine::{
         renderer::{
             descriptors::DescriptorHandler,
-            render_object::{RenderObject, RenderObjectResourceManager},
+            render_resources::{RenderObject, RenderResourceManager, TerrainMesh},
         },
         rendering_context::RenderingContext,
+        terrain_generation::{ChunkManager, GenParams, mesh_chunk},
         timer::Timer,
     },
     logger::Logger,
 };
+use glam::IVec2;
 
 // Paramètres du « frustum » orthographique de la lumière (la boîte qui doit
 // englober toute la scène projetant des ombres). À élargir si des objets sortent
@@ -71,28 +73,38 @@ impl DirectionalLight {
 
 pub struct World {
     pub logger: Arc<Logger>,
-    pub rorm: RenderObjectResourceManager,
+    pub rrm: RenderResourceManager,
     pub render_objects: Vec<RenderObject>,
     pub camera: Camera,
     pub light: DirectionalLight,
+    /// Données du terrain (voxels). `None` tant que la scène n'a pas appelé
+    /// [`World::generate_terrain`]. Conservé pour l'édition future (creuser,
+    /// poser des minerais, etc.).
+    pub chunk_manager: Option<ChunkManager>,
+    /// Un mesh GPU par chunk de terrain.
+    pub terrain_meshes: Vec<TerrainMesh>,
+    /// Contexte GPU, conservé pour pouvoir allouer les buffers du terrain au
+    /// moment du `setup` (la génération est pilotée par la scène).
+    context: Arc<RenderingContext>,
 }
 
 impl World {
     /// Crée un monde *vide* : seul le gestionnaire de ressources (`rorm`) et des
     /// valeurs par défaut (caméra, lumière) sont initialisés. Le contenu concret
-    /// (assets + `RenderObject`) est fourni par la `Scene` via `Scene::setup`, qui
-    /// est appelée juste après la construction du `Renderer`. La scène peut aussi
-    /// modifier `world.light` à ce moment-là.
+    /// (assets + `RenderObject`, terrain) est fourni par la `Scene` via
+    /// `Scene::setup`, appelée juste après la construction du `Renderer`. La
+    /// scène peut aussi modifier `world.light` à ce moment-là.
     pub fn new(
         logger: Arc<Logger>,
         context: Arc<RenderingContext>,
         descriptor_handler: Arc<DescriptorHandler>,
     ) -> Result<World> {
-        let rorm = RenderObjectResourceManager::new(context, logger.clone(), descriptor_handler)?;
+        let rorm =
+            RenderResourceManager::new(context.clone(), logger.clone(), descriptor_handler)?;
 
         Ok(World {
             logger,
-            rorm,
+            rrm: rorm,
             render_objects: Vec::new(),
             camera: Camera::default(),
             light: DirectionalLight {
@@ -100,11 +112,57 @@ impl World {
                 color: glam::Vec3::ONE,
                 intensity: 1.0,
             },
+            chunk_manager: None,
+            terrain_meshes: Vec::new(),
+            context,
         })
     }
 
+    /// Génère une grille de `chunks_x × chunks_y` chunks de terrain, centrée sur
+    /// l'origine (en coordonnées chunk), et construit un `TerrainMesh` par chunk.
+    /// Appelée par la scène dans `setup` ; l'upload GPU des meshes se fait ensuite
+    /// dans [`World::initialize`].
+    pub fn generate_terrain(
+        &mut self,
+        params: GenParams,
+        chunks_x: u32,
+        chunks_y: u32,
+    ) -> Result<()> {
+        let mut manager = ChunkManager::new(params);
+
+        // Coordonnées des chunks, centrées sur l'origine.
+        let half_x = chunks_x as i32 / 2;
+        let half_y = chunks_y as i32 / 2;
+        let mut coords = Vec::with_capacity((chunks_x * chunks_y) as usize);
+        for cx in 0..chunks_x as i32 {
+            for cy in 0..chunks_y as i32 {
+                coords.push(IVec2::new(cx - half_x, cy - half_y));
+            }
+        }
+
+        // 1) Génère TOUS les chunks (données voxel) d'abord, pour que le meshing
+        //    puisse échantillonner les chunks voisins aux bords (coutures continues).
+        for &coord in &coords {
+            manager.generate_chunk(coord);
+        }
+
+        // 2) Meshing : un TerrainMesh par chunk.
+        let mut terrain_meshes = Vec::with_capacity(coords.len());
+        for &coord in &coords {
+            let (vertices, indices) = mesh_chunk(&manager, coord);
+            terrain_meshes.push(TerrainMesh::new(self.context.clone(), vertices, indices)?);
+        }
+
+        self.chunk_manager = Some(manager);
+        self.terrain_meshes = terrain_meshes;
+        Ok(())
+    }
+
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
-        self.rorm.initialize(command_buffer)?;
+        self.rrm.initialize(command_buffer)?;
+        for mesh in &self.terrain_meshes {
+            mesh.initialize(command_buffer);
+        }
         Ok(())
     }
 

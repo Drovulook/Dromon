@@ -20,3 +20,4 @@ softbuffer = "0.4"
 winit = "0.30.13"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 gltf = "1.4.1"
+noise = "0.9.0"

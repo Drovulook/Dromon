@@ -25,25 +25,27 @@ pub struct Camera {
     pub move_speed: f32,
     pub rotation_sensitivity: f32,
     pub zoom_speed: f32,
-    pub boost_factor: f32, // multiplicateur appliqué tant qu'Alt est maintenue
+    pub boost_factor_rot: f32, // multiplicateur appliqué tant qu'Alt est maintenue
+    pub boost_factor_move: f32,
 }
 
 impl Default for Camera {
     fn default() -> Self {
         let mut camera = Self {
-            position: Vec3::new(2.0, 2.0, 2.0),
+            position: Vec3::new(2.0, 2.0, 30.0),
             yaw: 0.0,
             pitch: 0.0,
             fov_y: 45.0_f32.to_radians(),
             near: 0.1,
-            far: 100.0,
+            far: 1000.0,
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
-            move_speed: 3.0,
+            move_speed: 30.0,
             rotation_sensitivity: 0.002,
             zoom_speed: 0.05,
-            boost_factor: 4.0,
+            boost_factor_rot: 4.0,
+            boost_factor_move: 4.0,
         };
         // au démarrage, on regarde l'origine (déduit yaw/pitch de la direction)
         camera.look_at(Vec3::ZERO);
@@ -75,7 +77,7 @@ impl Camera {
 
         // Alt maintenue → on amplifie déplacement, rotation et zoom.
         let boost = if input.is_held(KeyCode::AltLeft) {
-            self.boost_factor
+            self.boost_factor_rot
         } else {
             1.0
         };
@@ -116,6 +118,11 @@ impl Camera {
         }
 
         // normalize() évite d'aller plus vite en diagonale (front + right).
+        let boost = if input.is_held(KeyCode::AltLeft) {
+            self.boost_factor_move
+        } else {
+            1.0
+        };
         if direction != Vec3::ZERO {
             self.position += direction.normalize() * self.move_speed * boost * dt;
         }
