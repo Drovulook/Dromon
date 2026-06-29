@@ -238,7 +238,9 @@ impl Renderer {
             frame.uniform_buffer.update(
                 self.world.camera.view,
                 self.world.camera.proj,
-                self.world.light.view_proj(),
+                self.world
+                    .light
+                    .view_proj(self.world.camera.position, self.world.camera.front()),
                 self.world.light.direction,
                 self.world.light.color,
                 self.world.light.intensity,

@@ -1,17 +1,18 @@
-// Shader du terrain volumétrique (géométrie issue de marching cubes).
+// Shader du terrain volumétrique (géométrie issue de Surface Nets).
 
 #include "common.slang"
 
-// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1).
+// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1,2).
 struct VSInput {
-  float3 inPosition;        // location 0
-  float4 inMaterialWeights; // location 1 — poids des 4 matériaux dominants
+  float3 inPosition; // location 0
+  float3 inNormal;   // location 1 — normale lissée (gradient de densité)
+  float3 inColor;    // location 2 — couleur du sommet (matériaux mélangés côté CPU)
 }
 
 struct VSOutput {
   float4 pos : SV_Position;
-  float3 worldPos; // position monde, pour recalculer la normale dans le frag
-  float4 materialWeights;
+  float3 worldNormal; // normale monde, interpolée pour l'éclairage lisse
+  float3 color;       // couleur interpolée entre les sommets par le rasterizer
   float4 shadowCoord;
 }
 
@@ -20,8 +21,10 @@ VSOutput terrainVertMain(VSInput input) {
   VSOutput output;
   float4 worldPos = mul(pc.model, float4(input.inPosition, 1.0));
   output.pos = mul(ubo.proj, mul(ubo.view, worldPos));
-  output.worldPos = worldPos.xyz;
-  output.materialWeights = input.inMaterialWeights;
+  // model = identité pour le terrain, mais on applique la normalMatrix par
+  // cohérence (gère un éventuel scale non uniforme).
+  output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
+  output.color = input.inColor;
   output.shadowCoord = mul(ubo.lightViewProj, worldPos);
   return output;
 }
@@ -39,30 +42,25 @@ float4 terrainShadowVertMain(ShadowVSInput input) : SV_Position {
 
 [shader("fragment")]
 float4 terrainFragMain(VSOutput vertIn) : SV_Target {
-  // Normale géométrique recalculée par face depuis les dérivées d'écran de la
-  // position monde (flat shading). Évite de stocker une normale par vertex.
-  // On l'oriente vers le haut (+Z) : le terrain heightmap n'a pas de surplombs.
-  float3 N = normalize(cross(ddx(vertIn.worldPos), ddy(vertIn.worldPos)));
-  if (N.z < 0.0) {
-    N = -N;
-  }
+  // Normale lissée interpolée depuis les sommets (gradient de densité). Donne un
+  // ombrage doux sur la surface Surface Nets, contrairement au flat shading.
+  // La renormaliser : l'interpolation linéaire raccourcit le vecteur.
+  float3 N = normalize(vertIn.worldNormal);
 
-  // Couleur de base PROVISOIRE, pilotée par la pente : herbe sur les surfaces
-  // planes, roche sur les pentes raides. Placeholder en attendant le vrai
-  // texture splatting piloté par les matériaux (`materialWeights` + IDs).
-  // N.z ≈ 1 → horizontal ; N.z ≈ 0 → vertical.
-  float3 grass = float3(0.23, 0.42, 0.16);
-  float3 rock = float3(0.38, 0.36, 0.33);
-  float slope = 1.0 - saturate(N.z);
-  float3 baseColor = lerp(grass, rock, smoothstep(0.35, 0.65, slope));
+  // Couleur du matériau : déjà calculée côté CPU (mélange des matériaux dominants
+  // selon l'altitude) et interpolée par le rasterizer entre les sommets.
+  float3 material = vertIn.color;
 
   float3 L = normalize(-ubo.lightDirection.xyz);
   float NdotL = max(dot(N, L), 0.0);
 
   float shadow = computeShadow(vertIn.shadowCoord, NdotL);
   float3 lightCol = ubo.lightColor.rgb * ubo.lightColor.w;
-  float3 ambient = 0.05 * baseColor;
-  float3 color = baseColor * lightCol * NdotL * shadow + ambient;
+  // Ambiant = lumière indirecte du ciel, légèrement bleutée. MULTIPLIÉ par la
+  // couleur du matériau (et non ajouté) : les zones à l'ombre gardent leur teinte
+  // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
+  float3 ambient = float3(0.28, 0.32, 0.40);
+  float3 color = material * (ambient + lightCol * NdotL * shadow);
 
   return float4(color, 1.0);
 }

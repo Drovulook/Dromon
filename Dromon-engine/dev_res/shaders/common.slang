@@ -44,12 +44,15 @@ float computeShadow(float4 shadowCoord, float NdotL) {
   float2 uv = proj.xy * 0.5 + 0.5;
 
   // Biais dépendant de la pente : plus la surface est rasante (NdotL faible),
-  // plus on décale, pour limiter le « shadow acne ».
-  float bias = max(0.0005, 0.0025 * (1.0 - NdotL));
+  // plus on décale, pour limiter le « shadow acne ». ⚠ Exprimé en profondeur
+  // NORMALISÉE [0,1] : avec `far` grand (terrain, ~600), un même biais NDC vaut
+  // beaucoup plus en unités monde → ces valeurs suffisent à tuer l'acné du
+  // terrain sans trop décoller l'ombre des petits objets (far ~60).
+  float bias = max(0.002, 0.008 * (1.0 - NdotL));
 
-  // PCF élargi : on moyenne une grille 5×5 de texels voisins. Chaque tap est
-  // déjà filtré 2×2 par le hardware (sampler LINEAR) → bord lissé en dégradé
-  // au lieu d'un escalier net.
+  // PCF 3×3 : on moyenne 9 texels voisins. Chaque tap est déjà filtré 2×2 par le
+  // hardware (sampler LINEAR) → bord lissé sans escalier, mais sans le flou
+  // excessif d'un noyau trop large.
   float sum = 0.0;
   for (int x = -2; x <= 2; x++) {
     for (int y = -2; y <= 2; y++) {
@@ -57,5 +60,5 @@ float computeShadow(float4 shadowCoord, float NdotL) {
       sum += shadowMap.SampleCmp(uv + offset, proj.z - bias);
     }
   }
-  return sum / 9.0; // moyenne des 9 échantillons
+  return sum / 25; // moyenne des 9 échantillons
 }

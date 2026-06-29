@@ -32,7 +32,7 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         let mut camera = Self {
-            position: Vec3::new(2.0, 2.0, 30.0),
+            position: Vec3::new(2.0, 2.0, 50.0),
             yaw: 0.0,
             pitch: 0.0,
             fov_y: 45.0_f32.to_radians(),
@@ -55,7 +55,7 @@ impl Default for Camera {
 
 impl Camera {
     /// Vecteur « avant » (direction du regard), reconstruit depuis yaw/pitch.
-    fn front(&self) -> Vec3 {
+    pub fn front(&self) -> Vec3 {
         Vec3::new(
             self.pitch.cos() * self.yaw.cos(),
             self.pitch.cos() * self.yaw.sin(),

@@ -6,41 +6,50 @@ pub const CHUNK_SIZE: usize = 32;
 /// Hauteur d'un chunk en voxels (axe Z — le monde est en Z-up).
 pub const CHUNK_HEIGHT: usize = 256;
 
-/// Un voxel : jusqu'à 4 matériaux dominants mélangés (« top-K »).
+/// Valeur de densité de l'iso-surface : la surface du terrain est l'ensemble des
+/// points où `density == ISO_LEVEL`. Au-dessus (densité < ISO) = air, en dessous
+/// (densité > ISO) = matière. Le mailleur (Surface Nets) reconstruit cette
+/// surface lisse en interpolant la densité **entre** les voxels — d'où l'absence
+/// de marches, contrairement à un meshing « voxel plein le plus haut ».
+pub const ISO_LEVEL: f32 = 0.0;
+
+/// Un voxel : une **densité** signée + jusqu'à 4 matériaux dominants mélangés.
 ///
-/// `materials` contient les IDs ; `weights` leurs proportions quantifiées sur
-/// `[0, 255]` (somme attendue = 255 pour un voxel plein). L'air est le cas
-/// particulier où tous les poids sont nuls — voir [`Voxel::AIR`].
-///
-/// 12 octets, contre 16 pour un `Vec4<f32>`, et bien plus expressif : on peut
-/// avoir des centaines de matériaux dans le jeu tout en n'en mélangeant que 4
-/// par voxel. Les poids `f32` du `TerrainVertex` (côté GPU) sont dérivés de
-/// ceux-ci au moment du meshing.
+/// `density` situe le voxel par rapport à la surface (cf. [`ISO_LEVEL`]). C'est
+/// le champ scalaire que Surface Nets échantillonne ; le modifier (creuser,
+/// remblayer) déplace la surface en douceur. `materials`/`weights` portent la
+/// composition (IDs + proportions quantifiées sur `[0, 255]`) pour le futur
+/// texture splatting.
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Voxel {
+    pub density: f32,
     pub materials: [u16; 4],
     pub weights: [u8; 4],
 }
 
 impl Voxel {
-    /// Voxel vide. C'est aussi la valeur par défaut d'un chunk fraîchement créé.
+    /// Voxel d'air « franc ». C'est la valeur par défaut d'un chunk fraîchement
+    /// créé ; la génération écrase ensuite la densité par la vraie valeur lisse.
     pub const AIR: Voxel = Voxel {
+        density: -1.0,
         materials: [MATERIAL_AIR; 4],
         weights: [0; 4],
     };
 
-    /// Voxel composé d'un seul matériau (poids plein sur le premier canal).
-    pub fn solid(material: u16) -> Voxel {
+    /// Voxel composé d'un seul matériau, à la densité donnée (poids plein sur le
+    /// premier canal).
+    pub fn solid(density: f32, material: u16) -> Voxel {
         Voxel {
+            density,
             materials: [material, MATERIAL_AIR, MATERIAL_AIR, MATERIAL_AIR],
             weights: [255, 0, 0, 0],
         }
     }
 
-    /// `true` si le voxel ne contient aucune matière.
+    /// `true` si le voxel est de l'air (densité sous l'iso-surface).
     pub fn is_air(&self) -> bool {
-        self.weights == [0; 4]
+        self.density < ISO_LEVEL
     }
 }
 
@@ -87,6 +96,12 @@ impl Chunk {
     /// Remplace le voxel aux coordonnées **locales** au chunk.
     pub fn set_voxel(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
         self.voxels[Self::index(x, y, z)] = voxel;
+    }
+
+    /// Densité du voxel aux coordonnées **locales** (raccourci pour le mailleur,
+    /// qui ne lit que ce champ).
+    pub fn density(&self, x: usize, y: usize, z: usize) -> f32 {
+        self.voxels[Self::index(x, y, z)].density
     }
 
     /// Z du voxel non-air le plus haut d'une colonne, ou `None` si la colonne

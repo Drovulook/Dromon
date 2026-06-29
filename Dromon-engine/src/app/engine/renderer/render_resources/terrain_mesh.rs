@@ -11,8 +11,8 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct TerrainVertex {
     pub pos: Vec3,
-    pub material_weights: [f32; 4], // poids des 4 matériaux dominants (top-K); pas de Vec4 car
-                      // problème de padding sinon
+    pub normal: Vec3, // normale lissée (gradient de densité), pour l'éclairage
+    pub color: Vec3,  // couleur du sommet : mélange des matériaux résolu côté CPU
 }
 
 impl TerrainVertex {
@@ -24,7 +24,7 @@ impl TerrainVertex {
         }
     }
 
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
+    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
         [
             vk::VertexInputAttributeDescription {
                 binding: 0,
@@ -35,8 +35,14 @@ impl TerrainVertex {
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 1,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(TerrainVertex, material_weights) as u32,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(TerrainVertex, normal) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: 2,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(TerrainVertex, color) as u32,
             },
         ]
     }
