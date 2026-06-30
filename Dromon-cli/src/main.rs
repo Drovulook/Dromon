@@ -1,15 +1,16 @@
 mod app_state;
 mod log_parser;
+mod tabs;
 
-use app_state::AppState;
+use app_state::{AppState, Tab};
 use color_eyre::eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode},
-    layout::{Constraint, Layout},
+    crossterm::event::{self, Event, KeyCode, KeyModifiers},
+    layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Paragraph, Tabs},
 };
 use std::{
     io::{BufRead, BufReader},
@@ -76,8 +77,11 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Left if ctrl => state.prev_tab(),
+                    KeyCode::Right if ctrl => state.next_tab(),
                     KeyCode::Up => state.scroll_up(),
                     KeyCode::Down => state.scroll_down(),
                     KeyCode::Char('g') | KeyCode::Home => state.go_to_top(),
@@ -95,21 +99,63 @@ const BORDER: Color = Color::Rgb(0x9D, 0x7B, 0xBF);
 const TITLE: Color = Color::Rgb(0xE6, 0xA2, 0x4C);
 const FG: Color = Color::Rgb(0xBF, 0xBD, 0xB6);
 const ACCENT: Color = Color::Rgb(0x56, 0x9C, 0xD6);
+const MUTED: Color = Color::Rgb(0x6B, 0x6A, 0x66);
 
 fn render(frame: &mut Frame, state: &mut AppState) {
-    let [status_area, logs_area] = Layout::vertical([
+    let [top_area, tabs_area, content_area] = Layout::vertical([
         Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Min(0),
     ])
     .areas(frame.area());
 
-    state.viewport_height = (logs_area.height as usize).saturating_sub(2).max(1);
+    // Barre du haut : statut (STATE/FPS) à gauche, config (BUILD/PROFILING) à droite.
+    let [status_area, config_area] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(46)]).areas(top_area);
+
+    state.viewport_height = (content_area.height as usize).saturating_sub(2).max(1);
     if state.auto_scroll {
         *state.list_state.offset_mut() = state.bottom_offset();
     }
 
     render_status(frame, state, status_area);
-    render_logs(frame, state, logs_area);
+    render_config(frame, state, config_area);
+    render_tabs(frame, state, tabs_area);
+
+    match state.active_tab {
+        Tab::Logs => tabs::infos::render(frame, state, content_area),
+        Tab::Profiling => tabs::profiling::render(frame, content_area),
+        Tab::World => tabs::world::render(frame, content_area),
+    }
+}
+
+fn render_tabs(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+    // Petite marge à gauche, onglets au centre, rappel de navigation à droite.
+    let [_, tabs_area, hint_area] = Layout::horizontal([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(26),
+    ])
+    .areas(area);
+
+    // Onglet actif : « chip » à fond plein ; inactifs atténués. Le padding donne
+    // de l'air autour des libellés et fait ressortir le fond du chip.
+    let tabs = Tabs::new(Tab::ALL.iter().map(|t| t.title()))
+        .select(state.active_tab.index())
+        .style(Style::default().fg(MUTED))
+        .highlight_style(
+            Style::default()
+                .fg(BG)
+                .bg(ACCENT)
+                .add_modifier(Modifier::BOLD),
+        )
+        .divider(Span::styled("·", Style::default().fg(BORDER)))
+        .padding(" ", " ");
+    frame.render_widget(tabs, tabs_area);
+
+    let hint = Paragraph::new(Span::styled("Ctrl+←/→ onglet ", Style::default().fg(BORDER)))
+        .alignment(Alignment::Right);
+    frame.render_widget(hint, hint_area);
 }
 
 fn render_status(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
@@ -121,11 +167,17 @@ fn render_status(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rec
 
     let line = Line::from(vec![
         Span::raw("  "),
-        Span::styled("STATE", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "STATE",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
         Span::styled(engine_state, Style::default().fg(FG)),
         Span::raw("     "),
-        Span::styled("FPS", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "FPS",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
         Span::styled(fps_str, Style::default().fg(FG)),
     ]);
@@ -139,28 +191,36 @@ fn render_status(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rec
     frame.render_widget(Paragraph::new(line).block(block), area);
 }
 
-fn render_logs(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::Rect) {
-    let items: Vec<ListItem> = state
-        .logs
-        .iter()
-        .map(|l| ListItem::new(l.clone()))
-        .collect();
-
-    let title = if state.auto_scroll {
-        "Logs — (↑↓ scroll  g/G haut/bas  q quitter)"
-    } else {
-        "Logs — [scroll manuel] (G = bas + auto)"
+fn render_config(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+    let build = state.config_mode.as_deref().unwrap_or("—");
+    let profiling = match state.config_profiling {
+        Some(true) => "enabled",
+        Some(false) => "disabled",
+        None => "—",
     };
 
+    let line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            "BUILD",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(build.to_string(), Style::default().fg(FG)),
+        Span::raw("     "),
+        Span::styled(
+            "PROFILING",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(profiling, Style::default().fg(FG)),
+    ]);
+
     let block = Block::default()
-        .title(Span::styled(title, Style::default().fg(TITLE)))
+        .title(Span::styled("config", Style::default().fg(TITLE)))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(BORDER))
-        .style(Style::default().bg(BG).fg(FG));
+        .style(Style::default().bg(BG));
 
-    frame.render_stateful_widget(
-        List::new(items).block(block),
-        area,
-        &mut state.list_state,
-    );
+    frame.render_widget(Paragraph::new(line).block(block), area);
 }

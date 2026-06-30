@@ -7,6 +7,7 @@ pub enum ParsedMessage {
     Log(Line<'static>),
     Fps(f32),
     State(String),
+    Config { mode: String, profiling: bool },
 }
 
 pub fn parse(raw: String) -> ParsedMessage {
@@ -17,6 +18,18 @@ pub fn parse(raw: String) -> ParsedMessage {
     }
     if let Some(rest) = raw.strip_prefix("[STATE] ") {
         return ParsedMessage::State(rest.trim().to_string());
+    }
+    if let Some(rest) = raw.strip_prefix("[CONFIG] ") {
+        let mut mode = String::new();
+        let mut profiling = false;
+        for tok in rest.split_whitespace() {
+            if let Some(v) = tok.strip_prefix("mode=") {
+                mode = v.to_string();
+            } else if let Some(v) = tok.strip_prefix("profiling=") {
+                profiling = v == "enabled";
+            }
+        }
+        return ParsedMessage::Config { mode, profiling };
     }
     ParsedMessage::Log(parse_log(raw))
 }

@@ -59,6 +59,8 @@ impl Engine {
 
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
 
+        logger.state("Initializing");
+
         let renderers = windows
             .iter()
             .map(|(id, window)| {
@@ -101,12 +103,14 @@ impl Engine {
         self.input_manager.handle_window_event(&event);
         match event {
             winit::event::WindowEvent::CloseRequested => {
+                self.logger.state("Closing");
                 if window_id == self.primary_window_id {
                     event_loop.exit();
                 } else {
                     self.windows.remove(&window_id);
                     self.renderers.remove(&window_id);
                 }
+                self.logger.state("Closed");
             }
 
             winit::event::WindowEvent::RedrawRequested => {

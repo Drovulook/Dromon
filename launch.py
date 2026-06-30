@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from launch_config import RELEASE, USE_CLI
+from launch_config import ENABLE_PROFILING, RELEASE, USE_CLI
 
 SOCKET_PATH = "/tmp/dromon.sock"
 WORKSPACE = os.path.dirname(os.path.abspath(__file__))
@@ -42,18 +42,40 @@ def cargo_run(
     return subprocess.Popen(cmd, cwd=WORKSPACE, stdout=devnull, stderr=devnull)
 
 
+def engine_args() -> list[str]:
+    """Arguments passés au binaire de l'app.
+
+    --use-profiling sert de signal à la librairie (engine) pour activer son
+    instrumentation ; le launcher ne fait que transmettre le flag.
+    """
+    args = []
+    if ENABLE_PROFILING:
+        args.append("--use-profiling")
+    return args
+
+
 def main():
     processes: list[subprocess.Popen] = []
 
-    # Package/binaire à lancer : tout argument `--<nom>` (hors `--use-cli`) le
-    # sélectionne, ex. `./launch.py --model_sandbox`. Défaut : model_sandbox.
+    # Package/binaire à lancer : tout argument `--<nom>` le sélectionne, ex.
+    # `./launch.py --model_sandbox`. Défaut : model_sandbox.
     target = "model_sandbox"
     for arg in sys.argv[1:]:
-        if arg.startswith("--") and arg != "--use-cli":
+        if arg.startswith("--"):
             target = arg[2:]
 
     try:
         if USE_CLI:
+            # On compile le CLI AVANT de le lancer. Sinon `cargo run` compile les
+            # dépendances pendant qu'on attend le socket : une recompilation longue
+            # dépasse le timeout, le launcher abandonne, et le CLI démarre vide sans
+            # que l'app ne se lance.
+            print("Compilation du CLI…")
+            success, build_output = cargo_build("Dromon-cli")
+            if not success:
+                print(build_output, file=sys.stderr)
+                sys.exit(1)
+
             cli = cargo_run("Dromon-cli")
             processes.append(cli)
 
@@ -63,6 +85,13 @@ def main():
                 time.sleep(0.25)
             else:
                 sys.exit(1)
+
+            send_to_cli(
+                "[CONFIG] mode={} profiling={}".format(
+                    "release" if RELEASE else "debug",
+                    "enabled" if ENABLE_PROFILING else "disabled",
+                )
+            )
 
             success, build_output = cargo_build(target)
             block = "--------------------------------------------------------------------- COMPILATION ---------------------------------------------------------------------\n"
@@ -76,17 +105,23 @@ def main():
                 sys.exit(1)
 
             binary = os.path.join(WORKSPACE, "target", PROFILE, target)
-            engine = subprocess.Popen([binary, "--use-cli"], cwd=WORKSPACE)
+            engine = subprocess.Popen(
+                [binary, "--use-cli"] + engine_args(), cwd=WORKSPACE
+            )
             processes.append(engine)
 
             engine_running = True
             while cli.poll() is None:
                 if engine_running and engine.poll() is not None:
                     engine_running = False
-                    send_to_cli("[INFO] L'engine s'est arrêté (code {})".format(engine.returncode))
+                    send_to_cli(
+                        "[INFO] L'engine s'est arrêté (code {})".format(
+                            engine.returncode
+                        )
+                    )
                 time.sleep(0.2)
         else:
-            engine = cargo_run(target)
+            engine = cargo_run(target, extra_args=engine_args())
             processes.append(engine)
             engine.wait()
 

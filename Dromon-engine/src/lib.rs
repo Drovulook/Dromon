@@ -20,6 +20,7 @@ pub use scene::Scene;
 /// boucle d'événements avec la `Scene` fournie par l'application.
 pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
     let use_cli = std::env::args().any(|a| a == "--use-cli");
+    let use_profiling = std::env::args().any(|a| a == "--use-profiling");
     let logger = Arc::new(Logger::new(use_cli));
 
     let event_loop = EventLoop::new().map_err(|e| {
