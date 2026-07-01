@@ -122,6 +122,7 @@ const DEBUG_UTILS_EXT: &CStr =
 
 impl RenderingContext {
     pub fn new(logger: Arc<Logger>, attributes: ContextAttributes) -> Result<Self> {
+        crate::profile!();
         unsafe {
             // TODO: créer entry et instance une seule fois, pas une fois / renderer
             let entry = ash::Entry::load()?;

@@ -39,6 +39,7 @@ impl Engine {
         logger: Arc<Logger>,
         scene: &mut dyn Scene,
     ) -> Result<Self> {
+        crate::profile!();
         let attrs = WindowAttributes::default().with_title("Dromon");
         #[cfg(target_os = "linux")]
         let attrs = attrs.with_name("dromon", "dromon");

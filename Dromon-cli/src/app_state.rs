@@ -1,5 +1,6 @@
 use crate::log_parser::{self, ParsedMessage};
-use ratatui::{text::Line, widgets::ListState};
+use crate::tabs::logs::LogsState;
+use crate::tabs::profiling::ProfilingState;
 use std::sync::{Arc, atomic::AtomicBool, mpsc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -26,34 +27,42 @@ impl Tab {
     }
 }
 
+/// État global de l'application : les bandeaux du haut (Dromon Engine, config),
+/// la barre des onglets et le canal de réception. L'état et la logique propres à
+/// chaque onglet vivent dans son module (`tabs::logs`, `tabs::profiling`) ; ici
+/// on ne fait que router les messages reçus vers le bon sous-état.
 pub struct AppState {
-    pub logs: Vec<Line<'static>>,
     pub rx: mpsc::Receiver<String>,
     pub shutdown: Arc<AtomicBool>,
-    pub list_state: ListState,
-    pub auto_scroll: bool,
-    pub viewport_height: usize,
+
+    // Bandeau « Dromon Engine ».
     pub fps: Option<f32>,
     pub state: Option<String>,
+
+    // Bandeau « config ».
     pub config_mode: Option<String>,
     pub config_profiling: Option<bool>,
+
+    // Barre des onglets.
     pub active_tab: Tab,
+
+    // État propre à chaque onglet.
+    pub logs: LogsState,
+    pub profiling: ProfilingState,
 }
 
 impl AppState {
     pub fn new(rx: mpsc::Receiver<String>, shutdown: Arc<AtomicBool>) -> Self {
         Self {
-            logs: Vec::new(),
             rx,
             shutdown,
-            list_state: ListState::default(),
-            auto_scroll: true,
-            viewport_height: 1,
             fps: None,
             state: None,
             config_mode: None,
             config_profiling: None,
             active_tab: Tab::Logs,
+            logs: LogsState::new(),
+            profiling: ProfilingState::new(),
         }
     }
 
@@ -68,18 +77,10 @@ impl AppState {
         self.active_tab = Tab::ALL[prev];
     }
 
-    pub fn bottom_offset(&self) -> usize {
-        self.logs.len().saturating_sub(self.viewport_height)
-    }
-
+    /// Route un message reçu de l'engine vers le bon sous-état.
     pub fn push(&mut self, msg: String) {
         match log_parser::parse(msg) {
-            ParsedMessage::Log(line) => {
-                self.logs.push(line);
-                if self.auto_scroll {
-                    *self.list_state.offset_mut() = self.bottom_offset();
-                }
-            }
+            ParsedMessage::Log(line) => self.logs.push_line(line),
             ParsedMessage::Fps(fps) => self.fps = Some(fps),
             ParsedMessage::State(s) => self.state = Some(s),
             ParsedMessage::Config { mode, profiling } => {
@@ -87,29 +88,5 @@ impl AppState {
                 self.config_profiling = Some(profiling);
             }
         }
-    }
-
-    pub fn scroll_up(&mut self) {
-        self.auto_scroll = false;
-        *self.list_state.offset_mut() = self.list_state.offset().saturating_sub(1);
-    }
-
-    pub fn scroll_down(&mut self) {
-        let max = self.bottom_offset();
-        let new = (self.list_state.offset() + 1).min(max);
-        *self.list_state.offset_mut() = new;
-        if new >= max {
-            self.auto_scroll = true;
-        }
-    }
-
-    pub fn go_to_top(&mut self) {
-        self.auto_scroll = false;
-        *self.list_state.offset_mut() = 0;
-    }
-
-    pub fn go_to_bottom(&mut self) {
-        self.auto_scroll = true;
-        *self.list_state.offset_mut() = self.bottom_offset();
     }
 }

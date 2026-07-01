@@ -43,6 +43,16 @@ impl Logger {
         self.send(format!("[STATE] {}", s));
     }
 
+    /// Un nœud de l'arbre d'init : profondeur, durée cumulée, nombre d'appels
+    /// agrégés et nom du bloc. Le `name` est placé en dernier car il peut contenir
+    /// des espaces.
+    pub fn profile_init(&self, depth: usize, name: &str, total_us: u128, count: u32) {
+        self.send(format!(
+            "[PROFILE_INIT] depth={} dur_us={} count={} name={}",
+            depth, total_us, count, name
+        ));
+    }
+
     fn send(&self, msg: String) {
         match &self.sender {
             Some(tx) => {

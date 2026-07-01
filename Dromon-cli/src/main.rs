@@ -79,14 +79,29 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
             if let Event::Key(key) = event::read()? {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
+                    // Raccourcis globaux : quitter et changer d'onglet.
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Left if ctrl => state.prev_tab(),
                     KeyCode::Right if ctrl => state.next_tab(),
-                    KeyCode::Up => state.scroll_up(),
-                    KeyCode::Down => state.scroll_down(),
-                    KeyCode::Char('g') | KeyCode::Home => state.go_to_top(),
-                    KeyCode::Char('G') | KeyCode::End => state.go_to_bottom(),
-                    _ => (),
+                    // Les autres touches dépendent de l'onglet actif.
+                    _ => match state.active_tab {
+                        Tab::Logs => match key.code {
+                            KeyCode::Up => state.logs.scroll_up(),
+                            KeyCode::Down => state.logs.scroll_down(),
+                            KeyCode::Char('g') | KeyCode::Home => state.logs.go_to_top(),
+                            KeyCode::Char('G') | KeyCode::End => state.logs.go_to_bottom(),
+                            _ => (),
+                        },
+                        Tab::Profiling => match key.code {
+                            KeyCode::Up => state.profiling.move_up(),
+                            KeyCode::Down => state.profiling.move_down(),
+                            KeyCode::Left => state.profiling.move_left(),
+                            KeyCode::Right => state.profiling.move_right(),
+                            KeyCode::Char('z') => state.profiling.toggle_zoom(),
+                            _ => (),
+                        },
+                        Tab::World => (),
+                    },
                 }
             }
         }
@@ -96,9 +111,9 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
 
 const BG: Color = Color::Rgb(0x02, 0x00, 0x02);
 const BORDER: Color = Color::Rgb(0x9D, 0x7B, 0xBF);
-const TITLE: Color = Color::Rgb(0xE6, 0xA2, 0x4C);
+const GOLD: Color = Color::Rgb(0xE6, 0xA2, 0x4C);
 const FG: Color = Color::Rgb(0xBF, 0xBD, 0xB6);
-const ACCENT: Color = Color::Rgb(0x56, 0x9C, 0xD6);
+const BLUE: Color = Color::Rgb(0x56, 0x9C, 0xD6);
 const MUTED: Color = Color::Rgb(0x6B, 0x6A, 0x66);
 
 fn render(frame: &mut Frame, state: &mut AppState) {
@@ -111,20 +126,16 @@ fn render(frame: &mut Frame, state: &mut AppState) {
 
     // Barre du haut : statut (STATE/FPS) à gauche, config (BUILD/PROFILING) à droite.
     let [status_area, config_area] =
-        Layout::horizontal([Constraint::Min(0), Constraint::Length(46)]).areas(top_area);
-
-    state.viewport_height = (content_area.height as usize).saturating_sub(2).max(1);
-    if state.auto_scroll {
-        *state.list_state.offset_mut() = state.bottom_offset();
-    }
+        Layout::horizontal([Constraint::Length(134), Constraint::Min(0)]).areas(top_area);
 
     render_status(frame, state, status_area);
     render_config(frame, state, config_area);
     render_tabs(frame, state, tabs_area);
 
+    // Chaque onglet dessine son contenu à partir de son propre sous-état.
     match state.active_tab {
-        Tab::Logs => tabs::infos::render(frame, state, content_area),
-        Tab::Profiling => tabs::profiling::render(frame, content_area),
+        Tab::Logs => tabs::logs::render(frame, &mut state.logs, content_area),
+        Tab::Profiling => tabs::profiling::render(frame, &state.profiling, content_area),
         Tab::World => tabs::world::render(frame, content_area),
     }
 }
@@ -146,15 +157,18 @@ fn render_tabs(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect)
         .highlight_style(
             Style::default()
                 .fg(BG)
-                .bg(ACCENT)
+                .bg(GOLD)
                 .add_modifier(Modifier::BOLD),
         )
         .divider(Span::styled("·", Style::default().fg(BORDER)))
         .padding(" ", " ");
     frame.render_widget(tabs, tabs_area);
 
-    let hint = Paragraph::new(Span::styled("Ctrl+←/→ onglet ", Style::default().fg(BORDER)))
-        .alignment(Alignment::Right);
+    let hint = Paragraph::new(Span::styled(
+        "Ctrl+←/→ onglet ",
+        Style::default().fg(BORDER),
+    ))
+    .alignment(Alignment::Right);
     frame.render_widget(hint, hint_area);
 }
 
@@ -169,21 +183,21 @@ fn render_status(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rec
         Span::raw("  "),
         Span::styled(
             "STATE",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(engine_state, Style::default().fg(FG)),
         Span::raw("     "),
         Span::styled(
             "FPS",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(fps_str, Style::default().fg(FG)),
     ]);
 
     let block = Block::default()
-        .title(Span::styled("Dromon Engine", Style::default().fg(TITLE)))
+        .title(Span::styled("Dromon Engine", Style::default().fg(GOLD)))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(BORDER))
         .style(Style::default().bg(BG));
@@ -203,21 +217,21 @@ fn render_config(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rec
         Span::raw("  "),
         Span::styled(
             "BUILD",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(build.to_string(), Style::default().fg(FG)),
         Span::raw("     "),
         Span::styled(
             "PROFILING",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(profiling, Style::default().fg(FG)),
     ]);
 
     let block = Block::default()
-        .title(Span::styled("config", Style::default().fg(TITLE)))
+        .title(Span::styled("config", Style::default().fg(GOLD)))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(BORDER))
         .style(Style::default().bg(BG));

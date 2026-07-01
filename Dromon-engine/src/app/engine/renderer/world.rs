@@ -1,5 +1,6 @@
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::camera::Camera;
+use crate::profile;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -184,6 +185,7 @@ impl World {
         chunks_x: u32,
         chunks_y: u32,
     ) -> Result<()> {
+        profile!();
         // Le terrain s'étend sur tout le monde et on le survole : la boîte d'ombre
         // doit être grande et suivre la caméra (cf. ShadowConfig). On garde une
         // résolution correcte (2*150/2048 ≈ 0.15 u/texel) ; CSM plus tard pour les
@@ -219,12 +221,15 @@ impl World {
         //    (aucune surface dans la zone maillée, p. ex. relief entièrement
         //    sous z=0) : un buffer de taille 0 est interdit par Vulkan.
         let mut terrain_meshes = Vec::with_capacity(coords.len());
-        for &coord in &coords {
-            let (vertices, indices) = mesh_chunk(&manager, coord);
-            if vertices.is_empty() || indices.is_empty() {
-                continue;
+        {
+            profile!("create terrain meshes from chunks");
+            for &coord in &coords {
+                let (vertices, indices) = mesh_chunk(&manager, coord);
+                if vertices.is_empty() || indices.is_empty() {
+                    continue;
+                }
+                terrain_meshes.push(TerrainMesh::new(self.context.clone(), vertices, indices)?);
             }
-            terrain_meshes.push(TerrainMesh::new(self.context.clone(), vertices, indices)?);
         }
 
         self.chunk_manager = Some(manager);
@@ -233,6 +238,7 @@ impl World {
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
+        profile!();
         self.rrm.initialize(command_buffer)?;
         for mesh in &self.terrain_meshes {
             mesh.initialize(command_buffer);

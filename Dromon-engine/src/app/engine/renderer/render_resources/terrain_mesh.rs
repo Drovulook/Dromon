@@ -1,5 +1,6 @@
 use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::rendering_context::RenderingContext;
+use crate::profile;
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
@@ -71,6 +72,7 @@ impl TerrainMesh {
         vertices: Vec<TerrainVertex>,
         indices: Vec<u32>,
     ) -> Result<TerrainMesh> {
+        profile!();
         let (vertex_staging_buffer, vertex_buffer) =
             Self::staging_and_device(&context, &vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let (index_staging_buffer, index_buffer) =

@@ -35,7 +35,12 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         match Engine::new(event_loop, self.logger.clone(), self.scene.as_mut()) {
-            Ok(engine) => self.engine = Some(engine),
+            Ok(engine) => {
+                self.engine = Some(engine);
+                // Init terminée : à ce point le garde racine d'`Engine::new` est
+                // droppé, donc `SPANS` est complet. On peut vider l'arbre au CLI.
+                crate::profiling::flush_init(&self.logger);
+            }
             Err(e) => {
                 self.logger
                     .error(&format!("Impossible d'initialiser le moteur : {e:#}"));

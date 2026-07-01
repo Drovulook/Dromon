@@ -1,6 +1,7 @@
 use super::chunk::CHUNK_SIZE;
 use super::chunk_manager::ChunkManager;
 use crate::app::engine::renderer::render_resources::TerrainVertex;
+use crate::profile;
 use glam::{IVec2, Vec3};
 
 // ─── Mailleur heightfield ────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ const NORMAL_RADIUS: i32 = 5;
 /// Construit le mesh de surface d'un chunk en coordonnées monde (`model` =
 /// identité au draw).
 pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, Vec<u32>) {
+    profile!();
     let n = CHUNK_SIZE as i32;
     let origin_x = coord.x * n;
     let origin_y = coord.y * n;

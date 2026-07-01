@@ -8,6 +8,12 @@ edition = "2024"
 # `Dromon_engine`, dérivé du nom de package avec tirets convertis en underscores).
 name = "dromon_engine"
 
+[features]
+# Quand elle est absente, la macro `profile!` s'expanse en néant : aucune trace du
+# profiling dans le binaire. Le launcher l'active via `--features Dromon-engine/profiling`
+# selon `ENABLE_PROFILING`. Désactivée par défaut.
+profiling = []
+
 [dependencies]
 anyhow = "1.0.102"
 ash = "0.38.0"

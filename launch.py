@@ -15,8 +15,13 @@ PROFILE = "release" if RELEASE else "debug"
 BUILD_FLAGS = ["--release"] if RELEASE else []
 
 
-def cargo_build(package: str) -> tuple[bool, str]:
-    cmd = ["cargo", "build", "-p", package] + BUILD_FLAGS
+# Feature Cargo de l'engine, activée seulement si le profiling est demandé. La
+# passer au build de l'app compile l'instrumentation ; l'omettre l'efface du binaire.
+ENGINE_PROFILING_FEATURE = ["--features", "Dromon-engine/profiling"]
+
+
+def cargo_build(package: str, features: list[str] | None = None) -> tuple[bool, str]:
+    cmd = ["cargo", "build", "-p", package] + BUILD_FLAGS + (features or [])
     result = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True)
     return result.returncode == 0, result.stderr
 
@@ -33,9 +38,12 @@ def send_to_cli(text: str):
 
 
 def cargo_run(
-    package: str, extra_args: list[str] | None = None, silent: bool = False
+    package: str,
+    extra_args: list[str] | None = None,
+    silent: bool = False,
+    features: list[str] | None = None,
 ) -> subprocess.Popen:
-    cmd = ["cargo", "run", "-p", package] + BUILD_FLAGS
+    cmd = ["cargo", "run", "-p", package] + BUILD_FLAGS + (features or [])
     if extra_args:
         cmd += ["--"] + extra_args
     devnull = subprocess.DEVNULL if silent else None
@@ -43,12 +51,15 @@ def cargo_run(
 
 
 def engine_args() -> list[str]:
-    """Arguments passés au binaire de l'app.
+    """Arguments runtime passés au binaire de l'app.
 
-    --use-profiling sert de signal à la librairie (engine) pour activer son
-    instrumentation ; le launcher ne fait que transmettre le flag.
+    --use-cli branche les logs sur le socket du CLI ; --use-profiling signale à la
+    librairie (engine) d'armer son instrumentation. Le launcher ne fait que
+    transmettre ces flags selon la config.
     """
     args = []
+    if USE_CLI:
+        args.append("--use-cli")
     if ENABLE_PROFILING:
         args.append("--use-profiling")
     return args
@@ -63,6 +74,10 @@ def main():
     for arg in sys.argv[1:]:
         if arg.startswith("--"):
             target = arg[2:]
+
+    # Un seul interrupteur : ENABLE_PROFILING active à la fois la feature Cargo
+    # (compile l'instrumentation) et le flag runtime `--use-profiling`.
+    target_features = ENGINE_PROFILING_FEATURE if ENABLE_PROFILING else []
 
     try:
         if USE_CLI:
@@ -93,7 +108,7 @@ def main():
                 )
             )
 
-            success, build_output = cargo_build(target)
+            success, build_output = cargo_build(target, features=target_features)
             block = "--------------------------------------------------------------------- COMPILATION ---------------------------------------------------------------------\n"
             if build_output.strip():
                 block += build_output
@@ -105,9 +120,7 @@ def main():
                 sys.exit(1)
 
             binary = os.path.join(WORKSPACE, "target", PROFILE, target)
-            engine = subprocess.Popen(
-                [binary, "--use-cli"] + engine_args(), cwd=WORKSPACE
-            )
+            engine = subprocess.Popen([binary] + engine_args(), cwd=WORKSPACE)
             processes.append(engine)
 
             engine_running = True
@@ -121,7 +134,9 @@ def main():
                     )
                 time.sleep(0.2)
         else:
-            engine = cargo_run(target, extra_args=engine_args())
+            engine = cargo_run(
+                target, extra_args=engine_args(), features=target_features
+            )
             processes.append(engine)
             engine.wait()
 

@@ -1,6 +1,5 @@
 use crate::{Timer, World};
 use anyhow::Result;
-
 /// Frontière moteur ↔ application. Une `Scene` décrit *quoi* afficher et *comment*
 /// ça évolue ; le moteur (`Engine`/`Renderer`) gère le *comment* du rendu Vulkan.
 ///

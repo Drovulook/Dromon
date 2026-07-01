@@ -2,6 +2,7 @@ pub use super::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Chunk, ISO_LEVEL, Voxel};
 pub use super::height_field::{HeightField, HeightParams};
 
 use super::material::{classify_solid, material_color};
+use crate::profile;
 use glam::{IVec2, Vec3};
 use std::collections::HashMap;
 
@@ -50,6 +51,7 @@ impl ChunkManager {
     /// hauteur fractionnaire exacte par interpolation (surface lisse, sans
     /// marches). Les matériaux sont posés selon la profondeur sous la surface.
     pub fn generate_chunk(&mut self, coord: IVec2) -> &Chunk {
+        profile!();
         let mut chunk = Chunk::new(coord);
 
         // Origine du chunk en coordonnées voxel « monde ».
