@@ -12,6 +12,7 @@ Dromon is a long-term personal project aimed at learning low-level graphics prog
 - Directional lighting with shadow mapping.
 - Camera system.
 - Input handling (keyboard/mouse).
+- glTF model loading with textures.
 - Procedural terrain: chunked heightmap generation and meshing.
 - Built-in CPU and GPU profiling, streamed to the CLI over a Unix socket.
 
@@ -25,11 +26,15 @@ Dromon is a long-term personal project aimed at learning low-level graphics prog
 
 ### Procedural terrain
 
-![Procedurally generated terrain](terrain_generation.jpg)
+![Procedurally generated terrain](screenshots/terrain_generation.jpg)
+
+### 3D models
+
+![3D models](screenshots/3d_models.jpg)
 
 ### Profiling CLI
 
-![Profiling terminal UI](cli_profiling.jpg)
+![Profiling terminal UI](screenshots/cli_profiling.jpg)
 
 ## Status
 
