@@ -93,10 +93,17 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
                             _ => (),
                         },
                         Tab::Profiling => match key.code {
-                            KeyCode::Up => state.profiling.move_up(),
-                            KeyCode::Down => state.profiling.move_down(),
-                            KeyCode::Left => state.profiling.move_left(),
-                            KeyCode::Right => state.profiling.move_right(),
+                            // Flèches simples : navigation dans l'arbre d'init.
+                            KeyCode::Up => state.profiling.tree_up(),
+                            KeyCode::Down => state.profiling.tree_down(),
+                            KeyCode::Left => state.profiling.tree_left(),
+                            KeyCode::Right => state.profiling.tree_right(),
+                            // fn+flèches (= Home/End/PageUp/PageDown) : entre encadrés.
+                            KeyCode::PageUp => state.profiling.block_up(),
+                            KeyCode::PageDown => state.profiling.block_down(),
+                            KeyCode::Home => state.profiling.block_left(),
+                            KeyCode::End => state.profiling.block_right(),
+                            KeyCode::Enter | KeyCode::Char(' ') => state.profiling.on_toggle(),
                             KeyCode::Char('z') => state.profiling.toggle_zoom(),
                             _ => (),
                         },
@@ -135,7 +142,7 @@ fn render(frame: &mut Frame, state: &mut AppState) {
     // Chaque onglet dessine son contenu à partir de son propre sous-état.
     match state.active_tab {
         Tab::Logs => tabs::logs::render(frame, &mut state.logs, content_area),
-        Tab::Profiling => tabs::profiling::render(frame, &state.profiling, content_area),
+        Tab::Profiling => tabs::profiling::render(frame, &mut state.profiling, content_area),
         Tab::World => tabs::world::render(frame, content_area),
     }
 }

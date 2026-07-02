@@ -92,6 +92,7 @@ impl DirectionalLight {
     /// donc le résultat reste cohérent ; inverser Y ici ne ferait que retourner
     /// la texture sans rien changer au calcul d'ombre.
     pub fn view_proj(&self, cam_pos: glam::Vec3, cam_front: glam::Vec3) -> glam::Mat4 {
+        profile!();
         let dir = self.direction.normalize();
         let s = &self.shadow;
 
@@ -247,6 +248,7 @@ impl World {
     }
 
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {
+        profile!();
         self.camera.update(input_state, timer, aspect);
     }
 }

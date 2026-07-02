@@ -1,4 +1,5 @@
 use crate::app::engine::renderer::{Frame, Renderer, image_layout_state::ImageLayoutState};
+use crate::profile;
 use anyhow::Result;
 use ash::vk;
 
@@ -7,6 +8,7 @@ impl Renderer {
     /// depth-only depuis la lumière vers la shadow map, puis on transitionne
     /// celle-ci en lecture pour la passe principale.
     pub(super) fn record_shadow_pass(&self, command_buffer: vk::CommandBuffer, frame_index: usize) {
+        profile!();
         // shadow map : UNDEFINED → attachment de profondeur (aspect DEPTH explicite).
         self.context.transition_image_layout_aspect(
             command_buffer,
@@ -77,6 +79,7 @@ impl Renderer {
     }
 
     pub(super) fn record_render_pass(&self, frame: &Frame, image_index: u32) {
+        profile!();
         self.context.transition_image_layout(
             frame.command_buffer,
             &[

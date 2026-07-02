@@ -3,6 +3,7 @@ use winit::keyboard::KeyCode;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::timer::Timer;
+use crate::profile;
 
 const MAX_PITCH: f32 = 1.55; // ≈ 89° : on ne regarde jamais pile à la verticale
 const MIN_FOV: f32 = 0.350; // ≈ 20°
@@ -73,6 +74,7 @@ impl Camera {
 
     /// Lit l'état clavier et déplace la caméra, puis recalcule les matrices.
     pub fn update(&mut self, input: &InputState, timer: &Timer, aspect: f32) {
+        profile!();
         let dt = timer.delta_secs();
 
         // Alt maintenue → on amplifie déplacement, rotation et zoom.

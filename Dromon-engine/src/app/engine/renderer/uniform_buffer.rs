@@ -1,5 +1,6 @@
 use super::buffer::Buffer;
 use crate::app::engine::rendering_context::RenderingContext;
+use crate::profile;
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
@@ -57,6 +58,7 @@ impl UniformBuffer {
         light_color: Vec3,
         light_intensity: f32,
     ) {
+        profile!();
         let ubo = UniformBufferObject {
             view,
             proj,

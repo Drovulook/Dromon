@@ -37,9 +37,7 @@ impl ApplicationHandler for App {
         match Engine::new(event_loop, self.logger.clone(), self.scene.as_mut()) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                // Init terminée : à ce point le garde racine d'`Engine::new` est
-                // droppé, donc `SPANS` est complet. On peut vider l'arbre au CLI.
-                crate::profiling::flush_init(&self.logger);
+                crate::profiling::initialize::flush(&self.logger);
             }
             Err(e) => {
                 self.logger
@@ -67,9 +65,7 @@ impl ApplicationHandler for App {
         event: winit::event::WindowEvent,
     ) {
         if let Some(engine) = &mut self.engine {
-            if let Err(e) =
-                engine.window_event(event_loop, window_id, event, self.scene.as_mut())
-            {
+            if let Err(e) = engine.window_event(event_loop, window_id, event, self.scene.as_mut()) {
                 self.logger.error(&format!(
                     "Erreur fatale dans la boucle d'événements : {e:#}"
                 ));

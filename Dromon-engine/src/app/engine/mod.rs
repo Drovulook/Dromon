@@ -12,6 +12,7 @@ use crate::app::engine::rendering_context::{
 };
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
+use crate::profile;
 use anyhow::Result;
 use renderer::Renderer;
 use std::{collections::HashMap, sync::Arc};
@@ -39,6 +40,7 @@ impl Engine {
         logger: Arc<Logger>,
         scene: &mut dyn Scene,
     ) -> Result<Self> {
+        crate::profiling::initialize::begin();
         crate::profile!();
         let attrs = WindowAttributes::default().with_title("Dromon");
         #[cfg(target_os = "linux")]
@@ -115,12 +117,17 @@ impl Engine {
             }
 
             winit::event::WindowEvent::RedrawRequested => {
-                if let Some(renderer) = self.renderers.get_mut(&window_id) {
-                    renderer.render(&self.timer, self.input_manager.input_state(), scene)?;
+                crate::profiling::frame::begin();
+                {
+                    profile!();
+                    if let Some(renderer) = self.renderers.get_mut(&window_id) {
+                        renderer.render(&self.timer, self.input_manager.input_state(), scene)?;
+                    }
+                    self.input_manager.end_frame();
+                    self.timer.tick();
                 }
-                self.input_manager.end_frame();
-                self.timer.tick();
                 self.logger.fps(self.timer.fps());
+                crate::profiling::frame::end(&self.logger);
             }
 
             winit::event::WindowEvent::Resized(_size) => {

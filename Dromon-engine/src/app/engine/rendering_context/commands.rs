@@ -1,5 +1,6 @@
 use super::RenderingContext;
 use crate::app::engine::renderer::image_layout_state::ImageLayoutState;
+use crate::profile;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ impl RenderingContext {
         clear_color: vk::ClearColorValue,
         render_area: vk::Rect2D,
     ) {
+        profile!();
         unsafe {
             self.device.cmd_begin_rendering(
                 command_buffer,

@@ -87,6 +87,9 @@ impl AppState {
                 self.config_mode = Some(mode);
                 self.config_profiling = Some(profiling);
             }
+            ParsedMessage::ProfileInit(nodes) => self.profiling.load_init(nodes),
+            ParsedMessage::ProfileFrame(nodes) => self.profiling.load_frame(nodes),
+            ParsedMessage::ProfileGpu(nodes) => self.profiling.load_gpu(nodes),
         }
     }
 }

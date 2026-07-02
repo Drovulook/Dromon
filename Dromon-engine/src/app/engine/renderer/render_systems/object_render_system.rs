@@ -1,6 +1,7 @@
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::render_resources::{ObjectVertex, RenderObject};
 use crate::app::engine::rendering_context::RenderingContext;
+use crate::profile;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -105,6 +106,7 @@ impl ObjectRenderSystem {
         frame_index: usize,
         render_objects: &[RenderObject],
     ) {
+        profile!();
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command_buffer,
@@ -183,6 +185,7 @@ impl ObjectRenderSystem {
         frame_index: usize,
         render_objects: &[RenderObject],
     ) {
+        profile!();
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command_buffer,

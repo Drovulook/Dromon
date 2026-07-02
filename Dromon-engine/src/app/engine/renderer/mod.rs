@@ -20,6 +20,8 @@ use crate::app::engine::renderer::world::World;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
+use crate::profile;
+use crate::profiling::render::GpuProfiler;
 use crate::{Scene, app::engine::renderer::render_systems::ObjectRenderSystem};
 use anyhow::{Context, Result};
 use ash::vk;
@@ -46,6 +48,7 @@ pub struct Renderer {
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
     descriptor_handler: Arc<DescriptorHandler>,
+    gpu_profiler: GpuProfiler,
     world: World,
 }
 
@@ -158,6 +161,22 @@ impl Renderer {
 
             Renderer::initialize(context.clone(), &world)?;
 
+            // Profiler GPU : nb de nanosecondes par tick + support des timestamps sur
+            // la queue graphique (0 bit valide = non supporté).
+            let timestamp_valid_bits = context
+                .physical_device
+                .queue_families
+                .iter()
+                .find(|f| f.index == context.queue_families.graphics)
+                .map_or(0, |f| f.properties.timestamp_valid_bits);
+            let gpu_profiler = GpuProfiler::new(
+                context.device.clone(),
+                logger.clone(),
+                context.physical_device.properties.limits.timestamp_period,
+                timestamp_valid_bits,
+                in_flight_frames_count,
+            )?;
+
             Ok(Self {
                 in_flight_frames_count,
                 frame_index: 0,
@@ -172,6 +191,7 @@ impl Renderer {
                 swapchain,
                 context,
                 descriptor_handler,
+                gpu_profiler,
                 world,
             })
         }
@@ -187,6 +207,7 @@ impl Renderer {
         input_state: &InputState,
         scene: &mut dyn Scene,
     ) -> Result<()> {
+        profile!();
         // ratio largeur/hauteur de la fenêtre, pour la projection de la caméra.
         // `.max(1)` évite une division par zéro quand la fenêtre est minimisée.
         let aspect =
@@ -198,9 +219,16 @@ impl Renderer {
         let frame = &self.frames[self.frame_index];
 
         unsafe {
-            self.context
-                .device
-                .wait_for_fences(&[frame.in_flight_fence], true, u64::MAX)?;
+            {
+                profile!("wait for fences");
+                self.context
+                    .device
+                    .wait_for_fences(&[frame.in_flight_fence], true, u64::MAX)?;
+            }
+
+            // Fence passé → les timestamps GPU de la dernière soumission de ce slot
+            // sont prêts. On les lit avant de réutiliser le slot.
+            self.gpu_profiler.resolve(self.frame_index);
 
             if self.swapchain.is_dirty {
                 self.swapchain.update_size()?;
@@ -220,9 +248,11 @@ impl Renderer {
             self.acquire_semaphore_index =
                 (self.acquire_semaphore_index + 1) % self.image_available_semaphores.len();
 
-            let image_index = self
-                .swapchain
-                .acquire_next_image(image_available_semaphore)?;
+            let image_index = {
+                profile!("acquire next image");
+                self.swapchain
+                    .acquire_next_image(image_available_semaphore)?
+            };
 
             let render_finished_semaphore = self.render_finished_semaphores[image_index as usize];
 
@@ -232,6 +262,9 @@ impl Renderer {
                 &vk::CommandBufferBeginInfo::default()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
+
+            // Reset du query pool obligatoire avant d'y écrire, hors rendering scope.
+            self.gpu_profiler.reset(frame.command_buffer, self.frame_index);
 
             // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
             // passe principale lisent la même `light_view_proj` depuis le set 0.
@@ -246,12 +279,31 @@ impl Renderer {
                 self.world.light.intensity,
             );
 
+            // Scope GPU englobant les deux passes ; les scopes internes se cumulent
+            // dessous. Droppé avant `end_command_buffer` pour écrire son timestamp de fin.
+            let gpu_frame = self
+                .gpu_profiler
+                .scope(frame.command_buffer, self.frame_index, "frame");
+
             // 1re passe : on remplit la shadow map depuis le point de vue de la lumière.
-            self.record_shadow_pass(frame.command_buffer, self.frame_index);
+            {
+                let _gpu = self.gpu_profiler.scope(
+                    frame.command_buffer,
+                    self.frame_index,
+                    "shadow pass",
+                );
+                self.record_shadow_pass(frame.command_buffer, self.frame_index);
+            }
 
             // 2nde passe : on dessine le monde.
-            self.record_render_pass(frame, image_index);
+            {
+                let _gpu =
+                    self.gpu_profiler
+                        .scope(frame.command_buffer, self.frame_index, "render pass");
+                self.record_render_pass(frame, image_index);
+            }
 
+            drop(gpu_frame);
             self.context
                 .device
                 .end_command_buffer(frame.command_buffer)?;
@@ -281,6 +333,7 @@ impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
             let _ = self.context.device.device_wait_idle();
+            self.gpu_profiler.destroy();
             self.frames.drain(..).for_each(|frame| {
                 self.context
                     .device

@@ -1,5 +1,6 @@
 use crate::app::engine::rendering_context::{RenderingContext, SwapchainSurface};
 use crate::app::logger::Logger;
+use crate::profile;
 use anyhow::{Result, anyhow};
 use ash::vk;
 use std::sync::Arc;
@@ -95,6 +96,7 @@ impl Swapchain {
     }
 
     pub fn update_size(&mut self) -> Result<()> {
+        profile!();
         self.logger.info("update_size");
         let size = self.window.inner_size();
         self.extent = vk::Extent2D {
@@ -260,6 +262,7 @@ impl Swapchain {
         image_index: u32,
         render_finished_semaphore: vk::Semaphore,
     ) -> Result<()> {
+        profile!();
         let is_suboptimal = unsafe {
             match self.context.swapchain_extensions.queue_present(
                 self.context.queues[self.context.queue_families.present as usize],
