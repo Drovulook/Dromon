@@ -27,3 +27,9 @@ winit = "0.30.13"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 gltf = "1.4.1"
 noise = "0.9.0"
+# HashMap à hash non-cryptographique (FxHash) : bien plus rapide que le SipHash par
+# défaut sur des clés entières, pour les caches chauds du mailleur.
+rustc-hash = "2"
+# Parallélisme de données par vol de travail (work-stealing) : maille les chunks sur
+# tous les cœurs. Chaque chunk est indépendant, `mesh_chunk` ne lit que `&manager`.
+rayon = "1"

@@ -11,7 +11,7 @@
 //!
 //! Ces proportions sont stockées dans les canaux `materials`/`weights` du
 //! [`Voxel`] (jusqu'à 4 matériaux pondérés). Le rendu les mélange déjà dans
-//! `ChunkManager::color_at` ; combiné à l'interpolation du rasterizer entre
+//! `DensityField::color` ; combiné à l'interpolation du rasterizer entre
 //! sommets, on obtient un dégradé doux au lieu d'un trait.
 
 use super::chunk::Voxel;
@@ -57,25 +57,20 @@ const SURFACE_DEPTH: f64 = 1.0;
 /// Profondeur jusqu'à laquelle on place de la terre ; au-delà, de la roche.
 const DIRT_DEPTH: f64 = 4.0;
 
-/// Voxel **plein** à placer à `depth` voxels sous la surface d'une colonne dont
-/// l'altitude de surface (déjà perturbée par le bruit de frontière) vaut
-/// `mat_alt`. `density` est la valeur signée du champ, déjà calculée par
-/// l'appelant. L'air (densité sous l'iso) est géré en amont, pas ici.
+/// Matériau (ou mélange) **plein** à `depth` voxels sous la surface d'une colonne
+/// dont l'altitude de surface (déjà perturbée par le bruit de frontière) vaut
+/// `mat_alt`. L'air (au-dessus de l'iso-surface) est géré en amont, pas ici.
 ///
 /// Cascade par profondeur : couche de surface (biome, éventuellement mélangé
 /// près d'une bordure) → terre → roche.
-pub fn classify_solid(density: f32, depth: f64, mat_alt: f64) -> Voxel {
+pub fn classify_solid(depth: f64, mat_alt: f64) -> Voxel {
     if depth < SURFACE_DEPTH {
         let (materials, weights) = surface_blend(mat_alt);
-        Voxel {
-            density,
-            materials,
-            weights,
-        }
+        Voxel { materials, weights }
     } else if depth < DIRT_DEPTH {
-        Voxel::solid(density, MATERIAL_DIRT)
+        Voxel::solid(MATERIAL_DIRT)
     } else {
-        Voxel::solid(density, MATERIAL_ROCK)
+        Voxel::solid(MATERIAL_ROCK)
     }
 }
 

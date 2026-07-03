@@ -21,6 +21,7 @@
 //! [`HeightField::noise_with_grad`] sera à remplacer.
 
 use super::utils::smootherstep;
+use crate::profile;
 use noise::{NoiseFn, Perlin};
 
 /// Paramètres du champ d'altitude. Regroupe le contrôle du fBm et de l'érosion.
@@ -90,6 +91,7 @@ impl HeightField {
     /// fréquence) : la mise à l'échelle est appliquée en interne, octave par
     /// octave. C'est l'unique source de vérité de la hauteur du terrain.
     pub fn height(&self, wx: f64, wy: f64) -> f64 {
+        profile!();
         self.params.base_height + self.fbm_eroded(wx, wy) * self.params.amplitude
     }
 

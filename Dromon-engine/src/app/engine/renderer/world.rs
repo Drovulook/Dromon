@@ -12,12 +12,13 @@ use crate::app::{
             render_resources::{RenderObject, RenderResourceManager, TerrainMesh},
         },
         rendering_context::RenderingContext,
-        terrain_generation::{ChunkManager, GenParams, mesh_chunk},
+        terrain_generation::{ChunkManager, GenParams, WorldBounds, mesh_chunk},
         timer::Timer,
     },
     logger::Logger,
 };
 use glam::IVec2;
+use rayon::prelude::*;
 
 // Paramètres du « frustum » orthographique de la lumière (la boîte qui doit
 // englober toute la scène projetant des ombres). La boîte SUIT la caméra
@@ -212,20 +213,37 @@ impl World {
             }
         }
 
+        // Étendue du monde en coord chunk : le mailleur ferme par des parois les chunks
+        // dont un côté touche ces bornes.
+        let bounds = WorldBounds {
+            min: IVec2::new(-half_x, -half_y),
+            max: IVec2::new(chunks_x as i32 - 1 - half_x, chunks_y as i32 - 1 - half_y),
+        };
+
         // 1) Génère TOUS les chunks (données voxel) d'abord, pour que le meshing
         //    puisse échantillonner les chunks voisins aux bords (coutures continues).
         for &coord in &coords {
             manager.generate_chunk(coord);
         }
 
-        // 2) Meshing : un TerrainMesh par chunk. On saute les chunks **vides**
-        //    (aucune surface dans la zone maillée, p. ex. relief entièrement
-        //    sous z=0) : un buffer de taille 0 est interdit par Vulkan.
-        let mut terrain_meshes = Vec::with_capacity(coords.len());
+        // 2a) Meshing en parallèle : chaque chunk est indépendant et `mesh_chunk` ne
+        //     lit que `&manager` (partage en lecture seule, sûr entre threads). Rayon
+        //     répartit les 2500 chunks sur tous les cœurs par vol de travail.
+        let meshed: Vec<(Vec<_>, Vec<_>)> = {
+            profile!("mesh chunks (parallel)");
+            coords
+                .par_iter()
+                .map(|&coord| mesh_chunk(&manager, coord, bounds))
+                .collect()
+        };
+
+        // 2b) Upload GPU séquentiel : `TerrainMesh::new` touche le contexte Vulkan et
+        //     renvoie un `Result` — on le garde hors du parallélisme. On saute les
+        //     chunks **vides** (buffer de taille 0 interdit par Vulkan).
+        let mut terrain_meshes = Vec::with_capacity(meshed.len());
         {
-            profile!("create terrain meshes from chunks");
-            for &coord in &coords {
-                let (vertices, indices) = mesh_chunk(&manager, coord);
+            profile!("upload terrain meshes");
+            for (vertices, indices) in meshed {
                 if vertices.is_empty() || indices.is_empty() {
                     continue;
                 }
