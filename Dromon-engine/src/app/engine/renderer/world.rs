@@ -12,12 +12,14 @@ use crate::app::{
             render_resources::{RenderObject, RenderResourceManager, TerrainMesh},
         },
         rendering_context::RenderingContext,
-        terrain_generation::{ChunkManager, GenParams, WorldBounds, mesh_chunk},
+        terrain_generation::{
+            ChunkManager, GenParams, MAX_LOD, WorldBounds, mesh_chunk, static_lod,
+        },
         timer::Timer,
     },
     logger::Logger,
 };
-use glam::IVec2;
+use glam::{IVec2, Vec2};
 use rayon::prelude::*;
 
 // Paramètres du « frustum » orthographique de la lumière (la boîte qui doit
@@ -189,13 +191,11 @@ impl World {
     ) -> Result<()> {
         profile!();
         // Le terrain s'étend sur tout le monde et on le survole : la boîte d'ombre
-        // doit être grande et suivre la caméra (cf. ShadowConfig). On garde une
-        // résolution correcte (2*150/2048 ≈ 0.15 u/texel) ; CSM plus tard pour les
-        // ombres nettes à toutes distances.
+        // doit être grande et suivre la caméra.
         self.light.shadow = ShadowConfig {
             half_size: 150.0,
             near: 1.0,
-            far: 600.0,
+            far: 1000.0,
             eye_distance: 300.0,
             follow_camera: true,
             focus_distance: 90.0,
@@ -226,6 +226,19 @@ impl World {
             manager.generate_chunk(coord);
         }
 
+        // 1b) LOD statique : figé une fois selon la distance horizontale du chunk à la
+        //     position de départ de la caméra. `mesh_chunk` relira ce niveau via le
+        //     manager (source de vérité unique) → le meshing parallèle reste inchangé.
+        let focus = Vec2::new(self.camera.position.x, self.camera.position.y);
+        let lods: Vec<u8> = coords
+            .iter()
+            .map(|&c| {
+                let lod = static_lod(c, focus);
+                manager.set_chunk_lod(c, lod);
+                lod
+            })
+            .collect();
+
         // 2a) Meshing en parallèle : chaque chunk est indépendant et `mesh_chunk` ne
         //     lit que `&manager` (partage en lecture seule, sûr entre threads). Rayon
         //     répartit les 2500 chunks sur tous les cœurs par vol de travail.
@@ -236,6 +249,27 @@ impl World {
                 .map(|&coord| mesh_chunk(&manager, coord, bounds))
                 .collect()
         };
+
+        // Contrôle du gain LOD : sommets moyens par chunk et par niveau. On s'attend à
+        // avg(L1) ≈ avg(L0)/4 et avg(L2) ≈ avg(L0)/16 (la nappe est 2D : doubler le pas
+        // quadruple l'aire couverte par cellule). Un peu au-dessus du ÷4 idéal en
+        // pratique — le quad de fond et les parois de bord ne rétrécissent pas.
+        {
+            let mut chunks_per = [0usize; MAX_LOD as usize + 1];
+            let mut verts_per = [0usize; MAX_LOD as usize + 1];
+            for (&lod, (v, _)) in lods.iter().zip(&meshed) {
+                chunks_per[lod as usize] += 1;
+                verts_per[lod as usize] += v.len();
+            }
+            for l in 0..=MAX_LOD as usize {
+                let (c, v) = (chunks_per[l], verts_per[l]);
+                let avg = if c > 0 { v / c } else { 0 };
+                self.logger.info(&format!(
+                    "LOD{l} (pas {}) : {c} chunks, {v} sommets, {avg}/chunk",
+                    1 << l
+                ));
+            }
+        }
 
         // 2b) Upload GPU séquentiel : `TerrainMesh::new` touche le contexte Vulkan et
         //     renvoie un `Result` — on le garde hors du parallélisme. On saute les

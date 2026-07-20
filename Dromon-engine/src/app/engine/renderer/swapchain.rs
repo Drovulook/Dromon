@@ -70,6 +70,7 @@ impl Swapchain {
         );
 
         let msaa_samples = context.get_max_usable_sample_count();
+        //.min(vk::SampleCountFlags::TYPE_4); // réduction de x8 à x4
         logger.info(&format!("MSAA count: {:?}", msaa_samples));
 
         Ok(Self {

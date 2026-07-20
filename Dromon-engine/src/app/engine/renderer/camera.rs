@@ -38,15 +38,15 @@ impl Default for Camera {
             pitch: 0.0,
             fov_y: 45.0_f32.to_radians(),
             near: 0.1,
-            far: 1000.0,
+            far: 6000.0,
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
-            move_speed: 30.0,
+            move_speed: 100.0,
             rotation_sensitivity: 0.002,
             zoom_speed: 0.05,
             boost_factor_rot: 4.0,
-            boost_factor_move: 4.0,
+            boost_factor_move: 6.0,
         };
         // au démarrage, on regarde l'origine (déduit yaw/pitch de la direction)
         camera.look_at(Vec3::ZERO);

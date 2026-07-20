@@ -8,7 +8,7 @@ impl Scene for Physis {
         // Génère une grille de 2×2 chunks de terrain autour de l'origine.
         world.generate_terrain(
             GenParams {
-                seed: 10,
+                seed: 20,
                 height: HeightParams {
                     base_height: 26.0,
                     amplitude: 220.0, // base + amplitude = 220 < CHUNK_HEIGHT (256) :
@@ -19,11 +19,11 @@ impl Scene for Physis {
                     gain: 0.5,
                     erosion: 0.6,           // creuse les vallées sans tout lisser
                     ridge: 0.80,            // arêtes vives → aspect montagne escarpée
-                    lowland_flatness: 0.85, // plaines douces, détail réservé à l'altitude
+                    lowland_flatness: 0.75, // plaines douces, détail réservé à l'altitude
                 },
             },
-            50,
-            50,
+            80,
+            80,
         )?;
         Ok(())
     }

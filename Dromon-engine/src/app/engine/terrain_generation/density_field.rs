@@ -113,6 +113,27 @@ impl<'a> DensityField<'a> {
         self.relief[(gx * self.side + gy) as usize]
     }
 
+    /// Relief interpolé (bilinéaire) à la colonne monde **flottante** `(wx, wy)` :
+    /// [`DensityField::relief`] accepte seulement des entiers. Aux coins entiers il
+    /// redonne exactement la grille. Sert à mesurer la profondeur d'un sommet à sa
+    /// position exacte (cf. [`DensityField::color`]).
+    #[inline]
+    fn relief_interp(&self, wx: f64, wy: f64) -> f32 {
+        let fx = wx - self.origin_x as f64 + self.apron as f64;
+        let fy = wy - self.origin_y as f64 + self.apron as f64;
+        // Coin bas-gauche de la maille + fraction ; indices bornés à la grille (sûreté).
+        let x0 = (fx.floor() as i32).clamp(0, self.side - 1);
+        let y0 = (fy.floor() as i32).clamp(0, self.side - 1);
+        let x1 = (x0 + 1).min(self.side - 1);
+        let y1 = (y0 + 1).min(self.side - 1);
+        let tx = (fx - fx.floor()) as f32;
+        let ty = (fy - fy.floor()) as f32;
+        let at = |gx: i32, gy: i32| self.relief[(gx * self.side + gy) as usize];
+        let h0 = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
+        let h1 = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
+        h0 + (h1 - h0) * ty
+    }
+
     /// Altitude du **toit** du terrain (sommet de la couche pleine) à la colonne
     /// `(wx, wy)` — c'est le relief. Sert au mailleur pour poser le haut des parois de
     /// bordure. (Avec des grottes, ça restera le toit ; les cavités seront ailleurs.)
@@ -155,13 +176,20 @@ impl<'a> DensityField<'a> {
         (self.z_min, self.z_max)
     }
 
-    /// Couleur du point de surface en `(wx, wy, wz)` : mélange des matériaux dominants,
-    /// choisis par la profondeur sous le relief et l'altitude (cf.
-    /// [`super::material::classify_solid`]). Dépend du champ, donc vit ici.
-    pub fn color(&self, wx: i32, wy: i32, wz: i32) -> Vec3 {
-        let surface = self.relief(wx, wy) as f64;
-        let depth = surface - wz as f64;
-        let mat_alt = surface + self.height.material_jitter(wx as f64, wy as f64);
+    /// Couleur du point de surface en `p` (coordonnées monde **flottantes**, position
+    /// exacte du sommet) : mélange des matériaux dominants, choisis par la profondeur
+    /// sous le relief et l'altitude (cf. [`super::material::classify_solid`]).
+    ///
+    /// La position flottante est essentielle : un sommet d'iso-surface vérifie
+    /// `relief(p.x, p.y) == p.z`, donc profondeur ~0 → biome de surface. Arrondir `p`
+    /// à un coin entier avant de calculer la profondeur combine l'erreur d'arrondi à
+    /// la pente ; sur un versant raide, `depth` dépasse `SURFACE_DEPTH` et le voxel
+    /// bascule en terre (taches marron). Aux colonnes entières des parois de bordure,
+    /// l'interpolation coïncide avec la grille : leurs strates restent inchangées.
+    pub fn color(&self, p: Vec3) -> Vec3 {
+        let surface = self.relief_interp(p.x as f64, p.y as f64) as f64;
+        let depth = surface - p.z as f64;
+        let mat_alt = surface + self.height.material_jitter(p.x as f64, p.y as f64);
         let voxel = classify_solid(depth, mat_alt);
 
         let mut color = Vec3::ZERO;

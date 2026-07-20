@@ -32,6 +32,12 @@ const NORMAL_RADIUS: i32 = 5;
 /// dessous ; les parois de bordure montent de là jusqu'au relief.
 const WORLD_FLOOR: i32 = 0;
 
+/// Clé d'une arête de la grille : ses deux coins entiers, **triés** (pour que deux
+/// cubes voisins partageant l'arête tombent sur la même clé, quel que soit l'ordre de
+/// leurs coins). Sert à mutualiser les sommets Marching Cubes : un seul sommet par
+/// arête, réutilisé par tous ses triangles (surface indexée ⇒ ~×5 de sommets en moins).
+type EdgeKey = (i32, i32, i32, i32, i32, i32);
+
 /// Étendue du monde en **coordonnées chunk** (bornes incluses). Sert au mailleur à
 /// savoir quels côtés d'un chunk sont au bord du monde — donc à fermer par des parois.
 #[derive(Clone, Copy)]
@@ -53,6 +59,11 @@ pub fn mesh_chunk(
     let origin_x = coord.x * n;
     let origin_y = coord.y * n;
 
+    // Pas d'échantillonnage MC = `1 << lod` (1, 2, 4…). Il divise CHUNK_SIZE, donc les
+    // chunks se tuilent proprement. N'affecte QUE la géométrie : le stencil des normales
+    // reste à un pas fixe de 1 unité (éclairage continu à travers une frontière de LOD).
+    let step = 1i32 << manager.chunk_lod(coord);
+
     // Champ de densité échantillonnable sur la région du chunk. L'apron vaut le rayon
     // des normales : le stencil de différences ne débordera jamais du pré-échantillon.
     let field = manager.density_field(coord, NORMAL_RADIUS);
@@ -61,6 +72,13 @@ pub fn mesh_chunk(
     // (dessous) ou vide (dessus). Se resserre automatiquement autour de la surface —
     // et s'élargira vers le bas quand les grottes creuseront en profondeur.
     let (z_min, z_max) = field.vertical_bounds();
+
+    // Calage du départ z sur un treillis global multiple de `step`. En X/Y les colonnes
+    // tombent déjà sur un treillis global (origin = coord·64, 64 divisible par step) ;
+    // pas en Z. Sans ce cadrage, deux chunks voisins dont les `z_min` ont des parités
+    // différentes échantillonneraient des z décalés sur leur face commune → fissure même
+    // à LOD égal. `div_euclid` arrondit vers le bas au multiple de step (sûr si négatif).
+    let z_start = z_min.div_euclid(step) * step;
 
     let mut vertices: Vec<TerrainVertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -73,18 +91,27 @@ pub fn mesh_chunk(
     let mut normal_cache: FxHashMap<(i32, i32, i32), Vec3> = FxHashMap::default();
     let mut color_cache: FxHashMap<(i32, i32, i32), Vec3> = FxHashMap::default();
 
+    // Mutualisation des sommets : arête de grille → index. Chaque arête ne produit
+    // qu'un sommet, partagé par tous les cubes/triangles qui la touchent.
+    let mut vertex_map: FxHashMap<EdgeKey, u32> = FxHashMap::default();
+
     let mut corner_d = [0.0f32; 8];
 
-    for lx in 0..n {
-        for ly in 0..n {
-            for lz in z_min..=z_max {
+    for lx in (0..n).step_by(step as usize) {
+        for ly in (0..n).step_by(step as usize) {
+            for lz in (z_start..=z_max).step_by(step as usize) {
                 let base = [origin_x + lx, origin_y + ly, lz];
 
                 // Densité aux 8 coins → index de cas (bit posé quand le coin est
-                // sous l'iso = vide, convention de la table de Bourke).
+                // sous l'iso = vide, convention de la table de Bourke). Les coins sont
+                // espacés de `step` (cube MC de côté `step` unités monde).
                 let mut cube_index = 0usize;
                 for (i, off) in CORNERS.iter().enumerate() {
-                    let d = field.sample(base[0] + off[0], base[1] + off[1], base[2] + off[2]);
+                    let d = field.sample(
+                        base[0] + off[0] * step,
+                        base[1] + off[1] * step,
+                        base[2] + off[2] * step,
+                    );
                     corner_d[i] = d;
                     if d < ISO_LEVEL {
                         cube_index |= 1 << i;
@@ -96,75 +123,39 @@ pub fn mesh_chunk(
                     continue; // cube entièrement plein ou entièrement vide.
                 }
 
-                // Position d'un sommet sur l'arête `e`, là où la densité vaut
-                // ISO_LEVEL (interpolation linéaire entre les deux coins).
-                let interp = |e: usize| -> Vec3 {
-                    let [a, b] = EDGE_CORNERS[e];
-                    let (da, db) = (corner_d[a], corner_d[b]);
-                    let ca = CORNERS[a];
-                    let cb = CORNERS[b];
-                    let pa = Vec3::new(
-                        (base[0] + ca[0]) as f32,
-                        (base[1] + ca[1]) as f32,
-                        (base[2] + ca[2]) as f32,
-                    );
-                    let pb = Vec3::new(
-                        (base[0] + cb[0]) as f32,
-                        (base[1] + cb[1]) as f32,
-                        (base[2] + cb[2]) as f32,
-                    );
-                    let denom = db - da;
-                    let t = if denom.abs() < 1e-6 {
-                        0.5
-                    } else {
-                        (ISO_LEVEL - da) / denom
-                    };
-                    pa + (pb - pa) * t
+                // `edge(e)` = sommet mutualisé de l'arête `e` du cube courant. La
+                // clôture referme les 6 arguments d'état (buffers + caches) communs aux
+                // 3 appels. `edge_vertex` renvoie des valeurs possédées → aucun emprunt
+                // de `vertices` ne fuit hors de l'appel (sinon le test d'orientation, qui
+                // lit `vertices`, entrerait en conflit avec l'emprunt `&mut`).
+                let mut edge = |e: usize| {
+                    edge_vertex(
+                        e,
+                        base,
+                        step,
+                        &corner_d,
+                        &field,
+                        &mut vertices,
+                        &mut vertex_map,
+                        &mut normal_cache,
+                        &mut color_cache,
+                    )
                 };
 
                 let mut t = 0;
                 while t + 2 < 16 && tris[t] >= 0 {
-                    let p0 = interp(tris[t] as usize);
-                    let p1 = interp(tris[t + 1] as usize);
-                    let p2 = interp(tris[t + 2] as usize);
+                    let (i0, p0, n0) = edge(tris[t] as usize);
+                    let (i1, p1, n1) = edge(tris[t + 1] as usize);
+                    let (i2, p2, n2) = edge(tris[t + 2] as usize);
 
-                    let n0 = vertex_normal(&field, &mut normal_cache, p0);
-                    let n1 = vertex_normal(&field, &mut normal_cache, p1);
-                    let n2 = vertex_normal(&field, &mut normal_cache, p2);
-
-                    // On oriente le triangle d'après le gradient de densité plutôt
-                    // que de se fier au sens d'enroulement de la table : la normale
-                    // géométrique (produit vectoriel) doit pointer vers le vide, comme
-                    // les normales de sommet. Sinon on inverse les deux derniers
-                    // sommets. Robuste quelle que soit la convention de la table.
+                    // Oriente l'enroulement d'après le gradient (normale géométrique vers
+                    // le vide, comme les normales de sommet) : on permute les INDEX.
                     let geo = (p1 - p0).cross(p2 - p0);
-                    let (p1, p2, n1, n2) = if geo.dot(n0 + n1 + n2) < 0.0 {
-                        (p2, p1, n2, n1)
+                    if geo.dot(n0 + n1 + n2) < 0.0 {
+                        indices.extend_from_slice(&[i0, i2, i1]);
                     } else {
-                        (p1, p2, n1, n2)
-                    };
-
-                    let c0 = vertex_color(&field, &mut color_cache, p0);
-                    let c1 = vertex_color(&field, &mut color_cache, p1);
-                    let c2 = vertex_color(&field, &mut color_cache, p2);
-
-                    let start = vertices.len() as u32;
-                    vertices.push(TerrainVertex {
-                        pos: p0,
-                        normal: n0,
-                        color: c0,
-                    });
-                    vertices.push(TerrainVertex {
-                        pos: p1,
-                        normal: n1,
-                        color: c1,
-                    });
-                    vertices.push(TerrainVertex {
-                        pos: p2,
-                        normal: n2,
-                        color: c2,
-                    });
-                    indices.extend_from_slice(&[start, start + 1, start + 2]);
+                        indices.extend_from_slice(&[i0, i1, i2]);
+                    }
 
                     t += 3;
                 }
@@ -180,6 +171,7 @@ pub fn mesh_chunk(
         &field,
         coord,
         bounds,
+        step,
         &mut vertices,
         &mut indices,
         &mut color_cache,
@@ -194,6 +186,7 @@ fn add_mesh_borders(
     field: &DensityField,
     coord: IVec2,
     bounds: WorldBounds,
+    step: i32,
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     color_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
@@ -221,15 +214,17 @@ fn add_mesh_borders(
         Vec3::new(0.0, 0.0, -1.0),
     );
 
-    // Paroi verticale le long d'une arête, subdivisée par colonne (un quad du fond au
-    // relief entre deux colonnes voisines). `along_x` = l'arête court selon x (donc x
-    // varie, y fixé) ; sinon elle court selon y.
+    // Paroi verticale le long d'une arête, subdivisée par pas `step` (un quad du fond au
+    // relief entre deux colonnes distantes de `step`). Au pas `step`, le haut du mur suit
+    // `surface_z` aux mêmes colonnes que les sommets MC de bord → coïncidence exacte
+    // (densité linéaire en z ⇒ le sommet MC tombe pile à `z = relief`), pas de fente.
+    // `along_x` = l'arête court selon x (donc x varie, y fixé) ; sinon elle court selon y.
     let mut wall = |along_x: bool, fixed: i32, normal: Vec3| {
-        for k in 0..n {
+        for k in (0..n).step_by(step as usize) {
             let (a0, a1) = if along_x {
-                ((x0 + k, fixed), (x0 + k + 1, fixed))
+                ((x0 + k, fixed), (x0 + k + step, fixed))
             } else {
-                ((fixed, y0 + k), (fixed, y0 + k + 1))
+                ((fixed, y0 + k), (fixed, y0 + k + step))
             };
             let top0 = field.surface_z(a0.0, a0.1);
             let top1 = field.surface_z(a1.0, a1.1);
@@ -310,6 +305,74 @@ fn push_tri(
     indices.extend_from_slice(&[start, start + 1, start + 2]);
 }
 
+/// Sommet mutualisé de l'arête de grille `e` du cube `base`. L'arête est identifiée
+/// par ses deux coins entiers triés ([`EdgeKey`]) : la 1re fois on interpole la
+/// position (là où la densité vaut ISO_LEVEL), on calcule normale+couleur et on pousse
+/// le sommet ; les fois suivantes (cube voisin, autre triangle) on réutilise l'index.
+/// Renvoie `(index, position, normale)` — la position/normale servent au test
+/// d'orientation de l'appelant sans re-lire le buffer.
+#[allow(clippy::too_many_arguments)]
+fn edge_vertex(
+    e: usize,
+    base: [i32; 3],
+    step: i32,
+    corner_d: &[f32; 8],
+    field: &DensityField,
+    vertices: &mut Vec<TerrainVertex>,
+    vertex_map: &mut FxHashMap<EdgeKey, u32>,
+    normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    color_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
+) -> (u32, Vec3, Vec3) {
+    let [a, b] = EDGE_CORNERS[e];
+    let ca = CORNERS[a];
+    let cb = CORNERS[b];
+    // Coins espacés de `step` (mêmes positions monde que l'échantillonnage des densités).
+    // La clé reste les deux coins entiers triés → dédoublonnage correct dans le chunk.
+    let ia = [
+        base[0] + ca[0] * step,
+        base[1] + ca[1] * step,
+        base[2] + ca[2] * step,
+    ];
+    let ib = [
+        base[0] + cb[0] * step,
+        base[1] + cb[1] * step,
+        base[2] + cb[2] * step,
+    ];
+    // Clé canonique : les deux coins triés (indépendante de l'ordre a/b propre au cube).
+    let key = if ia <= ib {
+        (ia[0], ia[1], ia[2], ib[0], ib[1], ib[2])
+    } else {
+        (ib[0], ib[1], ib[2], ia[0], ia[1], ia[2])
+    };
+    if let Some(&idx) = vertex_map.get(&key) {
+        let v = vertices[idx as usize];
+        return (idx, v.pos, v.normal);
+    }
+
+    // Interpolation linéaire sur l'arête (identique à l'ancien `interp`).
+    let (da, db) = (corner_d[a], corner_d[b]);
+    let pa = Vec3::new(ia[0] as f32, ia[1] as f32, ia[2] as f32);
+    let pb = Vec3::new(ib[0] as f32, ib[1] as f32, ib[2] as f32);
+    let denom = db - da;
+    let t = if denom.abs() < 1e-6 {
+        0.5
+    } else {
+        (ISO_LEVEL - da) / denom
+    };
+    let p = pa + (pb - pa) * t;
+
+    let normal = vertex_normal(field, normal_cache, p);
+    let color = vertex_color(field, color_cache, p);
+    let idx = vertices.len() as u32;
+    vertices.push(TerrainVertex {
+        pos: p,
+        normal,
+        color,
+    });
+    vertex_map.insert(key, idx);
+    (idx, p, normal)
+}
+
 /// Normale de surface au sommet `p` : `−∇density` normalisé (pointe vers le vide, où
 /// la densité décroît). Gradient estimé par différences centrées **moyennées** sur
 /// `k = 1..=NORMAL_RADIUS` (mélange de pas pairs et impairs → pas de damier
@@ -341,9 +404,11 @@ fn vertex_normal(
     n
 }
 
-/// Couleur du sommet `p` : matériau de surface résolu côté CPU (mélange des
-/// dominants). Échantillonné au coin entier le plus proche et mémoïsé. Fréquence
-/// bien plus basse que la densité (un appel par sommet unique).
+/// Couleur du sommet `p` : matériau de surface résolu côté CPU. Le calcul prend la
+/// position **flottante** exacte (profondeur ~0 sur une iso-surface, sans dériver
+/// vers la terre sur les pentes raides — cf. [`DensityField::color`]). La mémoïsation
+/// reste indexée au coin entier le plus proche : les sommets voisins y partagent une
+/// couleur quasi identique, économie sans artefact visible.
 fn vertex_color(
     field: &DensityField,
     cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
@@ -353,7 +418,7 @@ fn vertex_color(
     if let Some(&c) = cache.get(&key) {
         return c;
     }
-    let c = field.color(key.0, key.1, key.2);
+    let c = field.color(p);
     cache.insert(key, c);
     c
 }

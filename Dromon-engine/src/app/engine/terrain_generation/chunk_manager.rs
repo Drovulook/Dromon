@@ -53,8 +53,24 @@ impl ChunkManager {
     /// est produit à la demande au maillage (cf. [`ChunkManager::density_field`]).
     pub fn generate_chunk(&mut self, coord: IVec2) -> &Chunk {
         profile!();
-        self.chunks.entry(coord).or_insert_with(|| Chunk::new(coord));
+        self.chunks
+            .entry(coord)
+            .or_insert_with(|| Chunk::new(coord));
         &self.chunks[&coord]
+    }
+
+    /// Niveau de LOD du chunk `coord` (0 si inconnu). Lu par le mailleur pour choisir
+    /// le pas d'échantillonnage. Source de vérité unique du LOD.
+    pub fn chunk_lod(&self, coord: IVec2) -> u8 {
+        self.chunks.get(&coord).map_or(0, |c| c.lod_level)
+    }
+
+    /// Fixe le niveau de LOD du chunk `coord` (no-op s'il n'est pas chargé). Plus tard,
+    /// le LOD dynamique appellera ceci puis re-maillera le chunk concerné.
+    pub fn set_chunk_lod(&mut self, coord: IVec2, lod: u8) {
+        if let Some(c) = self.chunks.get_mut(&coord) {
+            c.lod_level = lod;
+        }
     }
 
     /// Construit le [`DensityField`] échantillonnable sur la région du chunk `coord`.
