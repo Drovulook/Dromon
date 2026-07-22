@@ -1,3 +1,4 @@
+use super::lod::TransitionFaces;
 use super::material::MATERIAL_AIR;
 use glam::IVec2;
 
@@ -54,14 +55,23 @@ pub struct Chunk {
     /// seulement passé en argument) pour préparer le LOD dynamique : re-mailler un
     /// chunk quand son niveau change. Source de vérité lue par le mailleur.
     pub lod_level: u8,
+    /// Faces bordant un voisin **plus grossier** ⇒ portant une cellule de transition
+    /// Transvoxel (cf. [`super::lod::transition_faces`]). Cache **dérivé** du LOD des
+    /// voisins — pas une source de vérité : recalculable à tout moment depuis les LOD.
+    /// À rafraîchir après toute (ré)assignation de LOD via
+    /// [`super::chunk_manager::ChunkManager::refresh_transition_faces`] (le masque
+    /// dépend des voisins, pas seulement de soi).
+    pub transition_faces: TransitionFaces,
 }
 
 impl Chunk {
-    /// Crée un chunk (simple marqueur de région chargée), en pleine résolution.
+    /// Crée un chunk (simple marqueur de région chargée), en pleine résolution et sans
+    /// face de transition (masque rempli plus tard, une fois les LOD des voisins connus).
     pub fn new(coord: IVec2) -> Chunk {
         Chunk {
             coord,
             lod_level: 0,
+            transition_faces: TransitionFaces::default(),
         }
     }
 }

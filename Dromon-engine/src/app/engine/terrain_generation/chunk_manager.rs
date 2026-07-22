@@ -1,6 +1,7 @@
 use super::chunk::Chunk;
 use super::density_field::DensityField;
 use super::height_field::{HeightField, HeightParams};
+use super::lod::{self, Face, TransitionFaces};
 use crate::profile;
 use glam::{IVec2, IVec3};
 use std::collections::HashMap;
@@ -71,6 +72,35 @@ impl ChunkManager {
         if let Some(c) = self.chunks.get_mut(&coord) {
             c.lod_level = lod;
         }
+    }
+
+    /// (Re)calcule le masque de faces de transition du chunk `coord` depuis le LOD de ses
+    /// voisins et le **stocke** sur le chunk (cf. [`Chunk::transition_faces`]). À appeler
+    /// après toute (ré)assignation de LOD, une fois TOUS les voisins fixés — le masque
+    /// dépend d'eux. No-op si le chunk n'est pas chargé.
+    pub fn refresh_transition_faces(&mut self, coord: IVec2) {
+        let faces = self.compute_transition_faces(coord);
+        if let Some(c) = self.chunks.get_mut(&coord) {
+            c.transition_faces = faces;
+        }
+    }
+
+    /// Masque de transition **stocké** du chunk `coord` (vide si non chargé). Lu par le
+    /// mailleur pour savoir quels bords coudre ; valide tant que les LOD n'ont pas bougé
+    /// depuis le dernier [`ChunkManager::refresh_transition_faces`].
+    pub fn chunk_transition_faces(&self, coord: IVec2) -> TransitionFaces {
+        self.chunks
+            .get(&coord)
+            .map_or(TransitionFaces::default(), |c| c.transition_faces)
+    }
+
+    /// Règle de détection appliquée au voisinage courant (dérivée, pure) : une face porte
+    /// une transition ssi son voisin est plus grossier. LOD des 4 voisins rassemblé ici
+    /// (0 si non chargé ⇒ jamais plus grossier). La source de vérité reste les LOD.
+    fn compute_transition_faces(&self, coord: IVec2) -> TransitionFaces {
+        let my_lod = self.chunk_lod(coord);
+        let neighbor_lods = Face::ALL.map(|f| self.chunk_lod(coord + f.offset()));
+        lod::transition_faces(my_lod, neighbor_lods)
     }
 
     /// Construit le [`DensityField`] échantillonnable sur la région du chunk `coord`.

@@ -87,7 +87,6 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            let _ = self.context.device.device_wait_idle();
             self.context.device.destroy_buffer(self.buffer, None);
             self.context.device.free_memory(self.buffer_memory, None);
         }

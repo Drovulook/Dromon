@@ -49,6 +49,13 @@ impl Logger {
         self.send(format!("[PROFILE_{}] {}", kind, payload));
     }
 
+    /// Envoie les statistiques du terrain (onglet « world » du CLI). Même
+    /// convention d'encodage que [`Logger::profile`] : un enregistrement par
+    /// niveau de LOD séparé par `\x1e`, champs `lod␟chunks␟sommets` par `\x1f`.
+    pub fn world(&self, payload: &str) {
+        self.send(format!("[WORLD] {}", payload));
+    }
+
     fn send(&self, msg: String) {
         match &self.sender {
             Some(tx) => {

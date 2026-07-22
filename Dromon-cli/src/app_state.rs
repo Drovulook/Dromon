@@ -1,6 +1,7 @@
 use crate::log_parser::{self, ParsedMessage};
 use crate::tabs::logs::LogsState;
 use crate::tabs::profiling::ProfilingState;
+use crate::tabs::world::WorldState;
 use std::sync::{Arc, atomic::AtomicBool, mpsc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,7 @@ pub struct AppState {
     // État propre à chaque onglet.
     pub logs: LogsState,
     pub profiling: ProfilingState,
+    pub world: WorldState,
 }
 
 impl AppState {
@@ -63,6 +65,7 @@ impl AppState {
             active_tab: Tab::Logs,
             logs: LogsState::new(),
             profiling: ProfilingState::new(),
+            world: WorldState::new(),
         }
     }
 
@@ -90,6 +93,7 @@ impl AppState {
             ParsedMessage::ProfileInit(nodes) => self.profiling.load_init(nodes),
             ParsedMessage::ProfileFrame(nodes) => self.profiling.load_frame(nodes),
             ParsedMessage::ProfileGpu(nodes) => self.profiling.load_gpu(nodes),
+            ParsedMessage::World(stats) => self.world.load(stats),
         }
     }
 }

@@ -177,6 +177,14 @@ pub fn mesh_chunk(
         &mut color_cache,
     );
 
+    // DEBUG Transvoxel : teinte tout le chunk en rouge s'il porte ≥1 face de transition
+    // (repérage visuel des chunks à coudre). À retirer une fois l'étape 2 en place.
+    if !manager.chunk_transition_faces(coord).is_empty() {
+        for v in &mut vertices {
+            v.color = Vec3::new(1.0, 0.0, 0.0);
+        }
+    }
+
     (vertices, indices)
 }
 

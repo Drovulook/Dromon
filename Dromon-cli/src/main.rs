@@ -143,7 +143,7 @@ fn render(frame: &mut Frame, state: &mut AppState) {
     match state.active_tab {
         Tab::Logs => tabs::logs::render(frame, &mut state.logs, content_area),
         Tab::Profiling => tabs::profiling::render(frame, &mut state.profiling, content_area),
-        Tab::World => tabs::world::render(frame, content_area),
+        Tab::World => tabs::world::render(frame, &state.world, content_area),
     }
 }
 

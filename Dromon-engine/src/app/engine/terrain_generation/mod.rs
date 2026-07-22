@@ -6,6 +6,7 @@ mod lod;
 mod marching_cubes;
 mod material;
 mod mesher;
+mod transvoxel_tables;
 mod utils;
 
 pub use chunk_manager::{ChunkManager, GenParams};

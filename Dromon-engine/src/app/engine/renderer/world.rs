@@ -239,6 +239,35 @@ impl World {
             })
             .collect();
 
+        // 1c) Masques de transition (Transvoxel, étape 1) : maintenant que TOUS les LOD
+        //     sont fixés, on calcule pour chaque chunk quelles faces bordent un voisin
+        //     plus grossier et on **stocke** le masque sur le chunk (cache dérivé, cf.
+        //     `Chunk::transition_faces`). Doit venir après la boucle 1b : le masque d'un
+        //     chunk dépend du LOD de ses voisins.
+        for &coord in &coords {
+            manager.refresh_transition_faces(coord);
+        }
+
+        // 1d) Preuve par log de la détection, sans encore générer de géométrie : combien
+        //     de chunks ont au moins une face à coudre, et combien de faces au total. Les
+        //     cellules de transition (qui scellent les fentes inter-LOD) viendront ensuite.
+        //     Les faces se concentrent aux frontières entre anneaux de LOD.
+        {
+            let mut chunks_to_stitch = 0usize;
+            let mut total_faces = 0usize;
+            for &coord in &coords {
+                let faces = manager.chunk_transition_faces(coord);
+                if !faces.is_empty() {
+                    chunks_to_stitch += 1;
+                    total_faces += faces.iter().count();
+                }
+            }
+            self.logger.info(&format!(
+                "Transitions LOD : {chunks_to_stitch} chunks à coudre, \
+                 {total_faces} faces de transition détectées"
+            ));
+        }
+
         // 2a) Meshing en parallèle : chaque chunk est indépendant et `mesh_chunk` ne
         //     lit que `&manager` (partage en lecture seule, sûr entre threads). Rayon
         //     répartit les 2500 chunks sur tous les cœurs par vol de travail.
@@ -250,10 +279,11 @@ impl World {
                 .collect()
         };
 
-        // Contrôle du gain LOD : sommets moyens par chunk et par niveau. On s'attend à
-        // avg(L1) ≈ avg(L0)/4 et avg(L2) ≈ avg(L0)/16 (la nappe est 2D : doubler le pas
-        // quadruple l'aire couverte par cellule). Un peu au-dessus du ÷4 idéal en
-        // pratique — le quad de fond et les parois de bord ne rétrécissent pas.
+        // Stats terrain → onglet « world » du CLI, un enregistrement par niveau.
+        // Sert de contrôle du gain LOD : on s'attend à avg(L1) ≈ avg(L0)/4 et
+        // avg(L2) ≈ avg(L0)/16 (la nappe est 2D : doubler le pas quadruple l'aire
+        // couverte par cellule). Un peu au-dessus du ÷4 idéal en pratique — le quad
+        // de fond et les parois de bord ne rétrécissent pas.
         {
             let mut chunks_per = [0usize; MAX_LOD as usize + 1];
             let mut verts_per = [0usize; MAX_LOD as usize + 1];
@@ -261,14 +291,20 @@ impl World {
                 chunks_per[lod as usize] += 1;
                 verts_per[lod as usize] += v.len();
             }
-            for l in 0..=MAX_LOD as usize {
-                let (c, v) = (chunks_per[l], verts_per[l]);
-                let avg = if c > 0 { v / c } else { 0 };
-                self.logger.info(&format!(
-                    "LOD{l} (pas {}) : {c} chunks, {v} sommets, {avg}/chunk",
-                    1 << l
-                ));
-            }
+
+            // 1er enregistrement : résumé en clair (sans séparateur de champ) — le CLI
+            // l'affiche tel quel, et c'est la seule trace lisible quand le moteur tourne
+            // sans CLI (le logger écrit alors le message sur stderr).
+            let total_chunks: usize = chunks_per.iter().sum();
+            let total_verts: usize = verts_per.iter().sum();
+            let mut records = vec![format!(
+                "Terrain : {total_chunks} chunks, {total_verts} sommets"
+            )];
+            records.extend(
+                (0..=MAX_LOD as usize)
+                    .map(|l| format!("{l}\u{1f}{}\u{1f}{}", chunks_per[l], verts_per[l])),
+            );
+            self.logger.world(&records.join("\u{1e}"));
         }
 
         // 2b) Upload GPU séquentiel : `TerrainMesh::new` touche le contexte Vulkan et
