@@ -5,7 +5,7 @@
 //! (`sample` + `vertical_bounds`) et ignore comment la densité est produite → on peut
 //! enrichir le terrain (grottes, surplombs, filons) sans toucher au mailleur.
 
-use super::chunk::{CHUNK_HEIGHT, CHUNK_SIZE};
+use super::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Voxel};
 use super::height_field::HeightField;
 use super::material::{classify_solid, material_color};
 use glam::{IVec2, IVec3, Vec3};
@@ -176,27 +176,45 @@ impl<'a> DensityField<'a> {
         (self.z_min, self.z_max)
     }
 
-    /// Couleur du point de surface en `p` (coordonnées monde **flottantes**, position
-    /// exacte du sommet) : mélange des matériaux dominants, choisis par la profondeur
-    /// sous le relief et l'altitude (cf. [`super::material::classify_solid`]).
+    /// Couleur d'un sommet d'**iso-surface** : le biome de surface à son altitude.
     ///
-    /// La position flottante est essentielle : un sommet d'iso-surface vérifie
-    /// `relief(p.x, p.y) == p.z`, donc profondeur ~0 → biome de surface. Arrondir `p`
-    /// à un coin entier avant de calculer la profondeur combine l'erreur d'arrondi à
-    /// la pente ; sur un versant raide, `depth` dépasse `SURFACE_DEPTH` et le voxel
-    /// bascule en terre (taches marron). Aux colonnes entières des parois de bordure,
-    /// l'interpolation coïncide avec la grille : leurs strates restent inchangées.
+    /// Sa profondeur sous le toit vaut zéro *par construction* — on ne la mesure donc
+    /// pas. La mesurer serait même faux : le mailleur pose le sommet sur la corde
+    /// joignant deux échantillons distants de `1 << lod`, alors que [`relief_interp`]
+    /// rend le relief au pas 1. Sur une portion convexe l'écart entre les deux croît
+    /// comme le pas, dépasse `SURFACE_DEPTH` dès le LOD 2 et fait basculer le sommet
+    /// en terre — d'où les étoiles marron isolées au loin (un seul sommet fautif
+    /// colorie tout son 1-ring par interpolation de Gouraud).
+    ///
+    /// L'altitude de biome vient de `p.z` lui-même : sur l'iso-surface c'est le relief,
+    /// en moins cher et sans écart de résolution.
+    ///
+    /// [`relief_interp`]: DensityField::relief_interp
+    pub fn surface_color(&self, p: Vec3) -> Vec3 {
+        let mat_alt = p.z as f64 + self.height.material_jitter(p.x as f64, p.y as f64);
+        blend(classify_solid(0.0, mat_alt))
+    }
+
+    /// Couleur d'un point **de volume** en `p` (coordonnées monde flottantes) : matériau
+    /// à sa profondeur réelle sous le relief. Réservée aux parois de bordure et au fond,
+    /// dont la géométrie coupe le terrain et doit en montrer les strates.
+    ///
+    /// Leurs sommets sont posés à des colonnes **entières**, où l'interpolation retombe
+    /// exactement sur la grille pré-échantillonnée : la profondeur y est exacte quel que
+    /// soit le LOD. Pour un sommet d'iso-surface, prendre [`DensityField::surface_color`].
     pub fn color(&self, p: Vec3) -> Vec3 {
         let surface = self.relief_interp(p.x as f64, p.y as f64) as f64;
         let depth = surface - p.z as f64;
         let mat_alt = surface + self.height.material_jitter(p.x as f64, p.y as f64);
-        let voxel = classify_solid(depth, mat_alt);
-
-        let mut color = Vec3::ZERO;
-        for i in 0..4 {
-            let weight = voxel.weights[i] as f32 / 255.0;
-            color += material_color(voxel.materials[i]) * weight;
-        }
-        color
+        blend(classify_solid(depth, mat_alt))
     }
+}
+
+/// Albédo d'un descripteur de matière : ses matériaux, pondérés par leurs poids.
+fn blend(voxel: Voxel) -> Vec3 {
+    let mut color = Vec3::ZERO;
+    for i in 0..4 {
+        color += material_color(voxel.materials[i]) * (voxel.weights[i] as f32 / 255.0);
+    }
+    color
 }

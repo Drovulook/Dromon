@@ -11,5 +11,5 @@ mod utils;
 
 pub use chunk_manager::{ChunkManager, GenParams};
 pub use height_field::HeightParams;
-pub use lod::{MAX_LOD, static_lod};
+pub use lod::{MAX_LOD, balanced_lods};
 pub use mesher::{WorldBounds, mesh_chunk};

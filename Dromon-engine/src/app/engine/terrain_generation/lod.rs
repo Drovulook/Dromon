@@ -8,6 +8,7 @@
 
 use super::chunk::CHUNK_SIZE;
 use glam::{IVec2, Vec2};
+use std::collections::HashMap;
 
 /// Niveau de détail maximal (pas = `1 << MAX_LOD`). 3 paliers pour commencer.
 pub const MAX_LOD: u8 = 3;
@@ -15,8 +16,8 @@ pub const MAX_LOD: u8 = 3;
 /// Rayons (unités monde) des anneaux, mesurés depuis le point focal (caméra).
 /// `dist < LOD1_DIST` → LOD0 (pleine résolution) ; `< LOD2_DIST` → LOD1 (÷4) ; au-delà → LOD2 (÷16).
 const LOD1_DIST: f32 = 220.0;
-const LOD2_DIST: f32 = 520.0;
-const LOD3_DIST: f32 = 2020.0;
+const LOD2_DIST: f32 = 620.0;
+const LOD3_DIST: f32 = 1820.0;
 
 /// Distance horizontale (monde) du **centre** du chunk `coord` au point focal.
 pub fn chunk_distance(coord: IVec2, focus: Vec2) -> f32 {
@@ -38,6 +39,49 @@ pub fn static_lod(coord: IVec2, focus: Vec2) -> u8 {
         2
     } else {
         3
+    }
+}
+
+/// Écart de LOD maximal toléré entre deux chunks **voisins**. La cellule de transition
+/// du Transvoxel suppose un voisin de pas exactement **double** (sa face grossière a
+/// 2×2 coins face à 3×3 échantillons fins) : un écart de 2 niveaux n'est pas coudable.
+const MAX_LOD_STEP: u8 = 1;
+
+/// LOD de chaque chunk de `coords`, **équilibré 2:1** : c'est [`static_lod`] suivi d'une
+/// relaxation qui affine tout chunk trop grossier pour un de ses voisins. Sans cette
+/// contrainte (« octree restreint »), deux chunks adjacents peuvent différer de 2
+/// niveaux — et le Transvoxel ne sait pas coudre ça.
+///
+/// La relaxation converge : abaisser le LOD d'un chunk ne peut créer de nouvelle
+/// violation que chez ses voisins (jamais chez lui), et les niveaux ne font que
+/// décroître, bornés par 0 ⇒ point fixe atteint en au plus `MAX_LOD` passes.
+pub fn balanced_lods(coords: &[IVec2], focus: Vec2) -> Vec<u8> {
+    let mut lods: HashMap<IVec2, u8> = coords.iter().map(|&c| (c, static_lod(c, focus))).collect();
+    balance(coords, &mut lods);
+    coords.iter().map(|c| lods[c]).collect()
+}
+
+/// Relaxation en place : tant qu'un chunk dépasse `voisin + MAX_LOD_STEP`, on le ramène
+/// à cette borne. Les chunks absents de la carte (hors monde) ne contraignent rien.
+fn balance(coords: &[IVec2], lods: &mut HashMap<IVec2, u8>) {
+    loop {
+        let mut changed = false;
+        for &c in coords {
+            let mine = lods[&c];
+            let limit = Face::ALL
+                .iter()
+                .filter_map(|f| lods.get(&(c + f.offset())))
+                .map(|&n| n + MAX_LOD_STEP)
+                .min()
+                .unwrap_or(mine);
+            if mine > limit {
+                lods.insert(c, limit);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
     }
 }
 
@@ -146,5 +190,74 @@ mod tests {
     #[test]
     fn all_four_faces() {
         assert_eq!(transition_faces(0, [1, 1, 1, 1]).iter().count(), 4);
+    }
+
+    /// Bande 1D `0, 3` : l'écart de 3 niveaux est ramené à 1 (le grossier s'affine).
+    #[test]
+    fn balance_clamps_neighbor_gap() {
+        let coords = [IVec2::new(0, 0), IVec2::new(1, 0)];
+        let mut lods: HashMap<IVec2, u8> = [(coords[0], 0), (coords[1], 3)].into();
+        balance(&coords, &mut lods);
+        assert_eq!(lods[&coords[0]], 0);
+        assert_eq!(lods[&coords[1]], 1);
+    }
+
+    /// La contrainte se **propage** : `0, 3, 3, 3` → `0, 1, 2, 3` (une marche par chunk).
+    #[test]
+    fn balance_propagates_along_a_row() {
+        let coords: Vec<IVec2> = (0..4).map(|x| IVec2::new(x, 0)).collect();
+        let mut lods: HashMap<IVec2, u8> = coords
+            .iter()
+            .map(|&c| (c, if c.x == 0 { 0 } else { 3 }))
+            .collect();
+        balance(&coords, &mut lods);
+        assert_eq!(
+            coords.iter().map(|c| lods[c]).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+    }
+
+    /// Sur la vraie grille du jeu (80×80 chunks autour de l'origine), la politique de
+    /// distance produit-elle un champ coudable ? C'est l'invariant dont dépend le
+    /// `debug_assert` du mailleur : aucun couple de voisins à plus d'un niveau d'écart.
+    #[test]
+    fn game_grid_is_two_to_one_balanced() {
+        let coords: Vec<IVec2> = (-40..40)
+            .flat_map(|x| (-40..40).map(move |y| IVec2::new(x, y)))
+            .collect();
+        let lods: HashMap<IVec2, u8> = coords
+            .iter()
+            .copied()
+            .zip(balanced_lods(&coords, Vec2::new(2.0, 2.0)))
+            .collect();
+
+        for (&c, &mine) in &lods {
+            for f in Face::ALL {
+                if let Some(&other) = lods.get(&(c + f.offset())) {
+                    assert!(
+                        mine.abs_diff(other) <= MAX_LOD_STEP,
+                        "{c} (LOD {mine}) et son voisin {f:?} (LOD {other}) : écart non coudable"
+                    );
+                }
+            }
+        }
+        // Garde-fou : le terrain doit rester réellement multi-LOD (sinon l'invariant
+        // serait vrai pour la raison triviale « tout est au même niveau »).
+        let levels = lods.values().collect::<std::collections::HashSet<_>>().len();
+        assert!(levels > 1, "un seul niveau de LOD : le test ne prouve rien");
+    }
+
+    /// Un terrain déjà équilibré n'est pas touché (la relaxation est un point fixe).
+    #[test]
+    fn balance_leaves_valid_field_untouched() {
+        let coords: Vec<IVec2> = (0..4).map(|x| IVec2::new(x, 0)).collect();
+        let before: HashMap<IVec2, u8> = coords
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| (c, i as u8))
+            .collect();
+        let mut lods = before.clone();
+        balance(&coords, &mut lods);
+        assert_eq!(lods, before);
     }
 }

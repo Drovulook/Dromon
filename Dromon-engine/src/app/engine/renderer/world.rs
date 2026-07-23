@@ -13,7 +13,7 @@ use crate::app::{
         },
         rendering_context::RenderingContext,
         terrain_generation::{
-            ChunkManager, GenParams, MAX_LOD, WorldBounds, mesh_chunk, static_lod,
+            ChunkManager, GenParams, MAX_LOD, WorldBounds, balanced_lods, mesh_chunk,
         },
         timer::Timer,
     },
@@ -227,17 +227,15 @@ impl World {
         }
 
         // 1b) LOD statique : figé une fois selon la distance horizontale du chunk à la
-        //     position de départ de la caméra. `mesh_chunk` relira ce niveau via le
-        //     manager (source de vérité unique) → le meshing parallèle reste inchangé.
+        //     position de départ de la caméra, puis **équilibré 2:1** — deux chunks
+        //     voisins ne peuvent pas différer de plus d'un niveau, seul écart que la
+        //     cellule de transition Transvoxel sait coudre. `mesh_chunk` relira ce niveau
+        //     via le manager (source de vérité unique) → meshing parallèle inchangé.
         let focus = Vec2::new(self.camera.position.x, self.camera.position.y);
-        let lods: Vec<u8> = coords
-            .iter()
-            .map(|&c| {
-                let lod = static_lod(c, focus);
-                manager.set_chunk_lod(c, lod);
-                lod
-            })
-            .collect();
+        let lods = balanced_lods(&coords, focus);
+        for (&c, &lod) in coords.iter().zip(&lods) {
+            manager.set_chunk_lod(c, lod);
+        }
 
         // 1c) Masques de transition (Transvoxel, étape 1) : maintenant que TOUS les LOD
         //     sont fixés, on calcule pour chaque chunk quelles faces bordent un voisin

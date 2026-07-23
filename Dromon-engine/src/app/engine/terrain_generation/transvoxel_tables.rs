@@ -85,6 +85,12 @@ impl TransitionCellData {
     }
 }
 
+/// Points des 13 dont la densité fournit le bit `i` du code de cas, **dans l'ordre des
+/// bits** (la spirale documentée en tête de module : anneau extérieur puis centre).
+/// Seuls les 9 points de la face haute réso y figurent — les 4 coins grossiers (9..C)
+/// ont par construction la valeur de 0/2/6/8, ils n'ajoutent aucun bit.
+pub const TRANSITION_CASE_BITS: [usize; 9] = [0, 1, 2, 5, 8, 7, 6, 3, 4];
+
 /// Coordonnées locales `[u, v, side]` des 13 points (cf. schéma en tête de module) :
 /// `u, v ∈ {0,1,2}` (demi-cellules dans le plan de la face) ; `side` = 0 pour la face
 /// haute réso (w=0), 1 pour la face basse réso. Le mailleur convertit `(u,v,side)` en
@@ -777,6 +783,57 @@ mod tests {
                 let (a, b) = transition_edge(case, k);
                 assert!(a < 13 && b < 13, "cas {} sommet {}: coins {},{}", case, k, a, b);
             }
+        }
+    }
+
+    /// Le point `k` des 13 est-il **plein** dans le cas `case` ? Les 9 points de la face
+    /// haute réso portent chacun un bit ([`TRANSITION_CASE_BITS`]) ; les 4 coins grossiers
+    /// (9..C) reprennent la valeur de 0/2/6/8 — mêmes positions monde, donc mêmes densités.
+    fn marked(case: usize, point: u8) -> bool {
+        let point = match point {
+            9 => 0,
+            10 => 2,
+            11 => 6,
+            12 => 8,
+            p => p,
+        } as usize;
+        let bit = TRANSITION_CASE_BITS
+            .iter()
+            .position(|&p| p == point)
+            .expect("les 9 points de la face portent chacun un bit");
+        case & (1 << bit) != 0
+    }
+
+    /// **Le test qui valide la lecture des tables** : tout sommet listé se pose sur une
+    /// arête dont les deux extrémités sont de signes OPPOSÉS. C'est faux dès qu'on se
+    /// trompe sur les poids de bits, sur le décodage d'arête ou sur la correspondance
+    /// des 4 coins grossiers — et une interpolation sur une arête sans changement de
+    /// signe n'aurait aucun sens (dénominateur nul).
+    #[test]
+    fn every_vertex_sits_on_a_sign_change() {
+        for case in 0..512 {
+            let class = (TRANSITION_CELL_CLASS[case] & 0x7F) as usize;
+            let nv = TRANSITION_CELL_DATA[class].vertex_count() as usize;
+            for k in 0..nv {
+                let (a, b) = transition_edge(case, k);
+                assert_ne!(
+                    marked(case, a),
+                    marked(case, b),
+                    "cas {:#05x} sommet {}: arête {}-{} sans changement de signe",
+                    case,
+                    k,
+                    a,
+                    b
+                );
+            }
+        }
+    }
+
+    /// Une cellule produit au plus 12 sommets — la borne que le mailleur alloue en pile.
+    #[test]
+    fn vertex_count_fits_scratch_buffers() {
+        for data in TRANSITION_CELL_DATA.iter() {
+            assert!(data.vertex_count() <= 12);
         }
     }
 }
