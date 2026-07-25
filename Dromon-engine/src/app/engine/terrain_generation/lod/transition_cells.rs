@@ -35,7 +35,10 @@ use crate::app::engine::{
                 TRANSITION_CORNER_UV, transition_edge,
             },
         },
-        mesh::mesher::{DEBUG_TRANSITION_COLOR, EdgeKey, cached_color, vertex_normal},
+        mesh::{
+            mesher::DEBUG_TRANSITION_COLOR,
+            vertex::{EdgeKey, cached_color, vertex_normal},
+        },
     },
 };
 

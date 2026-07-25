@@ -2,12 +2,15 @@ use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
-use crate::app::engine::{
-    renderer::{
-        descriptors::DescriptorHandler,
-        render_resources::{TerrainMesh, TerrainVertex},
+use crate::{
+    app::engine::{
+        renderer::{
+            descriptors::DescriptorHandler,
+            render_resources::{TerrainMesh, TerrainVertex},
+        },
+        rendering_context::RenderingContext,
     },
-    rendering_context::RenderingContext,
+    profile,
 };
 use glam::Mat4;
 
@@ -157,15 +160,18 @@ impl TerrainRenderSystem {
             );
 
             for mesh in terrain_meshes {
-                mesh.bind(command_buffer);
-                self.context.device.cmd_draw_indexed(
-                    command_buffer,
-                    mesh.indices.len() as u32,
-                    1,
-                    0,
-                    0,
-                    0,
-                );
+                {
+                    profile!("bind + draw command - terrain mesh");
+                    mesh.bind(command_buffer);
+                    self.context.device.cmd_draw_indexed(
+                        command_buffer,
+                        mesh.indices.len() as u32,
+                        1,
+                        0,
+                        0,
+                        0,
+                    );
+                }
             }
         }
     }

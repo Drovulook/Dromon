@@ -9,7 +9,7 @@ use crate::app::engine::{
     terrain_generation::{
         chunk::CHUNK_SIZE,
         generation::DensityField,
-        mesh::mesher::{WORLD_FLOOR, cached_color},
+        mesh::{mesher::WORLD_FLOOR, vertex::cached_color},
     },
 };
 

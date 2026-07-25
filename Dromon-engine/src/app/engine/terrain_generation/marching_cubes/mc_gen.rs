@@ -8,7 +8,7 @@ use crate::app::engine::{
         generation::DensityField,
         lod::transition_shrink::HalfStepShrink,
         marching_cubes::mc_tables::{CORNERS, EDGE_CORNERS},
-        mesh::mesher::{EdgeKey, cached_color, vertex_normal},
+        mesh::vertex::{EdgeKey, cached_color, vertex_normal},
     },
 };
 
