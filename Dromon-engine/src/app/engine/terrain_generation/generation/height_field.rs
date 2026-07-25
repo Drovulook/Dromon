@@ -20,9 +20,9 @@
 //! jour où l'on voudra un bruit dérivable analytiquement, seul
 //! [`HeightField::noise_with_grad`] sera à remplacer.
 
-use super::utils::smootherstep;
-use crate::profile;
 use noise::{NoiseFn, Perlin};
+
+use crate::app::engine::terrain_generation::utils::smootherstep;
 
 /// Paramètres du champ d'altitude. Regroupe le contrôle du fBm et de l'érosion.
 #[derive(Clone, Copy)]
@@ -184,19 +184,17 @@ impl HeightField {
     ///
     /// On perturbe ainsi l'altitude *testée* (et non le seuil) : la frontière
     /// devient l'iso-courbe de `surface + jitter` au lieu de `surface = seuil`.
-    pub fn material_jitter(&self, wx: f64, wy: f64) -> f64 {
+    pub fn material_jitter(&self, wx: f64, wy: f64, amp: f64) -> f64 {
         // Décalage monde qui décorrèle ce bruit de l'altitude (même source Perlin).
         const OFFSET: f64 = 4096.0;
         // Fréquence des grandes ondulations (longueur d'onde ≈ 1/FREQ voxels).
         const FREQ: f64 = 0.01;
-        // Amplitude verticale de la perturbation, en voxels.
-        const AMPLITUDE: f64 = 20.0;
 
         let x = wx + OFFSET;
         let y = wy + OFFSET;
         let macro_n = self.noise.get([x * FREQ, y * FREQ]);
         let detail_n = self.noise.get([x * FREQ * 4.0, y * FREQ * 4.0]);
-        (macro_n + 0.35 * detail_n) * AMPLITUDE
+        (macro_n + 0.35 * detail_n) * amp
     }
 
     /// Valeur du bruit + gradient `(∂/∂x, ∂/∂y)` en `(x, y)` (espace bruit), par

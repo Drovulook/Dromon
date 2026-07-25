@@ -69,9 +69,7 @@ impl DescriptorHandler {
                         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                         .descriptor_count(1)
                         // VERTEX : matrices view/proj. FRAGMENT : données de lumière.
-                        .stage_flags(
-                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                        ),
+                        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
                 ]),
                 None,
             )?

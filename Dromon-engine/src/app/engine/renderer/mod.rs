@@ -264,7 +264,8 @@ impl Renderer {
             )?;
 
             // Reset du query pool obligatoire avant d'y écrire, hors rendering scope.
-            self.gpu_profiler.reset(frame.command_buffer, self.frame_index);
+            self.gpu_profiler
+                .reset(frame.command_buffer, self.frame_index);
 
             // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
             // passe principale lisent la même `light_view_proj` depuis le set 0.
@@ -281,17 +282,15 @@ impl Renderer {
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent
             // dessous. Droppé avant `end_command_buffer` pour écrire son timestamp de fin.
-            let gpu_frame = self
-                .gpu_profiler
-                .scope(frame.command_buffer, self.frame_index, "frame");
+            let gpu_frame =
+                self.gpu_profiler
+                    .scope(frame.command_buffer, self.frame_index, "frame");
 
             // 1re passe : on remplit la shadow map depuis le point de vue de la lumière.
             {
-                let _gpu = self.gpu_profiler.scope(
-                    frame.command_buffer,
-                    self.frame_index,
-                    "shadow pass",
-                );
+                let _gpu =
+                    self.gpu_profiler
+                        .scope(frame.command_buffer, self.frame_index, "shadow pass");
                 self.record_shadow_pass(frame.command_buffer, self.frame_index);
             }
 

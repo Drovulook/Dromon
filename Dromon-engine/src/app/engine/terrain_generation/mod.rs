@@ -1,15 +1,12 @@
 mod chunk;
-mod chunk_manager;
-mod density_field;
-mod height_field;
+mod generation;
 mod lod;
 mod marching_cubes;
-mod material;
-mod mesher;
-mod transvoxel_tables;
+mod mesh;
 mod utils;
 
-pub use chunk_manager::{ChunkManager, GenParams};
-pub use height_field::HeightParams;
+pub use chunk::{ChunkManager, GenParams};
+pub use generation::height_field::HeightParams;
 pub use lod::{MAX_LOD, balanced_lods};
-pub use mesher::{WorldBounds, mesh_chunk};
+pub use mesh::mesher::mesh_chunk;
+pub use mesh::world_borders::WorldBounds;

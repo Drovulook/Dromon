@@ -1,6 +1,7 @@
-use crate::app::engine::inputs::InputState;
+use crate::app::engine::terrain_generation::{MAX_LOD, WorldBounds, balanced_lods, mesh_chunk};
+use crate::app::engine::{inputs::InputState, terrain_generation::ChunkManager};
 use crate::app::engine::renderer::camera::Camera;
-use crate::profile;
+use crate::{GenParams, profile};
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
@@ -13,7 +14,6 @@ use crate::app::{
         },
         rendering_context::RenderingContext,
         terrain_generation::{
-            ChunkManager, GenParams, MAX_LOD, WorldBounds, balanced_lods, mesh_chunk,
         },
         timer::Timer,
     },

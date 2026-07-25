@@ -5,7 +5,8 @@
 //! (`sample` + `vertical_bounds`) et ignore comment la densité est produite → on peut
 //! enrichir le terrain (grottes, surplombs, filons) sans toucher au mailleur.
 
-use super::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Voxel};
+use crate::app::engine::terrain_generation::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Voxel};
+
 use super::height_field::HeightField;
 use super::material::{classify_solid, material_color};
 use glam::{IVec2, IVec3, Vec3};
@@ -116,7 +117,7 @@ impl<'a> DensityField<'a> {
     /// Relief interpolé (bilinéaire) à la colonne monde **flottante** `(wx, wy)` :
     /// [`DensityField::relief`] accepte seulement des entiers. Aux coins entiers il
     /// redonne exactement la grille. Sert à mesurer la profondeur d'un sommet à sa
-    /// position exacte (cf. [`DensityField::color`]).
+    /// position exacte (cf. [`DensityField::volume_color`]).
     #[inline]
     fn relief_interp(&self, wx: f64, wy: f64) -> f32 {
         let fx = wx - self.origin_x as f64 + self.apron as f64;
@@ -191,7 +192,7 @@ impl<'a> DensityField<'a> {
     ///
     /// [`relief_interp`]: DensityField::relief_interp
     pub fn surface_color(&self, p: Vec3) -> Vec3 {
-        let mat_alt = p.z as f64 + self.height.material_jitter(p.x as f64, p.y as f64);
+        let mat_alt = p.z as f64 + self.height.material_jitter(p.x as f64, p.y as f64, 20.0);
         blend(classify_solid(0.0, mat_alt))
     }
 
@@ -202,10 +203,10 @@ impl<'a> DensityField<'a> {
     /// Leurs sommets sont posés à des colonnes **entières**, où l'interpolation retombe
     /// exactement sur la grille pré-échantillonnée : la profondeur y est exacte quel que
     /// soit le LOD. Pour un sommet d'iso-surface, prendre [`DensityField::surface_color`].
-    pub fn color(&self, p: Vec3) -> Vec3 {
+    pub fn volume_color(&self, p: Vec3) -> Vec3 {
         let surface = self.relief_interp(p.x as f64, p.y as f64) as f64;
         let depth = surface - p.z as f64;
-        let mat_alt = surface + self.height.material_jitter(p.x as f64, p.y as f64);
+        let mat_alt = surface + self.height.material_jitter(p.x as f64, p.y as f64, 20.0);
         blend(classify_solid(depth, mat_alt))
     }
 }

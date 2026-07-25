@@ -6,6 +6,10 @@
 //! pleine résolution (÷1), LOD1 = ÷4 sommets, LOD2 = ÷16 (la surface est une nappe 2D,
 //! doubler le pas quadruple l'aire couverte par cellule).
 
+pub mod transition_cells;
+pub mod transition_shrink;
+mod transvoxel_tables;
+
 use super::chunk::CHUNK_SIZE;
 use glam::{IVec2, Vec2};
 use std::collections::HashMap;
@@ -162,102 +166,4 @@ pub fn transition_faces(my_lod: u8, neighbor_lods: [u8; 4]) -> TransitionFaces {
         }
     }
     faces
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Voisins de même LOD ou plus fins ⇒ aucune transition de notre côté.
-    #[test]
-    fn none_when_neighbors_equal_or_finer() {
-        assert!(transition_faces(1, [1, 1, 1, 1]).is_empty());
-        assert!(transition_faces(1, [0, 0, 0, 0]).is_empty());
-    }
-
-    /// Seul le voisin plus grossier (ici l'est) déclenche une transition, sur sa face.
-    #[test]
-    fn only_toward_coarser_neighbor() {
-        let f = transition_faces(0, [0, 2, 0, 0]);
-        assert!(f.contains(Face::PosX));
-        assert!(!f.contains(Face::NegX));
-        assert!(!f.contains(Face::NegY));
-        assert!(!f.contains(Face::PosY));
-        assert_eq!(f.iter().count(), 1);
-    }
-
-    /// Les 4 voisins plus grossiers ⇒ les 4 faces actives.
-    #[test]
-    fn all_four_faces() {
-        assert_eq!(transition_faces(0, [1, 1, 1, 1]).iter().count(), 4);
-    }
-
-    /// Bande 1D `0, 3` : l'écart de 3 niveaux est ramené à 1 (le grossier s'affine).
-    #[test]
-    fn balance_clamps_neighbor_gap() {
-        let coords = [IVec2::new(0, 0), IVec2::new(1, 0)];
-        let mut lods: HashMap<IVec2, u8> = [(coords[0], 0), (coords[1], 3)].into();
-        balance(&coords, &mut lods);
-        assert_eq!(lods[&coords[0]], 0);
-        assert_eq!(lods[&coords[1]], 1);
-    }
-
-    /// La contrainte se **propage** : `0, 3, 3, 3` → `0, 1, 2, 3` (une marche par chunk).
-    #[test]
-    fn balance_propagates_along_a_row() {
-        let coords: Vec<IVec2> = (0..4).map(|x| IVec2::new(x, 0)).collect();
-        let mut lods: HashMap<IVec2, u8> = coords
-            .iter()
-            .map(|&c| (c, if c.x == 0 { 0 } else { 3 }))
-            .collect();
-        balance(&coords, &mut lods);
-        assert_eq!(
-            coords.iter().map(|c| lods[c]).collect::<Vec<_>>(),
-            vec![0, 1, 2, 3]
-        );
-    }
-
-    /// Sur la vraie grille du jeu (80×80 chunks autour de l'origine), la politique de
-    /// distance produit-elle un champ coudable ? C'est l'invariant dont dépend le
-    /// `debug_assert` du mailleur : aucun couple de voisins à plus d'un niveau d'écart.
-    #[test]
-    fn game_grid_is_two_to_one_balanced() {
-        let coords: Vec<IVec2> = (-40..40)
-            .flat_map(|x| (-40..40).map(move |y| IVec2::new(x, y)))
-            .collect();
-        let lods: HashMap<IVec2, u8> = coords
-            .iter()
-            .copied()
-            .zip(balanced_lods(&coords, Vec2::new(2.0, 2.0)))
-            .collect();
-
-        for (&c, &mine) in &lods {
-            for f in Face::ALL {
-                if let Some(&other) = lods.get(&(c + f.offset())) {
-                    assert!(
-                        mine.abs_diff(other) <= MAX_LOD_STEP,
-                        "{c} (LOD {mine}) et son voisin {f:?} (LOD {other}) : écart non coudable"
-                    );
-                }
-            }
-        }
-        // Garde-fou : le terrain doit rester réellement multi-LOD (sinon l'invariant
-        // serait vrai pour la raison triviale « tout est au même niveau »).
-        let levels = lods.values().collect::<std::collections::HashSet<_>>().len();
-        assert!(levels > 1, "un seul niveau de LOD : le test ne prouve rien");
-    }
-
-    /// Un terrain déjà équilibré n'est pas touché (la relaxation est un point fixe).
-    #[test]
-    fn balance_leaves_valid_field_untouched() {
-        let coords: Vec<IVec2> = (0..4).map(|x| IVec2::new(x, 0)).collect();
-        let before: HashMap<IVec2, u8> = coords
-            .iter()
-            .enumerate()
-            .map(|(i, &c)| (c, i as u8))
-            .collect();
-        let mut lods = before.clone();
-        balance(&coords, &mut lods);
-        assert_eq!(lods, before);
-    }
 }

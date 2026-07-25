@@ -1,8 +1,12 @@
-use super::chunk::Chunk;
-use super::density_field::DensityField;
-use super::height_field::{HeightField, HeightParams};
-use super::lod::{self, Face, TransitionFaces};
-use crate::profile;
+use crate::{
+    HeightParams,
+    app::engine::terrain_generation::{
+        chunk::Chunk,
+        generation::{DensityField, height_field::HeightField},
+        lod::{Face, TransitionFaces, transition_faces},
+    },
+    profile,
+};
 use glam::{IVec2, IVec3};
 use std::collections::HashMap;
 
@@ -100,7 +104,7 @@ impl ChunkManager {
     fn compute_transition_faces(&self, coord: IVec2) -> TransitionFaces {
         let my_lod = self.chunk_lod(coord);
         let neighbor_lods = Face::ALL.map(|f| self.chunk_lod(coord + f.offset()));
-        lod::transition_faces(my_lod, neighbor_lods)
+        transition_faces(my_lod, neighbor_lods)
     }
 
     /// Construit le [`DensityField`] échantillonnable sur la région du chunk `coord`.

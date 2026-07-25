@@ -11,11 +11,11 @@
 //!
 //! Ces proportions sont stockées dans les canaux `materials`/`weights` du
 //! [`Voxel`] (jusqu'à 4 matériaux pondérés). Le rendu les mélange déjà dans
-//! `DensityField::color` ; combiné à l'interpolation du rasterizer entre
+//! `DensityField::surface_color` ; combiné à l'interpolation du rasterizer entre
 //! sommets, on obtient un dégradé doux au lieu d'un trait.
 
-use super::chunk::Voxel;
-use super::utils::smoothstep;
+use super::super::chunk::Voxel;
+use super::super::utils::smoothstep;
 use glam::Vec3;
 
 // ─── Table des matériaux ─────────────────────────────────────────────────────
