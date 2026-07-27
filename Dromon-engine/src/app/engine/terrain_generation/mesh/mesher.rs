@@ -1,5 +1,6 @@
 use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ISO_LEVEL};
 use crate::app::engine::terrain_generation::generation::DensityField;
+use crate::app::engine::terrain_generation::lod::Face;
 use crate::app::engine::terrain_generation::lod::transition_cells::add_transition_cells;
 use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
 use crate::app::engine::terrain_generation::marching_cubes::mc_gen::edge_vertex;
@@ -7,7 +8,7 @@ use crate::app::engine::terrain_generation::marching_cubes::mc_tables::{
     CORNERS, EDGE_CORNERS, TRI_TABLE,
 };
 use crate::app::engine::terrain_generation::mesh::vertex::EdgeKey;
-use crate::app::engine::terrain_generation::{ChunkManager, WorldBounds};
+use crate::app::engine::terrain_generation::ChunkManager;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::mesh::world_borders::add_mesh_borders,
@@ -45,13 +46,9 @@ pub const NORMAL_RADIUS: i32 = 5;
 pub const DEBUG_TRANSITION_COLOR: bool = true;
 
 /// Construit le mesh d'un chunk en coordonnées monde (`model` = identité au draw) :
-/// la surface (Marching Cubes) plus, aux bords du monde, les parois latérales et le
-/// fond (cf. [`WorldBounds`]) qui ferment le volume.
-pub fn mesh_chunk(
-    manager: &ChunkManager,
-    coord: IVec2,
-    bounds: WorldBounds,
-) -> (Vec<TerrainVertex>, Vec<u32>) {
+/// la surface (Marching Cubes) plus le fond et, aux bords du monde, les parois
+/// latérales qui ferment le volume (cf. [`add_mesh_borders`]).
+pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, Vec<u32>) {
     profile!();
     let n = CHUNK_SIZE as i32;
     let origin_x = coord.x * n;
@@ -192,10 +189,12 @@ pub fn mesh_chunk(
     // Elles ignorent `shrink` : le bord du monde est le point le plus éloigné du focus,
     // donc uniformément au LOD le plus grossier ⇒ aucun voisin plus grossier, aucune
     // dalle sur ces faces, rien à rétrécir. À revoir si le focus peut s'en approcher.
+    // Une face est au bord du monde si le chunk voisin de ce côté n'est pas chargé.
+    let border_faces = Face::ALL.map(|f| !manager.is_loaded(coord + f.offset()));
     add_mesh_borders(
         &field,
         coord,
-        bounds,
+        border_faces,
         step,
         &mut vertices,
         &mut indices,
@@ -247,9 +246,10 @@ mod tests {
     /// Maille deux chunks voisins de LOD 0 et 1 (le fin à l'ouest) et rend leurs sommets.
     /// Le fin porte donc une face de transition vers l'est, le grossier aucune.
     ///
-    /// Les bornes du monde débordent volontairement la paire : aucun des deux n'est au
-    /// bord, donc aucune paroi latérale ne vient parasiter le plan frontière que les
-    /// tests inspectent (seule y reste la surface, plus le fond à `WORLD_FLOOR`).
+    /// La paire est isolée, donc au bord du monde de tous les côtés sauf le plan
+    /// frontière qu'inspectent les tests — celui-ci reste libre de toute paroi (et les
+    /// parois sont de toute façon désactivées, cf. `GENERATE_WORLD_WALLS`). Y demeurent
+    /// la surface et le fond à `WORLD_FLOOR`.
     fn stitched_pair() -> (Vec<TerrainVertex>, Vec<TerrainVertex>) {
         let (fine, coarse) = (IVec2::new(0, 0), IVec2::new(1, 0));
         let mut manager = ChunkManager::new(GenParams::default());
@@ -259,13 +259,9 @@ mod tests {
         manager.refresh_transition_faces(fine);
         manager.refresh_transition_faces(coarse);
 
-        let bounds = WorldBounds {
-            min: IVec2::new(-1, -1),
-            max: IVec2::new(2, 2),
-        };
         (
-            mesh_chunk(&manager, fine, bounds).0,
-            mesh_chunk(&manager, coarse, bounds).0,
+            mesh_chunk(&manager, fine).0,
+            mesh_chunk(&manager, coarse).0,
         )
     }
 

@@ -1,4 +1,6 @@
-use crate::app::engine::terrain_generation::{MAX_LOD, WorldBounds, balanced_lods, mesh_chunk};
+use crate::app::engine::terrain_generation::{
+    CHUNK_SIZE, MAX_LOD, balanced_lods, chunk_distance, mesh_chunk,
+};
 use crate::app::engine::{inputs::InputState, terrain_generation::ChunkManager};
 use crate::app::engine::renderer::camera::Camera;
 use crate::{GenParams, profile};
@@ -13,8 +15,6 @@ use crate::app::{
             render_resources::{RenderObject, RenderResourceManager, TerrainMesh},
         },
         rendering_context::RenderingContext,
-        terrain_generation::{
-        },
         timer::Timer,
     },
     logger::Logger,
@@ -179,16 +179,16 @@ impl World {
         })
     }
 
-    /// Génère une grille de `chunks_x × chunks_y` chunks de terrain, centrée sur
-    /// l'origine (en coordonnées chunk), et construit un `TerrainMesh` par chunk.
+    /// Génère un **disque** de chunks de terrain de rayon `radius_chunks` (exprimé en
+    /// chunks) centré sur l'origine du monde, et construit un `TerrainMesh` par chunk.
     /// Appelée par la scène dans `setup` ; l'upload GPU des meshes se fait ensuite
     /// dans [`World::initialize`].
-    pub fn generate_terrain(
-        &mut self,
-        params: GenParams,
-        chunks_x: u32,
-        chunks_y: u32,
-    ) -> Result<()> {
+    ///
+    /// Disque plutôt que carré : la distance au bord du monde ne dépend plus de la
+    /// direction. À nombre de chunks égal, un carré ne garantit que `0,89 · r` dans les
+    /// directions des axes, et en offre `1,25 · r` dans les diagonales — dépensés là où
+    /// le joueur ne va pas plus souvent qu'ailleurs.
+    pub fn generate_terrain(&mut self, params: GenParams, radius_chunks: u32) -> Result<()> {
         profile!();
         // Le terrain s'étend sur tout le monde et on le survole : la boîte d'ombre
         // doit être grande et suivre la caméra.
@@ -203,22 +203,22 @@ impl World {
 
         let mut manager = ChunkManager::new(params);
 
-        // Coordonnées des chunks, centrées sur l'origine.
-        let half_x = chunks_x as i32 / 2;
-        let half_y = chunks_y as i32 / 2;
-        let mut coords = Vec::with_capacity((chunks_x * chunks_y) as usize);
-        for cx in 0..chunks_x as i32 {
-            for cy in 0..chunks_y as i32 {
-                coords.push(IVec2::new(cx - half_x, cy - half_y));
+        // Coordonnées des chunks du disque : ceux dont le CENTRE tombe à moins de
+        // `radius` de l'origine — même mesure que la politique de LOD, dont les anneaux
+        // sont donc concentriques au bord du monde. Les centres valant `c·64 + 32`, ils
+        // sont symétriques autour de 0 et la bordure `c = ±r` du carré de balayage est
+        // toujours rejetée (`r·64 + 32 > r·64`).
+        let r = radius_chunks as i32;
+        let radius = (radius_chunks as usize * CHUNK_SIZE) as f32;
+        let mut coords = Vec::with_capacity((std::f32::consts::PI * (r * r) as f32) as usize);
+        for cx in -r..=r {
+            for cy in -r..=r {
+                let coord = IVec2::new(cx, cy);
+                if chunk_distance(coord, Vec2::ZERO) <= radius {
+                    coords.push(coord);
+                }
             }
         }
-
-        // Étendue du monde en coord chunk : le mailleur ferme par des parois les chunks
-        // dont un côté touche ces bornes.
-        let bounds = WorldBounds {
-            min: IVec2::new(-half_x, -half_y),
-            max: IVec2::new(chunks_x as i32 - 1 - half_x, chunks_y as i32 - 1 - half_y),
-        };
 
         // 1) Génère TOUS les chunks (données voxel) d'abord, pour que le meshing
         //    puisse échantillonner les chunks voisins aux bords (coutures continues).
@@ -268,12 +268,12 @@ impl World {
 
         // 2a) Meshing en parallèle : chaque chunk est indépendant et `mesh_chunk` ne
         //     lit que `&manager` (partage en lecture seule, sûr entre threads). Rayon
-        //     répartit les 2500 chunks sur tous les cœurs par vol de travail.
+        //     répartit les milliers de chunks sur tous les cœurs par vol de travail.
         let meshed: Vec<(Vec<_>, Vec<_>)> = {
             profile!("mesh chunks (parallel)");
             coords
                 .par_iter()
-                .map(|&coord| mesh_chunk(&manager, coord, bounds))
+                .map(|&coord| mesh_chunk(&manager, coord))
                 .collect()
         };
 

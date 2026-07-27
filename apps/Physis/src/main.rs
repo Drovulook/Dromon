@@ -5,7 +5,8 @@ struct Physis;
 
 impl Scene for Physis {
     fn setup(&mut self, world: &mut World) -> Result<()> {
-        // Génère une grille de 2×2 chunks de terrain autour de l'origine.
+        // Disque de terrain de 40 chunks de rayon autour de l'origine
+        // (2560 unités monde, ~5000 chunks).
         world.generate_terrain(
             GenParams {
                 seed: 20,
@@ -22,8 +23,7 @@ impl Scene for Physis {
                     lowland_flatness: 0.75, // plaines douces, détail réservé à l'altitude
                 },
             },
-            80,
-            80,
+            50,
         )?;
         Ok(())
     }

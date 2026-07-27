@@ -64,6 +64,13 @@ impl ChunkManager {
         &self.chunks[&coord]
     }
 
+    /// Le chunk `coord` fait-il partie du monde chargé ? Seul critère de « bord du
+    /// monde » du mailleur : la forme du monde (disque, plus tard streaming) n'est
+    /// décrite nulle part ailleurs que par l'ensemble des chunks présents.
+    pub fn is_loaded(&self, coord: IVec2) -> bool {
+        self.chunks.contains_key(&coord)
+    }
+
     /// Niveau de LOD du chunk `coord` (0 si inconnu). Lu par le mailleur pour choisir
     /// le pas d'échantillonnage. Source de vérité unique du LOD.
     pub fn chunk_lod(&self, coord: IVec2) -> u8 {

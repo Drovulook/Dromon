@@ -1,7 +1,7 @@
 use glam::{IVec2, Vec3};
 use rustc_hash::FxHashMap;
 
-const GENERATE_WORLD_WALLS: bool = false;
+const GENERATE_WORLD_WALLS: bool = true;
 const GENERATE_WORLD_BOTTOM: bool = true;
 
 use crate::app::engine::{
@@ -9,24 +9,21 @@ use crate::app::engine::{
     terrain_generation::{
         chunk::CHUNK_SIZE,
         generation::DensityField,
+        lod::Face,
         mesh::{mesher::WORLD_FLOOR, vertex::cached_color},
     },
 };
 
-/// Étendue du monde en **coordonnées chunk** (bornes incluses). Sert au mailleur à
-/// savoir quels côtés d'un chunk sont au bord du monde — donc à fermer par des parois.
-#[derive(Clone, Copy)]
-pub struct WorldBounds {
-    pub min: IVec2,
-    pub max: IVec2,
-}
-
 /// Ajoute la face du dessous (à [`WORLD_FLOOR`]) et, pour chaque côté du chunk situé
 /// au bord du monde, une paroi verticale montant du fond jusqu'au relief.
+///
+/// `border_faces` suit l'ordre de [`Face::ALL`] : une face est au bord ssi le monde
+/// s'arrête de ce côté. C'est un test de **voisinage**, pas de boîte englobante — le
+/// monde est un disque.
 pub fn add_mesh_borders(
     field: &DensityField,
     coord: IVec2,
-    bounds: WorldBounds,
+    border_faces: [bool; 4],
     step: i32,
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
@@ -87,17 +84,16 @@ pub fn add_mesh_borders(
                 );
             }
         };
-        if coord.x == bounds.min.x {
-            wall(false, x0, Vec3::new(-1.0, 0.0, 0.0)); // ouest
-        }
-        if coord.x == bounds.max.x {
-            wall(false, x1, Vec3::new(1.0, 0.0, 0.0)); // est
-        }
-        if coord.y == bounds.min.y {
-            wall(true, y0, Vec3::new(0.0, -1.0, 0.0)); // sud
-        }
-        if coord.y == bounds.max.y {
-            wall(true, y1, Vec3::new(0.0, 1.0, 0.0)); // nord
+        for (face, at_border) in Face::ALL.into_iter().zip(border_faces) {
+            if !at_border {
+                continue;
+            }
+            match face {
+                Face::NegX => wall(false, x0, Vec3::new(-1.0, 0.0, 0.0)), // ouest
+                Face::PosX => wall(false, x1, Vec3::new(1.0, 0.0, 0.0)),  // est
+                Face::NegY => wall(true, y0, Vec3::new(0.0, -1.0, 0.0)),  // sud
+                Face::PosY => wall(true, y1, Vec3::new(0.0, 1.0, 0.0)),   // nord
+            }
         }
     }
 }

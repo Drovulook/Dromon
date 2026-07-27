@@ -6,6 +6,7 @@
 //! pleine résolution (÷1), LOD1 = ÷4 sommets, LOD2 = ÷16 (la surface est une nappe 2D,
 //! doubler le pas quadruple l'aire couverte par cellule).
 
+pub mod lod_updater;
 pub mod transition_cells;
 pub mod transition_shrink;
 mod transvoxel_tables;

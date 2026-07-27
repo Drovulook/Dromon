@@ -6,6 +6,7 @@
 //! enrichir le terrain (grottes, surplombs, filons) sans toucher au mailleur.
 
 use crate::app::engine::terrain_generation::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Voxel};
+use crate::profile;
 
 use super::height_field::HeightField;
 use super::material::{classify_solid, material_color};
