@@ -1,5 +1,7 @@
 use anyhow::Result;
 use ash::vk;
+use glam::IVec2;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
@@ -104,7 +106,7 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        terrain_meshes: &[TerrainMesh],
+        terrain_meshes: &HashMap<IVec2, TerrainMesh>,
     ) {
         if terrain_meshes.is_empty() {
             return;
@@ -159,13 +161,13 @@ impl TerrainRenderSystem {
                 bytemuck::bytes_of(&identity),
             );
 
-            for mesh in terrain_meshes {
+            for mesh in terrain_meshes.values() {
                 {
                     profile!("bind + draw command - terrain mesh");
                     mesh.bind(command_buffer);
                     self.context.device.cmd_draw_indexed(
                         command_buffer,
-                        mesh.indices.len() as u32,
+                        mesh.index_count(),
                         1,
                         0,
                         0,
@@ -180,7 +182,7 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        terrain_meshes: &[TerrainMesh],
+        terrain_meshes: &HashMap<IVec2, TerrainMesh>,
     ) {
         if terrain_meshes.is_empty() {
             return;
@@ -213,16 +215,11 @@ impl TerrainRenderSystem {
                 bytemuck::bytes_of(&identity),
             );
 
-            for mesh in terrain_meshes {
+            for mesh in terrain_meshes.values() {
                 mesh.bind(command_buffer);
-                self.context.device.cmd_draw_indexed(
-                    command_buffer,
-                    mesh.indices.len() as u32,
-                    1,
-                    0,
-                    0,
-                    0,
-                );
+                self.context
+                    .device
+                    .cmd_draw_indexed(command_buffer, mesh.index_count(), 1, 0, 0, 0);
             }
         }
     }

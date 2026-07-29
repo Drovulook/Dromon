@@ -1,9 +1,8 @@
 use crate::{
     HeightParams,
     app::engine::terrain_generation::{
-        chunk::Chunk,
+        chunk::{CHUNK_SIZE, Chunk},
         generation::{DensityField, height_field::HeightField},
-        lod::{Face, TransitionFaces, transition_faces},
     },
     profile,
 };
@@ -34,6 +33,12 @@ impl Default for GenParams {
 /// (cf. [`DensityField`]), ré-échantillonné à la volée par le mailleur. Les seules
 /// données réellement stockées sont les **édits** du joueur (creuser/remblayer) :
 /// on ne paie que ce qui est modifié.
+///
+/// ## Immuable une fois généré
+/// Rien ici ne dépend de la caméra : le relief ne change pas quand on se déplace. C'est
+/// ce qui permet de le partager en `Arc` avec les threads de maillage sans copie ni
+/// verrou. Le niveau de détail, lui, vit dans la
+/// [`LodGrid`](super::super::lod::grid::LodGrid).
 pub struct ChunkManager {
     /// Régions chargées (simples marqueurs, cf. [`Chunk`]).
     chunks: HashMap<IVec2, Chunk>,
@@ -58,60 +63,40 @@ impl ChunkManager {
     /// est produit à la demande au maillage (cf. [`ChunkManager::density_field`]).
     pub fn generate_chunk(&mut self, coord: IVec2) -> &Chunk {
         profile!();
-        self.chunks
-            .entry(coord)
-            .or_insert_with(|| Chunk::new(coord));
+        self.chunks.entry(coord).or_insert_with(|| Chunk::new(coord));
         &self.chunks[&coord]
     }
 
-    /// Le chunk `coord` fait-il partie du monde chargé ? Seul critère de « bord du
-    /// monde » du mailleur : la forme du monde (disque, plus tard streaming) n'est
-    /// décrite nulle part ailleurs que par l'ensemble des chunks présents.
+    /// Le chunk `coord` est-il enregistré ? ⚠ Le mailleur, lui, lit le bord du monde sur
+    /// la `LodGrid` : c'est elle qui décrit la topologie du monde *affiché*.
     pub fn is_loaded(&self, coord: IVec2) -> bool {
         self.chunks.contains_key(&coord)
     }
 
-    /// Niveau de LOD du chunk `coord` (0 si inconnu). Lu par le mailleur pour choisir
-    /// le pas d'échantillonnage. Source de vérité unique du LOD.
-    pub fn chunk_lod(&self, coord: IVec2) -> u8 {
-        self.chunks.get(&coord).map_or(0, |c| c.lod_level)
+    /// Altitude du relief (en voxels) à la colonne monde `(wx, wy)`.
+    pub fn terrain_height(&self, wx: f32, wy: f32) -> f32 {
+        self.height.height(wx as f64, wy as f64) as f32
     }
 
-    /// Fixe le niveau de LOD du chunk `coord` (no-op s'il n'est pas chargé). Plus tard,
-    /// le LOD dynamique appellera ceci puis re-maillera le chunk concerné.
-    pub fn set_chunk_lod(&mut self, coord: IVec2, lod: u8) {
-        if let Some(c) = self.chunks.get_mut(&coord) {
-            c.lod_level = lod;
+    /// Altitude **moyenne** du relief sur `coords`, mesurée au centre des chunks.
+    ///
+    /// C'est le plan de référence par rapport auquel on juge « être haut » (cf.
+    /// [`LodFocus`](super::super::lod::LodFocus)) : survoler à 400 unités au-dessus de la
+    /// plaine moyenne doit dégrader le LOD, se tenir au fond d'une vallée non.
+    ///
+    /// Échantillonné 1 chunk sur 16 : le fBm érodé coûte ~3 évaluations de Perlin par
+    /// octave, et une moyenne n'a pas besoin de plus de quelques centaines de points.
+    pub fn mean_terrain_height(&self, coords: &[IVec2]) -> f32 {
+        let half = CHUNK_SIZE as f32 / 2.0;
+        let mut sum = 0.0;
+        let mut n = 0;
+        for coord in coords.iter().step_by(16) {
+            let x = (coord.x * CHUNK_SIZE as i32) as f32 + half;
+            let y = (coord.y * CHUNK_SIZE as i32) as f32 + half;
+            sum += self.terrain_height(x, y);
+            n += 1;
         }
-    }
-
-    /// (Re)calcule le masque de faces de transition du chunk `coord` depuis le LOD de ses
-    /// voisins et le **stocke** sur le chunk (cf. [`Chunk::transition_faces`]). À appeler
-    /// après toute (ré)assignation de LOD, une fois TOUS les voisins fixés — le masque
-    /// dépend d'eux. No-op si le chunk n'est pas chargé.
-    pub fn refresh_transition_faces(&mut self, coord: IVec2) {
-        let faces = self.compute_transition_faces(coord);
-        if let Some(c) = self.chunks.get_mut(&coord) {
-            c.transition_faces = faces;
-        }
-    }
-
-    /// Masque de transition **stocké** du chunk `coord` (vide si non chargé). Lu par le
-    /// mailleur pour savoir quels bords coudre ; valide tant que les LOD n'ont pas bougé
-    /// depuis le dernier [`ChunkManager::refresh_transition_faces`].
-    pub fn chunk_transition_faces(&self, coord: IVec2) -> TransitionFaces {
-        self.chunks
-            .get(&coord)
-            .map_or(TransitionFaces::default(), |c| c.transition_faces)
-    }
-
-    /// Règle de détection appliquée au voisinage courant (dérivée, pure) : une face porte
-    /// une transition ssi son voisin est plus grossier. LOD des 4 voisins rassemblé ici
-    /// (0 si non chargé ⇒ jamais plus grossier). La source de vérité reste les LOD.
-    fn compute_transition_faces(&self, coord: IVec2) -> TransitionFaces {
-        let my_lod = self.chunk_lod(coord);
-        let neighbor_lods = Face::ALL.map(|f| self.chunk_lod(coord + f.offset()));
-        transition_faces(my_lod, neighbor_lods)
+        if n == 0 { 0.0 } else { sum / n as f32 }
     }
 
     /// Construit le [`DensityField`] échantillonnable sur la région du chunk `coord`.

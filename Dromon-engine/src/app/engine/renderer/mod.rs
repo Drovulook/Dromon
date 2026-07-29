@@ -109,8 +109,12 @@ impl Renderer {
                 shadow_map.sampler,
             )?);
 
-            let mut world =
-                World::new(logger.clone(), context.clone(), descriptor_handler.clone())?;
+            let mut world = World::new(
+                logger.clone(),
+                context.clone(),
+                descriptor_handler.clone(),
+                in_flight_frames_count,
+            )?;
 
             // La scène peuple le monde (assets + RenderObject) AVANT l'upload GPU
             // (`Renderer::initialize` plus bas copie ces données vers le device).
@@ -213,6 +217,10 @@ impl Renderer {
         let aspect =
             self.swapchain.extent.width as f32 / self.swapchain.extent.height.max(1) as f32;
         self.world.update_world_data(timer, input_state, aspect);
+        // Terrain vivant : le LOD suit la caméra qu'on vient de déplacer. Le gros du
+        // travail (re-maillage) part sur le pool rayon ; ici on ne fait qu'échantillonner
+        // l'avancement et, le cas échéant, basculer un lot terminé.
+        self.world.update_terrain()?;
         // La logique de jeu (déplacement/rotation des objets) est déléguée à la scène.
         scene.update(&mut self.world, timer);
 
@@ -266,6 +274,11 @@ impl Renderer {
             // Reset du query pool obligatoire avant d'y écrire, hors rendering scope.
             self.gpu_profiler
                 .reset(frame.command_buffer, self.frame_index);
+
+            // Meshes de terrain installés depuis la dernière frame : leur copie
+            // staging → device s'enregistre ici, hors rendering scope, suivie de sa
+            // barrière. Les passes ci-dessous les dessineront dans cette même frame.
+            self.world.record_terrain_uploads(frame.command_buffer);
 
             // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
             // passe principale lisent la même `light_view_proj` depuis le set 0.

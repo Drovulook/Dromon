@@ -21,7 +21,7 @@ use anyhow::Result;
 use ash::vk;
 pub use object_mesh::{ObjectMesh, ObjectVertex};
 use std::{collections::HashMap, sync::Arc};
-pub use terrain_mesh::{TerrainMesh, TerrainVertex};
+pub use terrain_mesh::{MeshData, TerrainMesh, TerrainVertex};
 use texture::Texture;
 pub use transform::Transform;
 

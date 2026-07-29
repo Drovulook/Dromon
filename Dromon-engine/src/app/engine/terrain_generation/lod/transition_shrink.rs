@@ -39,9 +39,8 @@
 use glam::{IVec2, Vec3};
 
 use crate::app::engine::terrain_generation::{
-    ChunkManager,
     chunk::CHUNK_SIZE,
-    lod::{Face, TransitionFaces},
+    lod::{Face, TransitionFaces, grid::LodGrid},
 };
 
 /// Une face portant une dalle, du point de vue du rétrécissement.
@@ -66,9 +65,9 @@ pub struct HalfStepShrink {
 }
 
 impl HalfStepShrink {
-    pub fn new(manager: &ChunkManager, coord: IVec2, faces: TransitionFaces, step: i32) -> Self {
+    pub fn new(lods: &LodGrid, coord: IVec2, faces: TransitionFaces, step: i32) -> Self {
         let n = CHUNK_SIZE as i32;
-        let lod = manager.chunk_lod(coord);
+        let lod = lods.lod(coord);
         let mut slots = [None; 4];
         for (i, (slot, f)) in slots.iter_mut().zip(Face::ALL).enumerate() {
             if !faces.contains(f) {
@@ -86,7 +85,7 @@ impl HalfStepShrink {
             let tangent = if i < 2 { IVec2::Y } else { IVec2::X };
             let taper = [-1, 1].map(|s| {
                 let nb = coord + tangent * s;
-                manager.chunk_lod(nb) != lod || !manager.chunk_transition_faces(nb).contains(f)
+                lods.lod(nb) != lod || !lods.faces(nb).contains(f)
             });
             *slot = Some(PlaneShrink {
                 plane: plane as f32,

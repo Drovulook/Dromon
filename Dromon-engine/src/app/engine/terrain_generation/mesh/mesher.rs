@@ -1,6 +1,8 @@
+use crate::app::engine::terrain_generation::ChunkManager;
 use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ISO_LEVEL};
 use crate::app::engine::terrain_generation::generation::DensityField;
 use crate::app::engine::terrain_generation::lod::Face;
+use crate::app::engine::terrain_generation::lod::grid::LodGrid;
 use crate::app::engine::terrain_generation::lod::transition_cells::add_transition_cells;
 use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
 use crate::app::engine::terrain_generation::marching_cubes::mc_gen::edge_vertex;
@@ -8,9 +10,8 @@ use crate::app::engine::terrain_generation::marching_cubes::mc_tables::{
     CORNERS, EDGE_CORNERS, TRI_TABLE,
 };
 use crate::app::engine::terrain_generation::mesh::vertex::EdgeKey;
-use crate::app::engine::terrain_generation::ChunkManager;
 use crate::app::engine::{
-    renderer::render_resources::TerrainVertex,
+    renderer::render_resources::{MeshData, TerrainVertex},
     terrain_generation::mesh::world_borders::add_mesh_borders,
 };
 use crate::profile;
@@ -41,14 +42,15 @@ pub const WORLD_FLOOR: i32 = 0;
 /// que le champ de densité doit pré-échantillonner autour du chunk.
 pub const NORMAL_RADIUS: i32 = 5;
 
-/// DEBUG : teinte en magenta les sommets des cellules de transition, pour voir où
-/// elles se posent (et vérifier qu'elles longent bien les frontières de LOD).
-pub const DEBUG_TRANSITION_COLOR: bool = true;
-
 /// Construit le mesh d'un chunk en coordonnées monde (`model` = identité au draw) :
 /// la surface (Marching Cubes) plus le fond et, aux bords du monde, les parois
 /// latérales qui ferment le volume (cf. [`add_mesh_borders`]).
-pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, Vec<u32>) {
+///
+/// Les deux entrées sont **en lecture seule et sans état** : `manager` porte le relief
+/// (immuable), `lods` la configuration de niveaux du lot en cours. C'est ce qui permet
+/// d'appeler cette fonction depuis un thread de fond pendant que la caméra bouge — le
+/// lot maille contre la grille qu'on lui a passée, pas contre la plus récente.
+pub fn mesh_chunk(manager: &ChunkManager, lods: &LodGrid, coord: IVec2) -> MeshData {
     profile!();
     let n = CHUNK_SIZE as i32;
     let origin_x = coord.x * n;
@@ -57,7 +59,7 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
     // Pas d'échantillonnage MC = `1 << lod` (1, 2, 4…). Il divise CHUNK_SIZE, donc les
     // chunks se tuilent proprement. N'affecte QUE la géométrie : le stencil des normales
     // reste à un pas fixe de 1 unité (éclairage continu à travers une frontière de LOD).
-    let step = 1i32 << manager.chunk_lod(coord);
+    let step = 1i32 << lods.lod(coord);
 
     // Champ de densité échantillonnable sur la région du chunk. L'apron vaut le rayon
     // des normales : le stencil de différences ne débordera jamais du pré-échantillon.
@@ -98,8 +100,8 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
 
     // Faces à coudre — connues AVANT le maillage : elles conditionnent le
     // rétrécissement demi-pas que subit la dernière rangée de sommets qui les borde.
-    let lod_transition_faces = manager.chunk_transition_faces(coord);
-    let shrink = HalfStepShrink::new(manager, coord, lod_transition_faces, step);
+    let lod_transition_faces = lods.faces(coord);
+    let shrink = HalfStepShrink::new(lods, coord, lod_transition_faces, step);
 
     let mut corner_d = [0.0f32; 8];
 
@@ -190,7 +192,7 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
     // donc uniformément au LOD le plus grossier ⇒ aucun voisin plus grossier, aucune
     // dalle sur ces faces, rien à rétrécir. À revoir si le focus peut s'en approcher.
     // Une face est au bord du monde si le chunk voisin de ce côté n'est pas chargé.
-    let border_faces = Face::ALL.map(|f| !manager.is_loaded(coord + f.offset()));
+    let border_faces = Face::ALL.map(|f| !lods.is_loaded(coord + f.offset()));
     add_mesh_borders(
         &field,
         coord,
@@ -210,9 +212,9 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
         let mut trans_map: FxHashMap<EdgeKey, u32> = FxHashMap::default();
         for face in lod_transition_faces.iter() {
             debug_assert_eq!(
-                manager.chunk_lod(coord + face.offset()),
-                manager.chunk_lod(coord) + 1,
-                "Transvoxel ne coud qu'un niveau d'écart (cf. lod::balanced_lods)"
+                lods.lod(coord + face.offset()),
+                lods.lod(coord) + 1,
+                "Transvoxel ne coud qu'un niveau d'écart (cf. LodGrid::rebalance)"
             );
             add_transition_cells(
                 &field,
@@ -230,7 +232,7 @@ pub fn mesh_chunk(manager: &ChunkManager, coord: IVec2) -> (Vec<TerrainVertex>, 
         }
     }
 
-    (vertices, indices)
+    MeshData { vertices, indices }
 }
 
 #[cfg(test)]
@@ -242,6 +244,15 @@ mod tests {
     use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
 
     use super::*;
+
+    /// Grille de LOD d'un petit monde de test : niveaux imposés explicitement, puis
+    /// équilibrage et détection des coutures comme en production.
+    fn lod_grid(chunks: &[(IVec2, u8)]) -> LodGrid {
+        let mut grid = LodGrid::new(chunks.iter().map(|&(c, _)| c).collect());
+        grid.set_raw_lods(|c, _| chunks.iter().find(|&&(k, _)| k == c).unwrap().1);
+        grid.rebalance();
+        grid
+    }
 
     /// Maille deux chunks voisins de LOD 0 et 1 (le fin à l'ouest) et rend leurs sommets.
     /// Le fin porte donc une face de transition vers l'est, le grossier aucune.
@@ -255,13 +266,11 @@ mod tests {
         let mut manager = ChunkManager::new(GenParams::default());
         manager.generate_chunk(fine);
         manager.generate_chunk(coarse);
-        manager.set_chunk_lod(coarse, 1);
-        manager.refresh_transition_faces(fine);
-        manager.refresh_transition_faces(coarse);
+        let lods = lod_grid(&[(fine, 0), (coarse, 1)]);
 
         (
-            mesh_chunk(&manager, fine).0,
-            mesh_chunk(&manager, coarse).0,
+            mesh_chunk(&manager, &lods, fine).vertices,
+            mesh_chunk(&manager, &lods, coarse).vertices,
         )
     }
 
@@ -269,13 +278,9 @@ mod tests {
     /// elle, le test d'étanchéité ci-dessous passerait pour de mauvaises raisons).
     #[test]
     fn fine_chunk_stitches_toward_the_coarse_neighbor() {
-        let mut manager = ChunkManager::new(GenParams::default());
-        manager.generate_chunk(IVec2::new(0, 0));
-        manager.generate_chunk(IVec2::new(1, 0));
-        manager.set_chunk_lod(IVec2::new(1, 0), 1);
-        manager.refresh_transition_faces(IVec2::new(0, 0));
+        let lods = lod_grid(&[(IVec2::new(0, 0), 0), (IVec2::new(1, 0), 1)]);
 
-        let faces = manager.chunk_transition_faces(IVec2::new(0, 0));
+        let faces = lods.faces(IVec2::new(0, 0));
         assert!(faces.contains(Face::PosX));
         assert_eq!(faces.iter().count(), 1);
     }
@@ -323,16 +328,11 @@ mod tests {
         // Ses voisins nord/sud restent absents : ils ne portent aucune dalle est, donc
         // l'atténuation s'applique aux deux extrémités de la face.
         let (me, east) = (IVec2::ZERO, IVec2::new(1, 0));
-        let mut manager = ChunkManager::new(GenParams::default());
-        manager.generate_chunk(me);
-        manager.generate_chunk(east);
-        manager.set_chunk_lod(me, 2);
-        manager.set_chunk_lod(east, 3);
-        manager.refresh_transition_faces(me);
+        let lods = lod_grid(&[(me, 2), (east, 3)]);
 
         let step = 4;
         let border = CHUNK_SIZE as f32; // face est du chunk (0,0)
-        let shrink = HalfStepShrink::new(&manager, me, manager.chunk_transition_faces(me), step);
+        let shrink = HalfStepShrink::new(&lods, me, lods.faces(me), step);
         // Sommet à distance `d` du plan frontière → sa coordonnée x après compression.
         // `y = 10` : au-delà de la rampe d'atténuation, amplitude pleine.
         let x = |d: f32| shrink.apply(Vec3::new(border - d, 10.0, 10.0)).x;

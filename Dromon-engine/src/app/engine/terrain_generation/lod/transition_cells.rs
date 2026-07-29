@@ -35,12 +35,13 @@ use crate::app::engine::{
                 TRANSITION_CORNER_UV, transition_edge,
             },
         },
-        mesh::{
-            mesher::DEBUG_TRANSITION_COLOR,
-            vertex::{EdgeKey, cached_color, vertex_normal},
-        },
+        mesh::vertex::{EdgeKey, cached_color, vertex_normal},
     },
 };
+
+/// DEBUG : teinte en magenta les sommets des cellules de transition, pour voir où
+/// elles se posent (et vérifier qu'elles longent bien les frontières de LOD).
+pub const DEBUG_TRANSITION_COLOR: bool = true;
 
 /// Repère local d'une face de transition. `origin` = coin `(u=0, v=0)` de la face sur le
 /// **plan frontière** — le plan que le voisin grossier échantillonne aussi ; `u`/`v` =

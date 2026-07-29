@@ -1,30 +1,44 @@
 //! **Politique de LOD** du terrain — fonctions pures sur coordonnées/distances, sans
 //! rien connaître du rendu ni du maillage. `world.rs` ne fait qu'orchestrer ; c'est ici
-//! que vit la règle « distance → niveau de détail » (plus tard : anneaux, hystérésis).
+//! que vit la règle « distance → niveau de détail », les anneaux et l'hystérésis.
 //!
 //! Un niveau de LOD `l` correspond à un pas d'échantillonnage `step = 1 << l` : LOD0 =
 //! pleine résolution (÷1), LOD1 = ÷4 sommets, LOD2 = ÷16 (la surface est une nappe 2D,
 //! doubler le pas quadruple l'aire couverte par cellule).
+//!
+//! Le résultat de cette politique se range dans une [`grid::LodGrid`] ; c'est
+//! [`lod_updater::LodUpdater`] qui la recalcule quand la caméra a assez bougé.
 
+pub mod grid;
 pub mod lod_updater;
 pub mod transition_cells;
 pub mod transition_shrink;
 mod transvoxel_tables;
 
 use super::chunk::CHUNK_SIZE;
-use glam::{IVec2, Vec2};
-use std::collections::HashMap;
+use glam::{IVec2, Vec2, Vec3};
 
 /// Niveau de détail maximal (pas = `1 << MAX_LOD`). 3 paliers pour commencer.
 pub const MAX_LOD: u8 = 3;
 
-/// Rayons (unités monde) des anneaux, mesurés depuis le point focal (caméra).
-/// `dist < LOD1_DIST` → LOD0 (pleine résolution) ; `< LOD2_DIST` → LOD1 (÷4) ; au-delà → LOD2 (÷16).
-const LOD1_DIST: f32 = 220.0;
-const LOD2_DIST: f32 = 620.0;
-const LOD3_DIST: f32 = 1820.0;
+/// Rayons (unités monde) des anneaux, mesurés depuis le point focal. `RADII[k]` est la
+/// distance à partir de laquelle on passe du niveau `k` au niveau `k + 1`.
+const RADII: [f32; MAX_LOD as usize] = [220.0, 620.0, 1820.0];
 
-/// Distance horizontale (monde) du **centre** du chunk `coord` au point focal.
+/// Demi-largeur relative de la **bande morte** de l'hystérésis. Un chunk pile sur une
+/// frontière d'anneau oscillerait sinon entre deux niveaux et se ferait re-mailler en
+/// boucle : on exige de passer nettement sous le rayon pour gagner en détail, et
+/// nettement au-dessus pour en perdre. Principe du thermostat. 0.08 ⇒ le rayon 220 se
+/// dédouble en 202 / 238.
+const HYSTERESIS: f32 = 0.08;
+
+/// Poids de la hauteur de caméra dans la distance qui pilote le LOD (cf. [`LodFocus`]).
+/// `1.0` = distance euclidienne 3D honnête ; baisser pour atténuer l'effet de l'altitude.
+const HEIGHT_WEIGHT: f32 = 1.0;
+
+/// Distance **horizontale** (monde) du centre du chunk `coord` au point `focus`. Sert à
+/// décrire la forme du monde chargé (le disque), pas à choisir le LOD — pour ça, cf.
+/// [`LodFocus::distance`].
 pub fn chunk_distance(coord: IVec2, focus: Vec2) -> f32 {
     let half = CHUNK_SIZE as f32 / 2.0;
     let cx = (coord.x * CHUNK_SIZE as i32) as f32 + half;
@@ -32,19 +46,95 @@ pub fn chunk_distance(coord: IVec2, focus: Vec2) -> f32 {
     ((cx - focus.x).powi(2) + (cy - focus.y).powi(2)).sqrt()
 }
 
-/// LOD **statique** d'un chunk depuis un point focal : figé une fois à la génération
-/// (étape 0). Le LOD dynamique (suivi caméra + hystérésis) viendra plus tard.
-pub fn static_lod(coord: IVec2, focus: Vec2) -> u8 {
-    let d = chunk_distance(coord, focus);
-    if d < LOD1_DIST {
-        0
-    } else if d < LOD2_DIST {
-        1
-    } else if d < LOD3_DIST {
-        2
-    } else {
-        3
+/// Point de vue depuis lequel on juge du niveau de détail : la position horizontale de
+/// la caméra **et sa hauteur** au-dessus du terrain.
+///
+/// ## Pourquoi la hauteur compte
+/// Ce qui justifie un LOD grossier, c'est la petitesse d'un chunk **à l'écran**, laquelle
+/// varie comme l'inverse de sa distance à l'œil — pas de sa distance au sol. Survoler le
+/// terrain à 400 unités d'altitude éloigne tout autant qu'un recul de 400 unités : la
+/// bonne mesure est donc simplement la distance euclidienne 3D œil → chunk.
+///
+/// On l'obtient en composant les deux :
+///
+/// ```text
+/// d = √( d_horizontale² + (poids · hauteur)² )
+/// ```
+///
+/// Conséquence recherchée : depuis un sommet de montagne, l'anneau LOD0 se resserre tout
+/// seul et bien plus de chunks basculent en faible détail — alors que dans une vallée,
+/// où l'on ne voit pas loin de toute façon, rien ne change.
+#[derive(Clone, Copy, PartialEq)]
+pub struct LodFocus {
+    /// Position horizontale de la caméra (monde).
+    pub pos: Vec2,
+    /// Hauteur au-dessus de l'altitude de référence du terrain, **jamais négative**.
+    pub height: f32,
+}
+
+impl LodFocus {
+    /// Point focal depuis la position caméra. `reference_z` est l'altitude moyenne du
+    /// relief (cf. `ChunkManager::mean_terrain_height`) : c'est le plan par rapport
+    /// auquel on mesure « être haut ».
+    ///
+    /// Le `max(0.0)` traite le cas « caméra sous la référence » (fond de vallée, sous
+    /// terre) comme une hauteur nulle : on y retombe sur la distance horizontale pure.
+    /// Un creux ne doit pas faire grossir le LOD comme le ferait une altitude — d'en bas
+    /// on voit *moins* loin, pas plus.
+    pub fn new(camera_pos: Vec3, reference_z: f32) -> LodFocus {
+        LodFocus {
+            pos: camera_pos.truncate(),
+            height: (camera_pos.z - reference_z).max(0.0),
+        }
     }
+
+    /// Distance œil → chunk qui pilote le LOD (horizontale composée avec la hauteur).
+    #[inline]
+    pub fn distance(self, coord: IVec2) -> f32 {
+        let d = chunk_distance(coord, self.pos);
+        let h = self.height * HEIGHT_WEIGHT;
+        (d * d + h * h).sqrt()
+    }
+
+    /// Carré du déplacement du point focal depuis `other`, hauteur comprise. Au carré :
+    /// c'est le test fait à **chaque frame**, aucune racine n'y a sa place.
+    #[inline]
+    pub fn moved_sq(self, other: LodFocus) -> f32 {
+        self.pos.distance_squared(other.pos) + (self.height - other.height).powi(2)
+    }
+}
+
+/// LOD **brut** d'un chunk sans mémoire de son état précédent : le nombre d'anneaux
+/// franchis. Sert à l'initialisation, avant que l'hystérésis n'ait un état à relire.
+pub fn static_lod(coord: IVec2, focus: LodFocus) -> u8 {
+    let d = focus.distance(coord);
+    RADII.iter().take_while(|&&r| d >= r).count() as u8
+}
+
+/// LOD **brut** avec hystérésis : même règle que [`static_lod`], mais chaque rayon est
+/// décalé selon le niveau `current` déjà occupé par le chunk.
+///
+/// - le chunk a déjà franchi le rayon `k` (`current > k`) → pour revenir en deçà, il doit
+///   descendre sous `RADII[k]·(1 − HYSTERESIS)` ;
+/// - il ne l'a pas franchi → pour le franchir, il doit dépasser `RADII[k]·(1 + HYSTERESIS)`.
+///
+/// ⚠ `current` doit être le niveau **brut** du chunk, jamais celui d'après équilibrage
+/// 2:1 — sinon l'hystérésis dérive (cf. [`grid::LodGrid`]).
+pub fn hysteretic_lod(coord: IVec2, focus: LodFocus, current: u8) -> u8 {
+    let d = focus.distance(coord);
+    let mut lod = 0;
+    for (k, &radius) in RADII.iter().enumerate() {
+        let threshold = if current > k as u8 {
+            radius * (1.0 - HYSTERESIS)
+        } else {
+            radius * (1.0 + HYSTERESIS)
+        };
+        if d < threshold {
+            break;
+        }
+        lod = k as u8 + 1;
+    }
+    lod
 }
 
 /// Écart de LOD maximal toléré entre deux chunks **voisins**. La cellule de transition
@@ -52,53 +142,15 @@ pub fn static_lod(coord: IVec2, focus: Vec2) -> u8 {
 /// 2×2 coins face à 3×3 échantillons fins) : un écart de 2 niveaux n'est pas coudable.
 const MAX_LOD_STEP: u8 = 1;
 
-/// LOD de chaque chunk de `coords`, **équilibré 2:1** : c'est [`static_lod`] suivi d'une
-/// relaxation qui affine tout chunk trop grossier pour un de ses voisins. Sans cette
-/// contrainte (« octree restreint »), deux chunks adjacents peuvent différer de 2
-/// niveaux — et le Transvoxel ne sait pas coudre ça.
-///
-/// La relaxation converge : abaisser le LOD d'un chunk ne peut créer de nouvelle
-/// violation que chez ses voisins (jamais chez lui), et les niveaux ne font que
-/// décroître, bornés par 0 ⇒ point fixe atteint en au plus `MAX_LOD` passes.
-pub fn balanced_lods(coords: &[IVec2], focus: Vec2) -> Vec<u8> {
-    let mut lods: HashMap<IVec2, u8> = coords.iter().map(|&c| (c, static_lod(c, focus))).collect();
-    balance(coords, &mut lods);
-    coords.iter().map(|c| lods[c]).collect()
-}
-
-/// Relaxation en place : tant qu'un chunk dépasse `voisin + MAX_LOD_STEP`, on le ramène
-/// à cette borne. Les chunks absents de la carte (hors monde) ne contraignent rien.
-fn balance(coords: &[IVec2], lods: &mut HashMap<IVec2, u8>) {
-    loop {
-        let mut changed = false;
-        for &c in coords {
-            let mine = lods[&c];
-            let limit = Face::ALL
-                .iter()
-                .filter_map(|f| lods.get(&(c + f.offset())))
-                .map(|&n| n + MAX_LOD_STEP)
-                .min()
-                .unwrap_or(mine);
-            if mine > limit {
-                lods.insert(c, limit);
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-}
-
 // ─── Détection des faces de transition (Transvoxel) ──────────────────────────
 //
 // Deux chunks voisins à des LOD différents laissent une fente sur leur face commune.
-// On la scelle par une **cellule de transition** (cf. [`super::transvoxel_tables`])
-// posée du côté HAUTE RÉSOLUTION : le chunk fin, celui qui a le plus de sommets à
-// raccorder vers le bord grossier. Règle asymétrique — sur une face donnée, un seul
-// des deux chunks (le plus fin) construit la transition : jamais les deux, jamais
-// aucun. Chaque chunk est une colonne pleine hauteur tuilée en X/Y : ses seuls
-// voisins sont horizontaux ⇒ 4 faces possibles (aucun voisin en Z).
+// On la scelle par une **cellule de transition** (cf. [`transvoxel_tables`]) posée du
+// côté HAUTE RÉSOLUTION : le chunk fin, celui qui a le plus de sommets à raccorder
+// vers le bord grossier. Règle asymétrique — sur une face donnée, un seul des deux
+// chunks (le plus fin) construit la transition : jamais les deux, jamais aucun. Chaque
+// chunk est une colonne pleine hauteur tuilée en X/Y : ses seuls voisins sont
+// horizontaux ⇒ 4 faces possibles (aucun voisin en Z).
 
 /// Face horizontale d'un chunk, orientée vers son voisin.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -125,8 +177,8 @@ impl Face {
 }
 
 /// Ensemble des faces d'un chunk portant une cellule de transition (bitmask, 1 bit par
-/// [`Face`]). Le mailleur itérera dessus pour savoir quels bords coudre.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+/// [`Face`]). Le mailleur itère dessus pour savoir quels bords coudre.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub struct TransitionFaces(u8);
 
 impl TransitionFaces {
