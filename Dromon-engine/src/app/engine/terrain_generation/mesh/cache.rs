@@ -156,7 +156,7 @@ impl MeshCache {
     /// ⚠ **Ne compte que les entrées détenues en propre** (`strong_count == 1`). Une
     /// géométrie encore référencée par un `TerrainMesh` affiché occupe la RAM de toute
     /// façon : la retirer du cache ne libère rien et la rendrait juste introuvable au
-    /// moment où elle quitte l'écran — exactement le cas qu'on veut couvrir. Le budget
+    /// moment où elle quitte l'écran, exactement le cas qu'on veut couvrir. Le budget
     /// borne donc le **surcoût** du cache, pas la RAM totale du terrain.
     ///
     /// Quand tout le dépassement vient d'entrées partagées, l'éviction ne peut rien : on
