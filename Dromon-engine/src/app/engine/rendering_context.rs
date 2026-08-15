@@ -13,6 +13,7 @@ mod pipeline_creation;
 mod resources;
 
 use super::debug_messenger::DebugMessenger;
+use crate::app::engine::renderer::device_memory::DeviceMemoryAllocator;
 use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
@@ -34,6 +35,7 @@ pub struct RenderingContext {
     pub surface_extensions: ash::khr::surface::Instance,
     pub instance: ash::Instance,
     pub entry: ash::Entry,
+    pub device_memory_allocator: DeviceMemoryAllocator,
     pub logger: Arc<Logger>,
 }
 
@@ -277,6 +279,7 @@ impl RenderingContext {
                 entry,
                 debug_messenger,
                 swapchain_extensions,
+                device_memory_allocator: DeviceMemoryAllocator::new(),
                 logger,
             })
         }
