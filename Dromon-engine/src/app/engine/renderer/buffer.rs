@@ -1,12 +1,14 @@
-use crate::app::engine::rendering_context::RenderingContext;
-use anyhow::Result;
+use crate::app::engine::{
+    renderer::device_memory::Allocation, rendering_context::RenderingContext,
+};
+use anyhow::{Context as _, Result};
 use ash::vk;
 use std::sync::Arc;
 
 pub struct Buffer {
     context: Arc<RenderingContext>,
     pub buffer: vk::Buffer,
-    buffer_memory: vk::DeviceMemory,
+    allocation: Allocation,
 }
 
 impl Buffer {
@@ -28,59 +30,48 @@ impl Buffer {
 
         let memory_requirements = unsafe { context.device.get_buffer_memory_requirements(buffer) };
 
-        let buffer_memory = unsafe {
-            context.device.allocate_memory(
-                &vk::MemoryAllocateInfo::default()
-                    .allocation_size(memory_requirements.size)
-                    .memory_type_index(context.find_memory_type(
-                        memory_requirements.memory_type_bits,
-                        memory_properties,
-                    )?),
-                None,
-            )?
-        };
+        let allocation =
+            context
+                .allocator()
+                .allocate(&context, memory_requirements, memory_properties)?;
 
         unsafe {
             context
                 .device
-                .bind_buffer_memory(buffer, buffer_memory, 0)?;
+                .bind_buffer_memory(buffer, allocation.memory, allocation.offset)?;
         }
 
         Ok(Self {
             context,
             buffer,
-            buffer_memory,
+            allocation,
         })
     }
 
-    pub fn map_and_unmap<T: Copy>(&self, buffer_data: &[T]) -> Result<()> {
+    /// Écrit `buffer_data` dans le buffer. Le bloc étant mappé en permanence, il ne
+    /// reste qu'un `memcpy` — plus aucun appel au driver.
+    pub fn upload<T: Copy>(&self, buffer_data: &[T]) -> Result<()> {
+        let bytes = std::mem::size_of_val(buffer_data);
+        // Déborder n'écrase plus une zone à soi mais la tranche du voisin : géométrie
+        // corrompue, sans erreur de validation pour le signaler.
+        debug_assert!(bytes as u64 <= self.allocation.size);
+
+        let destination = self.map()?;
         unsafe {
-            let data = self.context.device.map_memory(
-                self.buffer_memory,
-                0,
-                std::mem::size_of_val(buffer_data) as u64,
-                vk::MemoryMapFlags::empty(),
-            )? as *mut T;
-            std::ptr::copy_nonoverlapping(buffer_data.as_ptr(), data, buffer_data.len());
-            self.context.device.unmap_memory(self.buffer_memory);
+            // Copie octet par octet : `copy_nonoverlapping::<T>` exigerait un `destination`
+            // aligné pour `T`, ce que `MemoryRequirements::alignment` ne promet pas.
+            std::ptr::copy_nonoverlapping(buffer_data.as_ptr() as *const u8, destination, bytes);
         }
         Ok(())
     }
 
-    pub fn map(&self, size: vk::DeviceSize) -> Result<*mut std::ffi::c_void> {
-        let ptr = unsafe {
-            self.context.device.map_memory(
-                self.buffer_memory,
-                0,
-                size,
-                vk::MemoryMapFlags::empty(),
-            )?
-        };
-        Ok(ptr)
-    }
-
-    pub fn unmap(&self) {
-        unsafe { self.context.device.unmap_memory(self.buffer_memory) };
+    /// Pointeur CPU vers le contenu du buffer, valide tant que le [`Buffer`] vit.
+    /// Rien à démapper : le mapping appartient au bloc, pas à la tranche.
+    pub fn map(&self) -> Result<*mut u8> {
+        self.context
+            .allocator()
+            .mapped_ptr(&self.allocation)
+            .context("pointeur CPU demandé sur un buffer qui n'est pas host-visible")
     }
 }
 
@@ -88,7 +79,7 @@ impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
             self.context.device.destroy_buffer(self.buffer, None);
-            self.context.device.free_memory(self.buffer_memory, None);
+            self.context.allocator().free_alloc(&self.allocation);
         }
     }
 }

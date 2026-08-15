@@ -9,10 +9,17 @@ struct FreeRange {
     end: u64,
 }
 
-pub struct MemoryBlock {
+/// Base d'un bloc host-visible, mappée à sa création et jamais démappée.
+///
+/// Un `*mut u8` nu est `!Send`, ce qui suffirait à rendre tout `RenderingContext`
+/// `!Sync` et donc `Arc<RenderingContext>` intransportable entre threads.
+struct MappedPtr(*mut u8);
+unsafe impl Send for MappedPtr {}
+
+struct MemoryBlock {
     memory: vk::DeviceMemory,
     size: u64,
-    mapped: Option<*mut u8>,
+    pub mapped: Option<MappedPtr>,
     free: Vec<FreeRange>,
 }
 /// Taille d'un bloc demandé au driver. Un mesh LOD0 fait ~2 Mo : un bloc en tient
@@ -40,7 +47,7 @@ impl MemoryBlock {
                     .device
                     .map_memory(memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())?
             };
-            Some(ptr as *mut u8)
+            Some(MappedPtr(ptr as *mut u8))
         } else {
             None
         };
@@ -179,6 +186,22 @@ impl DeviceMemoryAllocator {
             block,
             memory_type,
         })
+    }
+
+    /// Pointeur CPU vers le début de la tranche, `None` si son bloc n'est pas
+    /// host-visible. Le mapping appartient au bloc et vit aussi longtemps que lui :
+    /// l'appelant ne démappe jamais.
+    pub fn mapped_ptr(&self, allocation: &Allocation) -> Option<*mut u8> {
+        let block = self
+            .blocks
+            .get(&allocation.memory_type)?
+            .get(allocation.block)?;
+        // La tranche est vivante, donc incluse dans le bloc, donc dans le mapping qui
+        // le couvre en entier : le pointeur décalé reste dans la même allocation.
+        block
+            .mapped
+            .as_ref()
+            .map(|base| unsafe { base.0.add(allocation.offset as usize) })
     }
 
     pub fn free_alloc(&mut self, allocation: &Allocation) {

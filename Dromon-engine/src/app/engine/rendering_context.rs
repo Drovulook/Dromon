@@ -18,6 +18,7 @@ use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;
 use std::ffi::CStr;
+use std::sync::Mutex;
 use std::{collections::HashSet, sync::Arc};
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
@@ -35,9 +36,18 @@ pub struct RenderingContext {
     pub surface_extensions: ash::khr::surface::Instance,
     pub instance: ash::Instance,
     pub entry: ash::Entry,
-    pub device_memory_allocator: DeviceMemoryAllocator,
+    pub device_memory_allocator: Mutex<DeviceMemoryAllocator>, // on a besoin de modifier son
+    // contenu, mais faire en sorte que Arc<RenderingContext> reste Sync (utilisable dans plusieurs
+    // threads)
     pub logger: Arc<Logger>,
 }
+
+/// Verrouille le `Sync` de [`RenderingContext`] : sans ça, un champ `!Sync` ajouté
+/// plus tard passerait inaperçu jusqu'au jour où un `Arc<RenderingContext>` doit traverser un thread.
+const _: fn() = || {
+    fn assert_sync<T: Sync>() {}
+    assert_sync::<RenderingContext>();
+};
 
 type QueueFamilyPicker = fn(Vec<PhysicalDevice>) -> Result<(PhysicalDevice, QueueFamilies)>;
 
@@ -279,7 +289,7 @@ impl RenderingContext {
                 entry,
                 debug_messenger,
                 swapchain_extensions,
-                device_memory_allocator: DeviceMemoryAllocator::new(),
+                device_memory_allocator: Mutex::new(DeviceMemoryAllocator::new()),
                 logger,
             })
         }
@@ -288,6 +298,7 @@ impl RenderingContext {
 
 impl Drop for RenderingContext {
     fn drop(&mut self) {
+        self.allocator().destroy_allocator(self);
         unsafe {
             self.device.destroy_device(None);
             #[cfg(debug_assertions)]

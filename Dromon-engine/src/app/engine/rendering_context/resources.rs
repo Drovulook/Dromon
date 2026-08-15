@@ -1,8 +1,10 @@
 use super::RenderingContext;
-use crate::app::engine::rendering_context::SwapchainSurface;
+use crate::app::engine::{
+    renderer::device_memory::DeviceMemoryAllocator, rendering_context::SwapchainSurface,
+};
 use anyhow::Result;
 use ash::vk;
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::Window,
@@ -166,5 +168,14 @@ impl RenderingContext {
         } else {
             vk::SampleCountFlags::TYPE_1
         }
+    }
+
+    // `lock()` échoue seulement si un thread a paniqué en tenant le verrou. L'état
+    // de l'allocateur reste cohérent (aucune section critique ne peut paniquer à
+    // mi-chemin), donc on récupère le garde au lieu de propager.
+    pub fn allocator(&self) -> MutexGuard<'_, DeviceMemoryAllocator> {
+        self.device_memory_allocator
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
     }
 }

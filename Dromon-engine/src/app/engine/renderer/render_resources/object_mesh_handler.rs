@@ -231,7 +231,7 @@ impl ObjectMeshHandler {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
 
-        staging_buffer.map_and_unmap(data)?;
+        staging_buffer.upload(data)?;
 
         let device_buffer = Buffer::new(
             context.clone(),

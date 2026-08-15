@@ -83,7 +83,7 @@ impl TextureHandler {
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        staging_buffer.map_and_unmap(pixels)?;
+        staging_buffer.upload(pixels)?;
 
         let (texture_image, texture_image_memory) = self.context.create_image(
             image_width,

@@ -94,8 +94,11 @@ impl TerrainMesh {
     /// dans la passe de transfert du démarrage ou en tête d'une frame.
     pub fn new(context: Arc<RenderingContext>, data: Arc<MeshData>) -> Result<TerrainMesh> {
         profile!();
-        let (vertex_staging_buffer, vertex_buffer) =
-            Self::staging_and_device(&context, &data.vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let (vertex_staging_buffer, vertex_buffer) = Self::staging_and_device(
+            &context,
+            &data.vertices,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+        )?;
         let (index_staging_buffer, index_buffer) =
             Self::staging_and_device(&context, &data.indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
@@ -129,7 +132,7 @@ impl TerrainMesh {
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        staging.map_and_unmap(data)?;
+        staging.upload(data)?;
 
         let device = Buffer::new(
             context.clone(),

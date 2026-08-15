@@ -5,7 +5,6 @@ use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
-use std::ffi::c_void;
 use std::sync::Arc;
 
 #[repr(C)]
@@ -25,7 +24,7 @@ struct UniformBufferObject {
 pub struct UniformBuffer {
     context: Arc<RenderingContext>,
     buffer: Buffer,
-    mapped: *mut c_void,
+    mapped: *mut u8,
 }
 
 impl UniformBuffer {
@@ -37,7 +36,7 @@ impl UniformBuffer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        let mapped = buffer.map(size)?;
+        let mapped = buffer.map()?;
         Ok(Self {
             context,
             buffer,
@@ -69,9 +68,9 @@ impl UniformBuffer {
 
         unsafe {
             std::ptr::copy_nonoverlapping(
-                &ubo as *const UniformBufferObject,
-                self.mapped as *mut UniformBufferObject,
-                1,
+                &ubo as *const UniformBufferObject as *const u8,
+                self.mapped,
+                std::mem::size_of::<UniformBufferObject>(),
             );
         }
     }
