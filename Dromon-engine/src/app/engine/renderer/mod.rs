@@ -1,6 +1,7 @@
 mod buffer;
 mod camera;
 mod descriptors;
+mod gpu_allocator;
 pub mod image_layout_state;
 mod light;
 pub(crate) mod render_resources;
