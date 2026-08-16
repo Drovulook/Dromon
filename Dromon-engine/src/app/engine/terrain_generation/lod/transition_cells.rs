@@ -41,7 +41,7 @@ use crate::app::engine::{
 
 /// DEBUG : teinte en magenta les sommets des cellules de transition, pour voir où
 /// elles se posent (et vérifier qu'elles longent bien les frontières de LOD).
-pub const DEBUG_TRANSITION_COLOR: bool = true;
+pub const DEBUG_TRANSITION_COLOR: bool = false;
 
 /// Repère local d'une face de transition. `origin` = coin `(u=0, v=0)` de la face sur le
 /// **plan frontière** — le plan que le voisin grossier échantillonne aussi ; `u`/`v` =

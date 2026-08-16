@@ -29,7 +29,7 @@ use crate::{
 ///
 /// 2 ms sur les 16 d'une frame à 60 fps : le lot met quelques frames de plus à
 /// apparaître, ce qui ne se voit pas.
-const BUILD_BUDGET: Duration = Duration::from_millis(2);
+const BUILD_BUDGET: Duration = Duration::from_millis(1);
 
 /// Lot de re-maillage **en vol** : ce que les threads de fond sont en train de produire,
 /// plus ce que le cache a déjà fourni.
@@ -284,19 +284,7 @@ impl World {
                 self.pending_uploads.push(coord);
             }
         }
-
-        // Trace de contrôle : valide les estimations de charge (nombre de chunks sales
-        // par franchissement de seuil) et donne le taux de réutilisation du cache, seule
-        // façon de savoir s'il est rentable pour un style de déplacement donné.
-        let (hits, misses) = self.mesh_cache.stats();
-        let (bytes, entries) = self.mesh_cache.usage();
-        self.logger.info(&format!(
-            "LOD : {batch} chunks installés ({} maillés, {} repris du cache) — cache {hits}/{} accès, {entries} entrées, {} Mo",
-            job.meshed_count,
-            batch.saturating_sub(job.meshed_count),
-            hits + misses,
-            bytes / (1024 * 1024),
-        ));
+        self.cache_and_allocator_logs();
     }
 
     /// Détruit les meshes dont plus aucune frame en vol ne peut se servir, **sous le même
@@ -330,5 +318,39 @@ impl World {
                 return;
             }
         }
+    }
+
+    fn cache_and_allocator_logs(&self) {
+        // Trace de contrôle : valide les estimations de charge (nombre de chunks sales
+        // par franchissement de seuil) et donne le taux de réutilisation du cache, seule
+        // façon de savoir s'il est rentable pour un style de déplacement donné.
+        // let (hits, misses) = self.mesh_cache.stats();
+        // let (bytes, entries) = self.mesh_cache.usage();
+        // self.logger.info(&format!(
+        //     "LOD : {batch} chunks installés ({} maillés, {} repris du cache) — cache {hits}/{} accès, {entries} entrées, {} Mo",
+        //     job.meshed_count,
+        //     batch.saturating_sub(job.meshed_count),
+        //     hits + misses,
+        //     bytes / (1024 * 1024),
+        // ));
+
+        // Surveillance de la fragmentation externe de l'allocateur GPU. Le lot vient
+        // de libérer les anciens meshes et d'en allouer autant de nouveaux : c'est le
+        // moment où les trous apparaissent, donc le bon endroit pour mesurer.
+        const MB: u64 = 1024 * 1024;
+        let gpu = self.context.allocator().usage();
+        let occupancy = if gpu.reserved > 0 {
+            100 * gpu.used / gpu.reserved
+        } else {
+            0
+        };
+        self.logger.info(&format!(
+            "GPU : {} blocs, {}/{} Mo utilisés ({occupancy} %), {} trous, plus grand {} Ko",
+            gpu.blocks,
+            gpu.used / MB,
+            gpu.reserved / MB,
+            gpu.holes,
+            gpu.largest_free / 1024,
+        ));
     }
 }

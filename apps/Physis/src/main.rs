@@ -23,7 +23,7 @@ impl Scene for Physis {
                     lowland_flatness: 0.75, // plaines douces, détail réservé à l'altitude
                 },
             },
-            50,
+            80,
         )?;
         Ok(())
     }

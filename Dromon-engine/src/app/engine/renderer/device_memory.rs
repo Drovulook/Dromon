@@ -140,6 +140,21 @@ pub struct DeviceMemoryAllocator {
     blocks: HashMap<u32, Vec<MemoryBlock>>,
 }
 
+/// Instantané de l'occupation, pour surveiller la **fragmentation externe**.
+#[derive(Default)]
+pub struct MemoryUsage {
+    /// Blocs demandés au driver — c'est ce que plafonne `maxMemoryAllocationCount`.
+    pub blocks: usize,
+    /// Octets demandés au driver.
+    pub reserved: u64,
+    /// Octets couverts par des tranches vivantes.
+    pub used: u64,
+    /// Trous libres, tous blocs confondus.
+    pub holes: usize,
+    /// Plus grande tranche encore allouable d'un seul tenant.
+    pub largest_free: u64,
+}
+
 impl DeviceMemoryAllocator {
     pub fn new() -> Self {
         Self {
@@ -202,6 +217,21 @@ impl DeviceMemoryAllocator {
             .mapped
             .as_ref()
             .map(|base| unsafe { base.0.add(allocation.offset as usize) })
+    }
+
+    pub fn usage(&self) -> MemoryUsage {
+        let mut usage = MemoryUsage::default();
+        // `values()` donne les `Vec` par memory type, `flatten` les parcourt d'affilée :
+        // on agrège tout, staging host-visible et device-local confondus.
+        for block in self.blocks.values().flatten() {
+            usage.blocks += 1;
+            usage.reserved += block.size;
+            usage.used += block.size - block.free_bytes();
+            usage.holes += block.free.len();
+            let largest = block.free.iter().map(|r| r.end - r.start).max();
+            usage.largest_free = usage.largest_free.max(largest.unwrap_or(0));
+        }
+        usage
     }
 
     pub fn free_alloc(&mut self, allocation: &Allocation) {

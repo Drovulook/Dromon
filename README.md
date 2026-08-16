@@ -14,6 +14,8 @@ Dromon is a long-term personal project aimed at learning low-level graphics prog
 - Input handling (keyboard/mouse).
 - glTF model loading with textures.
 - Procedural terrain: chunked heightmap generation and meshing.
+- Dynamic level of details.
+- Simple memory allocator.
 - Built-in CPU and GPU profiling, streamed to the CLI over a Unix socket.
 
 ### CLI
