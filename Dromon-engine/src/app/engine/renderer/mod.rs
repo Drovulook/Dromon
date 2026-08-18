@@ -2,6 +2,7 @@ mod buffer;
 mod camera;
 mod descriptors;
 pub(crate) mod device_memory;
+mod frustum_culling;
 pub mod image_layout_state;
 mod light;
 pub(crate) mod render_resources;

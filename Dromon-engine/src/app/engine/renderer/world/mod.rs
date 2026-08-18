@@ -1,14 +1,16 @@
 mod mesh_job;
 mod terrain;
+pub(crate) mod terrain_meshes;
 
 use crate::app::engine::renderer::camera::Camera;
+use crate::app::engine::renderer::frustum_culling::Frustum;
 use crate::app::engine::renderer::light::{DirectionalLight, ShadowConfig};
+use crate::app::engine::renderer::world::terrain_meshes::TerrainMeshes;
 use crate::app::engine::terrain_generation::{LodUpdater, MeshCache};
 use crate::app::engine::{inputs::InputState, terrain_generation::ChunkManager};
 use crate::profile;
 use anyhow::Result;
 use ash::vk;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::app::{
@@ -25,6 +27,8 @@ use crate::app::{
 };
 use glam::IVec2;
 
+/// HACK: il faudra faire du refactoring pour mettre terrain_meshes, mesh_cache, mesh_job, graveyard
+/// etc dans un seul struct.
 pub struct World {
     pub logger: Arc<Logger>,
     pub rrm: RenderResourceManager,
@@ -38,7 +42,7 @@ pub struct World {
     /// Un mesh GPU par chunk **non vide**, indexé par coordonnée : c'est ce qui permet
     /// de remplacer le mesh d'un chunk précis quand son LOD change (un `Vec` n'avait
     /// aucun lien avec les positions, les chunks vides décalant même les index).
-    pub terrain_meshes: HashMap<IVec2, TerrainMesh>,
+    pub terrain_meshes: TerrainMeshes,
     /// Politique de LOD suivant la caméra. `None` tant qu'il n'y a pas de terrain.
     lod_updater: Option<LodUpdater>,
     /// Altitude moyenne du relief : plan de référence de la composante « hauteur de
@@ -59,6 +63,9 @@ pub struct World {
     frame: u64,
     /// Nombre de frames que le renderer garde en vol.
     frames_in_flight: u64,
+    /// Chunks visibles pour le frustum culling.
+    pub visible_chunks: Vec<IVec2>,
+    pub shadow_chunks: Vec<IVec2>,
     /// Contexte GPU, conservé pour pouvoir allouer les buffers du terrain au
     /// moment du `setup` (la génération est pilotée par la scène) comme en cours de jeu.
     context: Arc<RenderingContext>,
@@ -92,7 +99,7 @@ impl World {
                 shadow: ShadowConfig::default(),
             },
             chunk_manager: None,
-            terrain_meshes: HashMap::new(),
+            terrain_meshes: TerrainMeshes::new(),
             lod_updater: None,
             terrain_reference_z: 0.0,
             mesh_cache: MeshCache::default(),
@@ -101,6 +108,8 @@ impl World {
             graveyard: Vec::new(),
             frame: 0,
             frames_in_flight: frames_in_flight as u64,
+            visible_chunks: Vec::new(),
+            shadow_chunks: Vec::new(),
             context,
         })
     }
@@ -117,5 +126,23 @@ impl World {
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {
         profile!();
         self.camera.update(input_state, timer, aspect);
+
+        // Frustum culling
+        let camera_frustum = Frustum::from_view_proj(self.camera.proj * self.camera.view);
+        let light_frustum = Frustum::from_view_proj(
+            self.light
+                .view_proj(self.camera.position, self.camera.front()),
+        );
+        self.visible_chunks.clear();
+        self.shadow_chunks.clear();
+        for &coord in self.terrain_meshes.coords() {
+            let (min, max) = Frustum::chunk_aabb(coord);
+            if camera_frustum.intersects_aabb(min, max) {
+                self.visible_chunks.push(coord);
+            }
+            if light_frustum.intersects_aabb(min, max) {
+                self.shadow_chunks.push(coord);
+            }
+        }
     }
 }

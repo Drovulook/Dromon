@@ -30,7 +30,7 @@ use ratatui::{
 struct Node {
     depth: usize,
     name: String,
-    total_us: u128,
+    total_ns: u128,
     count: u32,
     parent: Option<usize>,
     children: Vec<usize>,
@@ -105,7 +105,7 @@ impl CallTree {
             self.nodes.push(Node {
                 depth: n.depth,
                 name: n.name,
-                total_us: n.dur_us,
+                total_ns: n.dur_ns,
                 count: n.count,
                 parent,
                 children: Vec::new(),
@@ -116,8 +116,8 @@ impl CallTree {
                 None => self.roots.push(idx),
             }
             build_stack.push(idx);
-            if n.dur_us > self.max_total {
-                self.max_total = n.dur_us;
+            if n.dur_ns > self.max_total {
+                self.max_total = n.dur_ns;
             }
         }
 
@@ -272,14 +272,14 @@ impl CallTree {
                 let label = fit(label, name_w);
 
                 let frac = if self.max_total > 0 {
-                    node.total_us as f64 / self.max_total as f64
+                    node.total_ns as f64 / self.max_total as f64
                 } else {
                     0.0
                 };
 
                 let mut spans = vec![Span::raw(label)];
                 if show_dur {
-                    let dur = format!("{:>dur_w$}", fmt_dur(node.total_us));
+                    let dur = format!("{:>dur_w$}", fmt_dur(node.total_ns));
                     spans.push(Span::raw(" "));
                     spans.push(Span::styled(dur, Style::default().fg(GOLD)));
                 }
@@ -363,14 +363,16 @@ fn fit(s: String, w: usize) -> String {
     }
 }
 
-/// Formate une durée en microsecondes vers l'unité la plus lisible.
-fn fmt_dur(us: u128) -> String {
-    if us >= 1_000_000 {
-        format!("{:.2}s", us as f64 / 1_000_000.0)
-    } else if us >= 1_000 {
-        format!("{:.1}ms", us as f64 / 1_000.0)
+/// Formate une durée en nanosecondes vers l'unité la plus lisible.
+fn fmt_dur(ns: u128) -> String {
+    if ns >= 1_000_000_000 {
+        format!("{:.2}s", ns as f64 / 1_000_000_000.0)
+    } else if ns >= 1_000_000 {
+        format!("{:.1}ms", ns as f64 / 1_000_000.0)
+    } else if ns >= 1_000 {
+        format!("{:.1}µs", ns as f64 / 1_000.0)
     } else {
-        format!("{us}µs")
+        format!("{ns}ns")
     }
 }
 

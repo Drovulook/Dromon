@@ -5,7 +5,7 @@ mod marching_cubes;
 mod mesh;
 mod utils;
 
-pub use chunk::{CHUNK_SIZE, ChunkManager, GenParams};
+pub use chunk::{CHUNK_HEIGHT, CHUNK_SIZE, ChunkManager, GenParams};
 pub use generation::height_field::HeightParams;
 pub use lod::grid::LodGrid;
 pub use lod::lod_updater::LodUpdater;

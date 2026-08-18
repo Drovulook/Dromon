@@ -21,7 +21,7 @@ pub enum ParsedMessage {
 /// Un nœud d'arbre de profiling tel que décodé d'un message `[PROFILE_*]`.
 pub struct ProfileNode {
     pub depth: usize,
-    pub dur_us: u128,
+    pub dur_ns: u128,
     pub count: u32,
     pub name: String,
 }
@@ -79,7 +79,7 @@ pub fn parse(raw: String) -> ParsedMessage {
 
 /// Décode le corps d'un message `[PROFILE_*]` : l'arbre entier en une passe.
 /// Les nœuds sont séparés par `\x1e` (record) et leurs 4 champs
-/// `depth␟dur_us␟count␟name` par `\x1f` — des caractères de contrôle qui
+/// `depth␟dur_ns␟count␟name` par `\x1f` — des caractères de contrôle qui
 /// n'apparaissent jamais dans un nom, donc pas d'ambiguïté même si le nom
 /// contient des espaces ou des `::`. Les nœuds arrivent déjà en ordre préfixe.
 fn parse_profile_nodes(rest: &str) -> Vec<ProfileNode> {
@@ -88,12 +88,12 @@ fn parse_profile_nodes(rest: &str) -> Vec<ProfileNode> {
         .filter_map(|record| {
             let mut fields = record.splitn(4, '\u{1f}');
             let depth = fields.next()?.parse().ok()?;
-            let dur_us = fields.next()?.parse().ok()?;
+            let dur_ns = fields.next()?.parse().ok()?;
             let count = fields.next()?.parse().ok()?;
             let name = fields.next()?.to_string();
             Some(ProfileNode {
                 depth,
-                dur_us,
+                dur_ns,
                 count,
                 name,
             })

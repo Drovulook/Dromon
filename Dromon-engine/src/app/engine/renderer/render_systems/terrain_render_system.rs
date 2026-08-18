@@ -9,6 +9,7 @@ use crate::{
         renderer::{
             descriptors::DescriptorHandler,
             render_resources::{TerrainMesh, TerrainVertex},
+            world::terrain_meshes::TerrainMeshes,
         },
         rendering_context::RenderingContext,
     },
@@ -106,7 +107,8 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        terrain_meshes: &HashMap<IVec2, TerrainMesh>,
+        terrain_meshes: &TerrainMeshes,
+        visible_chunks: &Vec<IVec2>,
     ) {
         if terrain_meshes.is_empty() {
             return;
@@ -161,8 +163,11 @@ impl TerrainRenderSystem {
                 bytemuck::bytes_of(&identity),
             );
 
-            for mesh in terrain_meshes.values() {
+            for coord in visible_chunks {
                 {
+                    let Some(mesh) = terrain_meshes.get(coord) else {
+                        continue;
+                    };
                     profile!("bind + draw command - terrain mesh");
                     mesh.bind(command_buffer);
                     self.context.device.cmd_draw_indexed(
@@ -182,7 +187,8 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        terrain_meshes: &HashMap<IVec2, TerrainMesh>,
+        terrain_meshes: &TerrainMeshes,
+        shadow_chunks: &Vec<IVec2>,
     ) {
         if terrain_meshes.is_empty() {
             return;
@@ -215,11 +221,19 @@ impl TerrainRenderSystem {
                 bytemuck::bytes_of(&identity),
             );
 
-            for mesh in terrain_meshes.values() {
+            for coord in shadow_chunks {
+                let Some(mesh) = terrain_meshes.get(coord) else {
+                    continue;
+                };
                 mesh.bind(command_buffer);
-                self.context
-                    .device
-                    .cmd_draw_indexed(command_buffer, mesh.index_count(), 1, 0, 0, 0);
+                self.context.device.cmd_draw_indexed(
+                    command_buffer,
+                    mesh.index_count(),
+                    1,
+                    0,
+                    0,
+                    0,
+                );
             }
         }
     }

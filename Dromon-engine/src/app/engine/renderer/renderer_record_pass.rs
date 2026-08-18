@@ -58,6 +58,7 @@ impl Renderer {
                 command_buffer,
                 frame_index,
                 &self.world.terrain_meshes,
+                &self.world.shadow_chunks,
             );
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -152,6 +153,7 @@ impl Renderer {
                 frame.command_buffer,
                 self.frame_index,
                 &self.world.terrain_meshes,
+                &self.world.visible_chunks,
             );
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////

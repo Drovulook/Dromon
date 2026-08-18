@@ -274,14 +274,21 @@ impl World {
     /// construits — quelques microsecondes, donc sans risque pour la frame.
     fn install_mesh_job(&mut self, job: MeshJob) {
         profile!();
-        let batch = job.built.len();
         for (coord, mesh) in job.built {
-            if let Some(old) = self.terrain_meshes.remove(&coord) {
-                self.graveyard.push((old, self.frame));
-            }
-            if let Some(mesh) = mesh {
-                self.terrain_meshes.insert(coord, mesh);
-                self.pending_uploads.push(coord);
+            match mesh {
+                // Remplacement : `insert` rend l'ancien, la coordonnée ne bouge pas.
+                Some(mesh) => {
+                    if let Some(old) = self.terrain_meshes.insert(coord, mesh) {
+                        self.graveyard.push((old, self.frame));
+                    }
+                    self.pending_uploads.push(coord);
+                }
+                // Le chunk devient vide : vraie suppression.
+                None => {
+                    if let Some(old) = self.terrain_meshes.remove(&coord) {
+                        self.graveyard.push((old, self.frame));
+                    }
+                }
             }
         }
         self.cache_and_allocator_logs();

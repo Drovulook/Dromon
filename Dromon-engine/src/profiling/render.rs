@@ -3,7 +3,8 @@
 //! Le GPU étant asynchrone, on ne le chronomètre pas côté CPU : on insère des
 //! `vkCmdWriteTimestamp` dans le command buffer, que le GPU horodate quand il les
 //! atteint. On lit les résultats 2 frames plus tard (après le fence du slot) :
-//! `(end - begin) × timestamp_period` = durée réelle GPU. Envoi via `[PROFILE_GPU]`,
+//! `(end - begin) × timestamp_period` = durée réelle GPU, en ns (l'unité du fil).
+//! Envoi via `[PROFILE_GPU]`,
 //! throttlé à 500 ms. Vit dans le `Renderer` (a besoin du `device`), contrairement au
 //! profiling CPU qui est global.
 
@@ -201,8 +202,8 @@ impl GpuProfiler {
             .iter()
             .map(|r| {
                 let ticks = data[r.end as usize].wrapping_sub(data[r.begin as usize]);
-                let dur_us = (ticks as f64 * self.ns_per_tick / 1000.0) as u128;
-                format!("{}\u{1f}{}\u{1f}1\u{1f}{}", r.depth, dur_us, r.name)
+                let dur_ns = (ticks as f64 * self.ns_per_tick) as u128;
+                format!("{}\u{1f}{}\u{1f}1\u{1f}{}", r.depth, dur_ns, r.name)
             })
             .collect();
         if !records.is_empty() {
