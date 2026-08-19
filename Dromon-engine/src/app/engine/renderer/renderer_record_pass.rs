@@ -1,6 +1,5 @@
 use crate::app::engine::renderer::{Frame, Renderer, image_layout_state::ImageLayoutState};
 use crate::profile;
-use anyhow::Result;
 use ash::vk;
 
 impl Renderer {
@@ -54,12 +53,14 @@ impl Renderer {
                 &self.world.render_objects,
             );
 
-            self.terrain_render_sytem.record_shadow_terrain(
-                command_buffer,
-                frame_index,
-                &self.world.terrain_meshes,
-                &self.world.shadow_chunks,
-            );
+            if let Some(terrain) = self.world.terrain.as_ref() {
+                self.terrain_render_sytem.record_shadow_terrain(
+                    command_buffer,
+                    frame_index,
+                    &terrain.chunks,
+                    &terrain.visible.shadow,
+                );
+            }
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -149,12 +150,14 @@ impl Renderer {
                 &self.world.render_objects,
             );
 
-            self.terrain_render_sytem.record_render_terrain(
-                frame.command_buffer,
-                self.frame_index,
-                &self.world.terrain_meshes,
-                &self.world.visible_chunks,
-            );
+            if let Some(terrain) = self.world.terrain.as_ref() {
+                self.terrain_render_sytem.record_render_terrain(
+                    frame.command_buffer,
+                    self.frame_index,
+                    &terrain.chunks,
+                    &terrain.visible.camera,
+                );
+            }
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 

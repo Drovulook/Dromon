@@ -1,78 +1,47 @@
-mod mesh_job;
-mod terrain;
-pub(crate) mod terrain_meshes;
+pub(crate) mod terrain;
 
-use crate::app::engine::renderer::camera::Camera;
-use crate::app::engine::renderer::frustum_culling::Frustum;
-use crate::app::engine::renderer::light::{DirectionalLight, ShadowConfig};
-use crate::app::engine::renderer::world::terrain_meshes::TerrainMeshes;
-use crate::app::engine::terrain_generation::{LodUpdater, MeshCache};
-use crate::app::engine::{inputs::InputState, terrain_generation::ChunkManager};
-use crate::profile;
 use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
+use crate::app::engine::inputs::InputState;
+use crate::app::engine::renderer::world::terrain::Terrain;
 use crate::app::{
     engine::{
         renderer::{
+            camera::Camera,
             descriptors::DescriptorHandler,
-            render_resources::{RenderObject, RenderResourceManager, TerrainMesh},
-            world::mesh_job::MeshJob,
+            light::{DirectionalLight, ShadowConfig},
+            render_resources::{RenderObject, RenderResourceManager},
         },
         rendering_context::RenderingContext,
         timer::Timer,
     },
     logger::Logger,
 };
-use glam::IVec2;
+use crate::profile;
 
-/// HACK: il faudra faire du refactoring pour mettre terrain_meshes, mesh_cache, mesh_job, graveyard
-/// etc dans un seul struct.
+/// Le contenu de la scène : ce que l'application décrit via le trait
+/// [`Scene`](crate::Scene), plus le terrain quand il y en a un.
 pub struct World {
     pub logger: Arc<Logger>,
     pub rrm: RenderResourceManager,
     pub render_objects: Vec<RenderObject>,
     pub camera: Camera,
     pub light: DirectionalLight,
-    /// Données du terrain (relief + édits). `None` tant que la scène n'a pas appelé
-    /// [`World::generate_terrain`]. En `Arc` car **immuable une fois généré** : les
-    /// threads de maillage en partagent la lecture sans copie ni verrou.
-    pub chunk_manager: Option<Arc<ChunkManager>>,
-    /// Un mesh GPU par chunk **non vide**, indexé par coordonnée : c'est ce qui permet
-    /// de remplacer le mesh d'un chunk précis quand son LOD change (un `Vec` n'avait
-    /// aucun lien avec les positions, les chunks vides décalant même les index).
-    pub terrain_meshes: TerrainMeshes,
-    /// Politique de LOD suivant la caméra. `None` tant qu'il n'y a pas de terrain.
-    lod_updater: Option<LodUpdater>,
-    /// Altitude moyenne du relief : plan de référence de la composante « hauteur de
-    /// caméra » du LOD (cf. [`LodFocus`]).
-    terrain_reference_z: f32,
-    /// Géométries déjà calculées, gardées pour les allers-retours de caméra.
-    mesh_cache: MeshCache,
-    /// Lot de re-maillage en cours, s'il y en a un.
-    mesh_job: Option<MeshJob>,
-    /// Chunks dont les buffers attendent leur copie staging → device.
-    pending_uploads: Vec<IVec2>,
-    /// Meshes remplacés, avec la frame de mise au rebut. `Buffer::drop` détruit le
-    /// buffer Vulkan **immédiatement** : libérer tout de suite un mesh encore
-    /// référencé par une frame en vol produirait une erreur de validation, voire un
-    /// crash. On attend donc que toutes les frames concernées soient terminées.
-    graveyard: Vec<(TerrainMesh, u64)>,
-    /// Compteur de frames, base du délai du cimetière.
-    frame: u64,
-    /// Nombre de frames que le renderer garde en vol.
-    frames_in_flight: u64,
-    /// Chunks visibles pour le frustum culling.
-    pub visible_chunks: Vec<IVec2>,
-    pub shadow_chunks: Vec<IVec2>,
+    /// Le terrain vivant. `None` tant que la scène n'a pas appelé
+    /// [`World::generate_terrain`] — une scène n'est pas obligée d'en avoir un.
+    pub(crate) terrain: Option<Terrain>,
     /// Contexte GPU, conservé pour pouvoir allouer les buffers du terrain au
     /// moment du `setup` (la génération est pilotée par la scène) comme en cours de jeu.
     context: Arc<RenderingContext>,
+    /// Nombre de frames que le renderer garde en vol — le terrain en a besoin pour dater
+    /// la destruction différée de ses meshes.
+    frames_in_flight: u64,
 }
 
 impl World {
-    /// Crée un monde *vide* : seul le gestionnaire de ressources (`rorm`) et des
+    /// Crée un monde *vide* : seul le gestionnaire de ressources (`rrm`) et des
     /// valeurs par défaut (caméra, lumière) sont initialisés. Le contenu concret
     /// (assets + `RenderObject`, terrain) est fourni par la `Scene` via
     /// `Scene::setup`, appelée juste après la construction du `Renderer`. La
@@ -83,11 +52,11 @@ impl World {
         descriptor_handler: Arc<DescriptorHandler>,
         frames_in_flight: usize,
     ) -> Result<World> {
-        let rorm = RenderResourceManager::new(context.clone(), logger.clone(), descriptor_handler)?;
+        let rrm = RenderResourceManager::new(context.clone(), logger.clone(), descriptor_handler)?;
 
         Ok(World {
             logger,
-            rrm: rorm,
+            rrm,
             render_objects: Vec::new(),
             camera: Camera::default(),
             light: DirectionalLight {
@@ -98,27 +67,17 @@ impl World {
                 // bascule en mode terrain si la scène crée un terrain.
                 shadow: ShadowConfig::default(),
             },
-            chunk_manager: None,
-            terrain_meshes: TerrainMeshes::new(),
-            lod_updater: None,
-            terrain_reference_z: 0.0,
-            mesh_cache: MeshCache::default(),
-            mesh_job: None,
-            pending_uploads: Vec::new(),
-            graveyard: Vec::new(),
-            frame: 0,
-            frames_in_flight: frames_in_flight as u64,
-            visible_chunks: Vec::new(),
-            shadow_chunks: Vec::new(),
+            terrain: None,
             context,
+            frames_in_flight: frames_in_flight as u64,
         })
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
         profile!();
         self.rrm.initialize(command_buffer)?;
-        for mesh in self.terrain_meshes.values() {
-            mesh.record_upload(command_buffer);
+        if let Some(terrain) = self.terrain.as_ref() {
+            terrain.initialize(command_buffer);
         }
         Ok(())
     }
@@ -126,23 +85,24 @@ impl World {
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {
         profile!();
         self.camera.update(input_state, timer, aspect);
+        if let Some(terrain) = self.terrain.as_mut() {
+            terrain.update_visibility(&self.camera, &self.light);
+        }
+    }
 
-        // Frustum culling
-        let camera_frustum = Frustum::from_view_proj(self.camera.proj * self.camera.view);
-        let light_frustum = Frustum::from_view_proj(
-            self.light
-                .view_proj(self.camera.position, self.camera.front()),
-        );
-        self.visible_chunks.clear();
-        self.shadow_chunks.clear();
-        for &coord in self.terrain_meshes.coords() {
-            let (min, max) = Frustum::chunk_aabb(coord);
-            if camera_frustum.intersects_aabb(min, max) {
-                self.visible_chunks.push(coord);
-            }
-            if light_frustum.intersects_aabb(min, max) {
-                self.shadow_chunks.push(coord);
-            }
+    /// Fait suivre le terrain aux mouvements de caméra (LOD aujourd'hui, streaming
+    /// demain). Sans terrain, ne fait rien.
+    pub fn update_terrain(&mut self) -> Result<()> {
+        let Some(terrain) = self.terrain.as_mut() else {
+            return Ok(());
+        };
+        terrain.update(&self.camera)
+    }
+
+    /// Copies staging → device des meshes de terrain fraîchement installés.
+    pub fn record_terrain_uploads(&mut self, command_buffer: vk::CommandBuffer) {
+        if let Some(terrain) = self.terrain.as_mut() {
+            terrain.record_uploads(command_buffer);
         }
     }
 }

@@ -1,15 +1,13 @@
 use anyhow::Result;
 use ash::vk;
 use glam::IVec2;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
     app::engine::{
         renderer::{
-            descriptors::DescriptorHandler,
-            render_resources::{TerrainMesh, TerrainVertex},
-            world::terrain_meshes::TerrainMeshes,
+            descriptors::DescriptorHandler, render_resources::TerrainVertex,
+            world::terrain::meshes::LoadedChunks,
         },
         rendering_context::RenderingContext,
     },
@@ -107,10 +105,10 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        terrain_meshes: &TerrainMeshes,
-        visible_chunks: &Vec<IVec2>,
+        chunks: &LoadedChunks,
+        visible_chunks: &[IVec2],
     ) {
-        if terrain_meshes.is_empty() {
+        if chunks.is_empty() {
             return;
         }
 
@@ -165,7 +163,7 @@ impl TerrainRenderSystem {
 
             for coord in visible_chunks {
                 {
-                    let Some(mesh) = terrain_meshes.get(coord) else {
+                    let Some(mesh) = chunks.get(coord).map(|c| &c.mesh) else {
                         continue;
                     };
                     profile!("bind + draw command - terrain mesh");
@@ -187,10 +185,10 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        terrain_meshes: &TerrainMeshes,
-        shadow_chunks: &Vec<IVec2>,
+        chunks: &LoadedChunks,
+        shadow_chunks: &[IVec2],
     ) {
-        if terrain_meshes.is_empty() {
+        if chunks.is_empty() {
             return;
         }
 
@@ -222,7 +220,7 @@ impl TerrainRenderSystem {
             );
 
             for coord in shadow_chunks {
-                let Some(mesh) = terrain_meshes.get(coord) else {
+                let Some(mesh) = chunks.get(coord).map(|c| &c.mesh) else {
                     continue;
                 };
                 mesh.bind(command_buffer);

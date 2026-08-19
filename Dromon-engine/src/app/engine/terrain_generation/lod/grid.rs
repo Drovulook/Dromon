@@ -78,7 +78,9 @@ impl LodGrid {
         };
         for i in 0..grid.coords.len() {
             let c = grid.coords[i];
-            let idx = grid.index(c).expect("coord dans sa propre boîte englobante");
+            let idx = grid
+                .index(c)
+                .expect("coord dans sa propre boîte englobante");
             grid.cells[idx] = Some(Cell::default());
         }
         grid
@@ -169,7 +171,9 @@ impl LodGrid {
             for i in 0..self.coords.len() {
                 let c = self.coords[i];
                 let Some(idx) = self.index(c) else { continue };
-                let Some(mine) = self.cells[idx] else { continue };
+                let Some(mine) = self.cells[idx] else {
+                    continue;
+                };
                 let limit = Face::ALL
                     .iter()
                     .filter_map(|f| self.cell(c + f.offset()))
@@ -177,10 +181,7 @@ impl LodGrid {
                     .min()
                     .unwrap_or(mine.lod);
                 if mine.lod > limit {
-                    self.cells[idx] = Some(Cell {
-                        lod: limit,
-                        ..mine
-                    });
+                    self.cells[idx] = Some(Cell { lod: limit, ..mine });
                     changed = true;
                 }
             }

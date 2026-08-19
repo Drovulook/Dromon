@@ -1,6 +1,4 @@
-use crate::app::engine::terrain_generation::ChunkManager;
-use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ISO_LEVEL};
-use crate::app::engine::terrain_generation::generation::DensityField;
+use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ISO_LEVEL, TerrainSnapshot};
 use crate::app::engine::terrain_generation::lod::Face;
 use crate::app::engine::terrain_generation::lod::grid::LodGrid;
 use crate::app::engine::terrain_generation::lod::transition_cells::add_transition_cells;
@@ -46,11 +44,11 @@ pub const NORMAL_RADIUS: i32 = 5;
 /// la surface (Marching Cubes) plus le fond et, aux bords du monde, les parois
 /// latérales qui ferment le volume (cf. [`add_mesh_borders`]).
 ///
-/// Les deux entrées sont **en lecture seule et sans état** : `manager` porte le relief
+/// Les deux entrées sont **en lecture seule et sans état** : `terrain` porte le relief
 /// (immuable), `lods` la configuration de niveaux du lot en cours. C'est ce qui permet
 /// d'appeler cette fonction depuis un thread de fond pendant que la caméra bouge — le
 /// lot maille contre la grille qu'on lui a passée, pas contre la plus récente.
-pub fn mesh_chunk(manager: &ChunkManager, lods: &LodGrid, coord: IVec2) -> MeshData {
+pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> MeshData {
     profile!();
     let n = CHUNK_SIZE as i32;
     let origin_x = coord.x * n;
@@ -63,7 +61,7 @@ pub fn mesh_chunk(manager: &ChunkManager, lods: &LodGrid, coord: IVec2) -> MeshD
 
     // Champ de densité échantillonnable sur la région du chunk. L'apron vaut le rayon
     // des normales : le stencil de différences ne débordera jamais du pré-échantillon.
-    let field = manager.density_field(coord, NORMAL_RADIUS);
+    let field = terrain.density_field(coord, NORMAL_RADIUS);
 
     // Tranche verticale à mailler, fournie par le champ : hors d'elle, tout est plein
     // (dessous) ou vide (dessus). Se resserre automatiquement autour de la surface —
@@ -238,10 +236,10 @@ pub fn mesh_chunk(manager: &ChunkManager, lods: &LodGrid, coord: IVec2) -> MeshD
 #[cfg(test)]
 mod tests {
     use crate::GenParams;
-    use crate::app::engine::terrain_generation::ChunkManager;
-    use crate::app::engine::terrain_generation::chunk::CHUNK_SIZE;
+    use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ChunkStore, TerrainSource};
     use crate::app::engine::terrain_generation::lod::Face;
     use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
+    use std::sync::Arc;
 
     use super::*;
 
@@ -263,14 +261,13 @@ mod tests {
     /// la surface et le fond à `WORLD_FLOOR`.
     fn stitched_pair() -> (Vec<TerrainVertex>, Vec<TerrainVertex>) {
         let (fine, coarse) = (IVec2::new(0, 0), IVec2::new(1, 0));
-        let mut manager = ChunkManager::new(GenParams::default());
-        manager.generate_chunk(fine);
-        manager.generate_chunk(coarse);
+        let source = Arc::new(TerrainSource::new(GenParams::default()));
+        let terrain = TerrainSnapshot::new(&source, &ChunkStore::default());
         let lods = lod_grid(&[(fine, 0), (coarse, 1)]);
 
         (
-            mesh_chunk(&manager, &lods, fine).vertices,
-            mesh_chunk(&manager, &lods, coarse).vertices,
+            mesh_chunk(&terrain, &lods, fine).vertices,
+            mesh_chunk(&terrain, &lods, coarse).vertices,
         )
     }
 

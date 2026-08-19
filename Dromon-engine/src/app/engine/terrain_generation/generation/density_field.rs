@@ -11,7 +11,7 @@ use crate::profile;
 use super::height_field::HeightField;
 use super::material::{classify_solid, material_color};
 use glam::{IVec2, IVec3, Vec3};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Vue échantillonnable du champ 3D sur la **région d'un chunk** (plus une marge
 /// « apron » pour les normales). Construite le temps d'un maillage.
@@ -30,8 +30,13 @@ use std::collections::HashMap;
 pub struct DensityField<'a> {
     /// Générateur du relief (fBm 2D). Sert aussi au choix des matériaux (couleur).
     height: &'a HeightField,
-    /// Overlay épars des densités **modifiées** (creuser/remblayer), prioritaire.
-    edits: &'a HashMap<IVec3, f32>,
+    /// Édits couvrant la région (chunk + apron), en coordonnées monde. Fusionnés une
+    /// fois à la construction par [`TerrainSnapshot::density_field`] : ne contient que
+    /// ce que cette région peut échantillonner, donc vide dans l'immense majorité des
+    /// chunks — ce qui garde le court-circuit de [`DensityField::sample`] armé.
+    ///
+    /// [`TerrainSnapshot::density_field`]: super::super::chunk::TerrainSnapshot::density_field
+    edits: FxHashMap<IVec3, f32>,
     /// Coin `(x, y)` monde du chunk (avant apron).
     origin_x: i32,
     origin_y: i32,
@@ -53,7 +58,7 @@ impl<'a> DensityField<'a> {
     /// ce que le mailleur échantillonne au-delà des bords (le rayon des normales).
     pub fn new(
         height: &'a HeightField,
-        edits: &'a HashMap<IVec3, f32>,
+        edits: FxHashMap<IVec3, f32>,
         coord: IVec2,
         apron: i32,
     ) -> DensityField<'a> {
@@ -154,8 +159,10 @@ impl<'a> DensityField<'a> {
     /// `- cave_strength * self.height.cave_noise(wx, wy, wz)`.
     #[inline]
     pub fn sample(&self, wx: i32, wy: i32, wz: i32) -> f32 {
-        // Court-circuit tant qu'aucune édition : évite de hacher une clé pour rien
-        // (chemin ultra-chaud, appelé des millions de fois au maillage).
+        // Court-circuit tant qu'aucune édition **dans cette région** : évite de hacher
+        // une clé pour rien sur un chemin appelé ~1,3 million de fois par chunk. Le test
+        // était autrefois global — un seul trou creusé dans le monde le désarmait
+        // partout, et rechargeait tout le maillage d'un hachage par échantillon.
         if !self.edits.is_empty() {
             if let Some(&d) = self.edits.get(&IVec3::new(wx, wy, wz)) {
                 return d;
