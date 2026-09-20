@@ -14,6 +14,7 @@ struct VSOutput {
   float3 worldNormal; // normale monde, interpolée pour l'éclairage lisse
   float3 color;       // couleur interpolée entre les sommets par le rasterizer
   float4 shadowCoord;
+  float viewDist;
 }
 
 [shader("vertex")]
@@ -26,6 +27,7 @@ VSOutput terrainVertMain(VSInput input) {
   output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
   output.color = input.inColor;
   output.shadowCoord = mul(ubo.lightViewProj, worldPos);
+  output.viewDist = length(mul(ubo.view, worldPos).xyz);
   return output;
 }
 
@@ -61,6 +63,9 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
   float3 ambient = float3(0.28, 0.32, 0.40);
   float3 color = material * (ambient + lightCol * NdotL * shadow);
+  // appliquer le brouillard (à distance)
+  float fog = 1.0 - exp(-vertIn.viewDist * ubo.fog.w);
+  color = lerp(color, ubo.fog.rgb, fog);
 
   return float4(color, 1.0);
 }

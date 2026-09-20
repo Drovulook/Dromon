@@ -1,6 +1,7 @@
 use crate::app::engine::renderer::{Frame, Renderer, image_layout_state::ImageLayoutState};
 use crate::profile;
 use ash::vk;
+use glam::Vec3;
 
 impl Renderer {
     /// Enregistre la passe d'ombre dans le command buffer : on rend la scène en
@@ -80,7 +81,7 @@ impl Renderer {
         );
     }
 
-    pub(super) fn record_render_pass(&self, frame: &Frame, image_index: u32) {
+    pub(super) fn record_render_pass(&self, frame: &Frame, image_index: u32, clear_color: Vec3) {
         profile!();
         self.context.transition_image_layout(
             frame.command_buffer,
@@ -118,7 +119,7 @@ impl Renderer {
                 self.swapchain.color_image_views[image_index as usize],
                 self.swapchain.depth_image_view,
                 vk::ClearColorValue {
-                    float32: [0.0015, 0.0, 0.0015, 1.0],
+                    float32: clear_color.extend(1.0).to_array(),
                 },
                 vk::Rect2D::default().extent(self.swapchain.extent),
             );

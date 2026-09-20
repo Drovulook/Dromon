@@ -19,6 +19,7 @@ struct UniformBufferObject {
     // occupe que 12
     light_direction: Vec4,
     light_color: Vec4,
+    fog: Vec4,
 }
 
 pub struct UniformBuffer {
@@ -56,6 +57,8 @@ impl UniformBuffer {
         light_direction: Vec3,
         light_color: Vec3,
         light_intensity: f32,
+        sky_color: Vec3,
+        fog_density: f32,
     ) {
         profile!();
         let ubo = UniformBufferObject {
@@ -64,6 +67,7 @@ impl UniformBuffer {
             light_view_proj,
             light_direction: light_direction.extend(0.0),
             light_color: light_color.extend(light_intensity),
+            fog: sky_color.extend(fog_density),
         };
 
         unsafe {

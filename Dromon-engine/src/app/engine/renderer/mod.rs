@@ -1,3 +1,4 @@
+mod atmosphere;
 mod buffer;
 mod camera;
 mod descriptors;
@@ -294,6 +295,8 @@ impl Renderer {
                 self.world.light.direction,
                 self.world.light.color,
                 self.world.light.intensity,
+                self.world.atmosphere.sky_color,
+                self.world.atmosphere.fog_density,
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent
@@ -315,7 +318,7 @@ impl Renderer {
                 let _gpu =
                     self.gpu_profiler
                         .scope(frame.command_buffer, self.frame_index, "render pass");
-                self.record_render_pass(frame, image_index);
+                self.record_render_pass(frame, image_index, self.world.atmosphere.sky_color);
             }
 
             drop(gpu_frame);

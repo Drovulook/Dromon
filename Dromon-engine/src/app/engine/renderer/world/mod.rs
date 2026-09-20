@@ -5,6 +5,7 @@ use ash::vk;
 use std::sync::Arc;
 
 use crate::app::engine::inputs::InputState;
+use crate::app::engine::renderer::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::terrain::Terrain;
 use crate::app::{
     engine::{
@@ -29,6 +30,7 @@ pub struct World {
     pub render_objects: Vec<RenderObject>,
     pub camera: Camera,
     pub light: DirectionalLight,
+    pub atmosphere: Atmosphere,
     /// Le terrain vivant. `None` tant que la scène n'a pas appelé
     /// [`World::generate_terrain`] — une scène n'est pas obligée d'en avoir un.
     pub(crate) terrain: Option<Terrain>,
@@ -66,6 +68,10 @@ impl World {
                 // Défaut « petite scène » : boîte fixe à l'origine. `generate_terrain`
                 // bascule en mode terrain si la scène crée un terrain.
                 shadow: ShadowConfig::default(),
+            },
+            atmosphere: Atmosphere {
+                sky_color: glam::Vec3::new(0.4, 0.6, 0.8),
+                fog_density: 0.0002,
             },
             terrain: None,
             context,

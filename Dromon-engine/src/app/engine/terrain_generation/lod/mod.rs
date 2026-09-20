@@ -23,7 +23,7 @@ pub const MAX_LOD: u8 = 4;
 
 /// Rayons (unités monde) des anneaux, mesurés depuis le point focal. `RADII[k]` est la
 /// distance à partir de laquelle on passe du niveau `k` au niveau `k + 1`.
-const RADII: [f32; MAX_LOD as usize] = [350.0, 700.0, 1300.0, 2400.0];
+const RADII: [f32; MAX_LOD as usize] = [600.0, 1000.0, 1500.0, 2400.0];
 
 /// Demi-largeur relative de la **bande morte** de l'hystérésis. Un chunk pile sur une
 /// frontière d'anneau oscillerait sinon entre deux niveaux et se ferait re-mailler en

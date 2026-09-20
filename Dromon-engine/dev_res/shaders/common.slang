@@ -7,6 +7,7 @@ struct UniformBuffer {
     float4x4 lightViewProj; // view*proj de la lumière (projection orthographique)
     float4 lightDirection;  // xyz = direction de propagation des rayons
     float4 lightColor;      // rgb = couleur, w = intensité
+    float4 fog;
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;
