@@ -4,10 +4,12 @@
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
+    float4 cameraPosition;
     float4x4 lightViewProj; // view*proj de la lumière (projection orthographique)
     float4 lightDirection;  // xyz = direction de propagation des rayons
     float4 lightColor;      // rgb = couleur, w = intensité
     float4 fog;
+    float4 fogParams;
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;
@@ -63,4 +65,23 @@ float computeShadow(float4 shadowCoord, float NdotL) {
     }
   }
   return sum / 25; // moyenne des 9 échantillons
+}
+
+// Épaisseur optique entre la caméra et le fragment, atmosphère exponentielle.
+float opticalDepth(float3 camPos, float3 worldPos, float sigma0, float H) {
+  float3 v = worldPos - camPos;
+  float d  = length(v);
+  float dz = v.z;
+  float eCam = exp(-camPos.z / H);
+  // Rayon quasi horizontal : la formule dégénère en 0/0 → densité constante.
+  if (abs(dz) < 1e-3) return sigma0 * d * eCam;
+  return sigma0 * H * (d / dz) * (eCam - exp(-worldPos.z / H));
+}
+
+// le brouillard est teinté par le soleil, selon la direction; fonction Henyey-Greenstein
+float3 fogSunTint(float3 V, float3 L, float3 sunCol, float g) {
+  float cosT = dot(V, L);
+  float denom = 1.0 + g*g - 2.0*g*cosT;
+  float hg = (1.0 - g*g) / (denom * sqrt(denom)); // pic ≈ 18.9, creux ≈ 0.10
+  return sunCol * hg * 0.03;        // 0.03 = le bouton de réglage
 }

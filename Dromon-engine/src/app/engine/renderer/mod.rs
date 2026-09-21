@@ -289,6 +289,7 @@ impl Renderer {
             frame.uniform_buffer.update(
                 self.world.camera.view,
                 self.world.camera.proj,
+                self.world.camera.position,
                 self.world
                     .light
                     .view_proj(self.world.camera.position, self.world.camera.front()),
@@ -297,6 +298,8 @@ impl Renderer {
                 self.world.light.intensity,
                 self.world.atmosphere.sky_color,
                 self.world.atmosphere.fog_density,
+                self.world.atmosphere.fog_scale_height,
+                self.world.atmosphere.fog_anisotropy,
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent

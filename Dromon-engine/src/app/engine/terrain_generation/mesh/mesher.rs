@@ -38,7 +38,7 @@ pub const WORLD_FLOOR: i32 = 0;
 /// `k = 1..=NORMAL_RADIUS`. Plus grand = normale lissée sur une zone plus large
 /// (éclairage doux, moins d'aliasing sur les pentes). Dimensionne aussi l'« apron »
 /// que le champ de densité doit pré-échantillonner autour du chunk.
-pub const NORMAL_RADIUS: i32 = 5;
+pub const NORMAL_RADIUS: i32 = 3;
 
 /// Construit le mesh d'un chunk en coordonnées monde (`model` = identité au draw) :
 /// la surface (Marching Cubes) plus le fond et, aux bords du monde, les parois

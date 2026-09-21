@@ -11,10 +11,10 @@ struct VSInput {
 
 struct VSOutput {
   float4 pos : SV_Position;
+  float3 worldPos;
   float3 worldNormal; // normale monde, interpolée pour l'éclairage lisse
   float3 color;       // couleur interpolée entre les sommets par le rasterizer
   float4 shadowCoord;
-  float viewDist;
 }
 
 [shader("vertex")]
@@ -27,7 +27,7 @@ VSOutput terrainVertMain(VSInput input) {
   output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
   output.color = input.inColor;
   output.shadowCoord = mul(ubo.lightViewProj, worldPos);
-  output.viewDist = length(mul(ubo.view, worldPos).xyz);
+  output.worldPos = worldPos.xyz;
   return output;
 }
 
@@ -63,9 +63,19 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
   float3 ambient = float3(0.28, 0.32, 0.40);
   float3 color = material * (ambient + lightCol * NdotL * shadow);
+  
   // appliquer le brouillard (à distance)
-  float fog = 1.0 - exp(-vertIn.viewDist * ubo.fog.w);
-  color = lerp(color, ubo.fog.rgb, fog);
+  float tau = opticalDepth(
+    ubo.cameraPosition.xyz, vertIn.worldPos,
+    ubo.fog.w, ubo.fogParams.x);
+  float fog = 1.0 - exp(-tau);
+
+  // Couleur du brouillard = ciel + halo solaire. Le halo est DANS la couleur du
+  // brouillard, donc pondéré par `fog` : sans air entre l'œil et le fragment, pas
+  // de diffusion, donc pas de halo.
+  float3 V = normalize(vertIn.worldPos - ubo.cameraPosition.xyz);
+  float3 fogCol = ubo.fog.rgb + fogSunTint(V, L, lightCol, ubo.fogParams.y);
+  color = lerp(color, fogCol, fog);
 
   return float4(color, 1.0);
 }

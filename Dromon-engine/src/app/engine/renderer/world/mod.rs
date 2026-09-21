@@ -71,7 +71,9 @@ impl World {
             },
             atmosphere: Atmosphere {
                 sky_color: glam::Vec3::new(0.4, 0.6, 0.8),
-                fog_density: 0.0002,
+                fog_density: 0.00035,
+                fog_scale_height: 700.0,
+                fog_anisotropy: 0.7,
             },
             terrain: None,
             context,

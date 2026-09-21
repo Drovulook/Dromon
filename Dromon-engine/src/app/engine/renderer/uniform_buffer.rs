@@ -12,6 +12,7 @@ use std::sync::Arc;
 struct UniformBufferObject {
     view: Mat4,
     proj: Mat4,
+    camera_position: Vec4, // w inutilisé (pour l'instant)
     // Matrice « view*proj » de la lumière (projection orthographique depuis le
     // soleil).
     light_view_proj: Mat4,
@@ -19,7 +20,8 @@ struct UniformBufferObject {
     // occupe que 12
     light_direction: Vec4,
     light_color: Vec4,
-    fog: Vec4,
+    fog: Vec4,        // xyz = couleur du ciel, w =  σ₀
+    fog_params: Vec4, // x = H, y= fog_anisotropy, zw inutilisés (pour l'instant)
 }
 
 pub struct UniformBuffer {
@@ -53,21 +55,26 @@ impl UniformBuffer {
         &self,
         view: Mat4,
         proj: Mat4,
+        camera_position: Vec3,
         light_view_proj: Mat4,
         light_direction: Vec3,
         light_color: Vec3,
         light_intensity: f32,
         sky_color: Vec3,
         fog_density: f32,
+        fog_scale_height: f32,
+        fog_anisotropy: f32,
     ) {
         profile!();
         let ubo = UniformBufferObject {
             view,
             proj,
+            camera_position: camera_position.extend(1.0),
             light_view_proj,
             light_direction: light_direction.extend(0.0),
             light_color: light_color.extend(light_intensity),
             fog: sky_color.extend(fog_density),
+            fog_params: Vec4::new(fog_scale_height, fog_anisotropy, 0.0, 0.0),
         };
 
         unsafe {
