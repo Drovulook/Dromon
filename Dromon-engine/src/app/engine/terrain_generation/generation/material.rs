@@ -42,14 +42,14 @@ pub fn material_color(material: u16) -> Vec3 {
 
 // ─── Bordures verticales des biomes de surface ───────────────────────────────
 /// Altitude (surface monde) de la bordure herbe → neige : au-dessus, neige.
-pub const SNOW_BORDER: f64 = 150.0;
+pub const SNOW_BORDER: f64 = 300.0;
 /// Altitude de la bordure sable → herbe : en-dessous, sable.
 pub const SAND_BORDER: f64 = 10.0;
 /// Largeur (en voxels d'altitude) de la bande de transition centrée sur chaque
 /// bordure. Sur cette bande, les deux matériaux voisins se mélangent. `0` =
 /// frontière nette. Doit rester inférieure à l'écart entre deux bordures pour
 /// que trois biomes ne se chevauchent jamais.
-pub const BLEND_WIDTH: f64 = 6.0;
+pub const BLEND_WIDTH: f64 = 4.0;
 
 /// Profondeur (en voxels sous la surface) de la couche de surface — au-dessous,
 /// c'est de la terre puis de la roche.

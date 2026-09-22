@@ -57,6 +57,6 @@ impl Frustum {
         let size = CHUNK_SIZE as f32;
         let height = CHUNK_HEIGHT as f32;
         let min = Vec3::new(coord.x as f32 * size, coord.y as f32 * size, 0.0);
-        (min, min + Vec3::new(size, size, 256.0))
+        (min, min + Vec3::new(size, size, CHUNK_HEIGHT as f32))
     }
 }

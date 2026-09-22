@@ -12,15 +12,16 @@ impl Scene for Physis {
                 seed: 20,
                 height: HeightParams {
                     base_height: 26.0,
-                    amplitude: 220.0, // base + amplitude = 220 < CHUNK_HEIGHT (256) :
+                    amplitude: 480.0, // base + amplitude = 506 < CHUNK_HEIGHT (512) :
                     // même la crête la plus vive reste sous le plafond du monde voxel
-                    frequency: 0.0017,
+                    frequency: 0.00065,
                     octaves: 7,
-                    lacunarity: 2.0,
-                    gain: 0.5,
-                    erosion: 0.6,           // creuse les vallées sans tout lisser
-                    ridge: 0.80,            // arêtes vives → aspect montagne escarpée
+                    lacunarity: 2.15, // !! doit être non entière pour éviter l'alignement des octaves
+                    gain: 0.5,        // la renormalisation rend `ridge` neutre en amplitude
+                    erosion: 0.4,     // creuse les vallées sans tout lisser
+                    ridge: 0.80,      // arêtes vives → aspect montagne escarpée
                     lowland_flatness: 0.75, // plaines douces, détail réservé à l'altitude
+                    ridge_altitude: 0.8, // arêtes vives en altitude, vallées arrondies
                 },
             },
             80,

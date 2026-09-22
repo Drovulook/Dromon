@@ -200,7 +200,7 @@ impl<'a> DensityField<'a> {
     ///
     /// [`relief_interp`]: DensityField::relief_interp
     pub fn surface_color(&self, p: Vec3) -> Vec3 {
-        let mat_alt = p.z as f64 + self.height.material_jitter(p.x as f64, p.y as f64, 20.0);
+        let mat_alt = p.z as f64 + self.height.material_jitter(p.x as f64, p.y as f64, 40.0);
         blend(classify_solid(0.0, mat_alt))
     }
 

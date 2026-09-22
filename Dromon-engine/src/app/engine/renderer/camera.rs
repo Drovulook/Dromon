@@ -2,6 +2,7 @@ use glam::{Mat4, Vec3};
 use winit::keyboard::KeyCode;
 
 use crate::app::engine::inputs::InputState;
+use crate::app::engine::terrain_generation::CHUNK_HEIGHT;
 use crate::app::engine::timer::Timer;
 use crate::profile;
 
@@ -33,7 +34,7 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         let mut camera = Self {
-            position: Vec3::new(2.0, 2.0, 260.0),
+            position: Vec3::new(0.0, 0.0, (CHUNK_HEIGHT as f32) * 1.1),
             yaw: 0.0,
             pitch: 0.0,
             fov_y: 45.0_f32.to_radians(),

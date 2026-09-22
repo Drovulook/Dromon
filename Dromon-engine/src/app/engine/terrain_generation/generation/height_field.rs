@@ -20,7 +20,7 @@
 //! jour où l'on voudra un bruit dérivable analytiquement, seul
 //! [`HeightField::noise_with_grad`] sera à remplacer.
 
-use noise::{NoiseFn, Perlin};
+use noise::{NoiseFn, SuperSimplex};
 
 use crate::app::engine::terrain_generation::utils::smootherstep;
 
@@ -36,6 +36,7 @@ pub struct HeightParams {
     /// Nombre d'octaves (couches de détail superposées).
     pub octaves: usize,
     /// Multiplicateur de fréquence entre deux octaves (typiquement ~2.0).
+    /// !!! ATTENTION : `lacunarity` doit être non-entière pour éviter un alignement des octaves
     pub lacunarity: f64,
     /// Multiplicateur d'amplitude entre deux octaves, dans `]0, 1[` (la
     /// « persistence » : ~0.5 donne un relief équilibré).
@@ -51,6 +52,10 @@ pub struct HeightParams {
     /// même rugosité partout ; `1.0` = le détail fin et les arêtes ne sont ajoutés
     /// qu'en altitude, les vallées restent douces et peu pentues (plus réaliste).
     pub lowland_flatness: f64,
+    /// Modulation du `ridge` par l'altitude `[0, 1]`. `0.0` = même mélange partout ;
+    /// `1.0` = arêtes vives réservées aux hauteurs, vallées entièrement arrondies.
+    /// L'amplitude du relief, elle, ne bouge pas (cf. [`value_std`]).
+    pub ridge_altitude: f64,
 }
 
 impl Default for HeightParams {
@@ -65,22 +70,41 @@ impl Default for HeightParams {
             erosion: 1.0,
             ridge: 0.0,
             lowland_flatness: 0.0,
+            ridge_altitude: 0.0,
         }
     }
+}
+
+// Décalage propre à chaque octave : les réseaux ne coïncident plus.
+const OCT_OFF: [f64; 8] = [0.0, 137.3, 411.9, 79.1, 263.5, 521.7, 191.3, 347.9];
+
+/// Écart-type de `value = (1−r)·n + r·(1−|n|)`, en forme fermée :
+/// `Cov[n, |n|] = 0` (fonction impaire, distribution symétrique) → les variances
+/// s'additionnent. Constantes mesurées sur SuperSimplex 2D.
+fn value_std(r: f64) -> f64 {
+    const SD_N: f64 = 0.4196; // écart-type de n
+    const SD_A: f64 = 0.2227; // écart-type de |n|
+    (((1.0 - r) * SD_N).powi(2) + (r * SD_A).powi(2)).sqrt()
+}
+
+/// Moyenne de `value`. `E[n] = 0` → seule la part ridged compte, linéaire en `r`.
+fn value_mean(r: f64) -> f64 {
+    const MEAN_A: f64 = 0.6444; // E[1 − |n|]
+    MEAN_A * r
 }
 
 /// Source de bruit + paramètres. Calcule une altitude continue, fonction des
 /// seules coordonnées **monde** — donc identique des deux côtés d'une couture de
 /// chunk (maillage sans fissure).
 pub struct HeightField {
-    noise: Perlin,
+    noise: SuperSimplex,
     params: HeightParams,
 }
 
 impl HeightField {
     pub fn new(seed: u32, params: HeightParams) -> HeightField {
         HeightField {
-            noise: Perlin::new(seed),
+            noise: SuperSimplex::new(seed),
             params,
         }
     }
@@ -105,10 +129,14 @@ impl HeightField {
         // Rugosité de l'octave courante (effet multifractal). Pleine (1.0) pour
         // l'octave macro ; ajustée ensuite selon l'altitude de cette octave de base.
         let mut roughness = 1.0;
+        // Facteur d'altitude ∈ [0,1] déduit de l'octave macro : 0 en vallée, 1 en
+        // hauteur. Pilote `roughness` ET le mélange ridged.
+        let mut alt = 1.0;
 
         for i in 0..self.params.octaves {
             // Bruit et son gradient à la fréquence courante.
-            let (n, dx, dy) = self.noise_with_grad(wx * freq, wy * freq);
+            let o = OCT_OFF[i % 8];
+            let (n, dx, dy) = self.noise_with_grad(wx * freq + o, wy * freq + o * 1.7);
 
             // Règle de la chaîne : la dérivée par rapport au MONDE est celle par
             // rapport à l'argument du bruit, multipliée par la fréquence (car
@@ -128,18 +156,9 @@ impl HeightField {
             // (`base_height`) — pas de creux négatifs qui passeraient sous z=0.
             // On interpole entre bruit doux (`n`) et ridged selon `ridge`.
             let ridged = 1.0 - n.abs();
-            let value = n + (ridged - n) * self.params.ridge;
-
-            // Contribution pondérée par la rugosité (réduite en plaine). `norm`
-            // accumule l'amplitude PLEINE (sans rugosité) : ainsi atténuer une
-            // octave réduit réellement le relief des basses terres (plus plates),
-            // au lieu d'être « rattrapé » par la normalisation.
-            sum += amp * value * erode * roughness;
-            norm += amp;
-
-            // L'octave macro (i == 0) donne l'altitude grossière. On en déduit la
-            // rugosité des octaves suivantes : faible en vallée (détail/pentes
-            // gommés), pleine en altitude. `lowland_flatness` dose l'effet.
+            // L'octave macro (i == 0) donne l'altitude grossière, d'où l'on tire
+            // `alt`. Calculée sur le mélange PLEIN : la valeur modulée dépend de
+            // `alt`, on tournerait en rond.
             if i == 0 {
                 // Altitude grossière, PERTURBÉE par une octave de bruit décorrélée
                 // (offset spatial) avant le seuil de rugosité. Sans cette
@@ -148,19 +167,47 @@ impl HeightField {
                 // devient une « ligne » nette dans le paysage, pile aux iso-valeurs
                 // `edge0`/`edge1` du smoothstep. Le jitter déchiquette cette
                 // frontière → transition naturelle, sans contour visible. (Il ne
-                // touche QUE la modulation de rugosité, pas la géométrie : `sum`
-                // n'en dépend pas.)
+                // touche QUE la modulation, pas la géométrie : `sum` n'en dépend pas.)
                 const CONTROL_OFFSET: f64 = 2048.0;
                 const CONTROL_JITTER: f64 = 0.18;
                 let j = self
                     .noise
                     .get([(wx + CONTROL_OFFSET) * freq, (wy + CONTROL_OFFSET) * freq]);
-                let macro_alt = (value * erode + j * CONTROL_JITTER).clamp(0.0, 1.0);
+                let nominal = n + (ridged - n) * self.params.ridge;
+                let macro_alt = (nominal * erode + j * CONTROL_JITTER).clamp(0.0, 1.0);
                 // smootherstep (C2) plutôt que smoothstep (C1) : pas de saut de
                 // courbure aux seuils → on évite aussi le liseré d'éclairage (bande
                 // de Mach) qui trahissait les bornes.
-                let r = smootherstep(0.25, 0.6, macro_alt);
-                roughness = (1.0 - self.params.lowland_flatness) + self.params.lowland_flatness * r;
+                alt = smootherstep(0.25, 0.6, macro_alt);
+            }
+
+            // Mélange EFFECTIF : `ridge` plein en altitude, arrondi en vallée. Même
+            // valeur à toutes les octaves — c'est l'altitude, et non l'échelle, qui
+            // décide de l'angularité.
+            let r_eff = self.params.ridge
+                * ((1.0 - self.params.ridge_altitude) + self.params.ridge_altitude * alt);
+            let raw = n + (ridged - n) * r_eff;
+
+            // Renormalisation : `raw` reprend la moyenne et l'écart-type qu'il aurait
+            // eus avec `ridge` plein, donc la modulation change la FORME sans toucher
+            // à l'amplitude. ⚠ sans ça, arrondir les vallées y AUGMENTERAIT le relief
+            // (|n| varie deux fois moins que n) et toute la calibration dériverait.
+            let value = (raw - value_mean(r_eff))
+                * (value_std(self.params.ridge) / value_std(r_eff))
+                + value_mean(self.params.ridge);
+
+            // Contribution pondérée par la rugosité (réduite en plaine). `norm`
+            // accumule l'amplitude PLEINE (sans rugosité) : ainsi atténuer une
+            // octave réduit réellement le relief des basses terres (plus plates),
+            // au lieu d'être « rattrapé » par la normalisation.
+            sum += amp * value * erode * roughness;
+            norm += amp;
+
+            // Rugosité des octaves suivantes : faible en vallée (détail et pentes
+            // gommés), pleine en altitude. `lowland_flatness` dose l'effet.
+            if i == 0 {
+                roughness =
+                    (1.0 - self.params.lowland_flatness) + self.params.lowland_flatness * alt;
             }
 
             amp *= self.params.gain;
