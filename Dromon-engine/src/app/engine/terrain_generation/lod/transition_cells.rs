@@ -281,7 +281,7 @@ fn transition_vertex(
     let color = if DEBUG_TRANSITION_COLOR {
         Vec3::new(1.0, 0.0, 1.0)
     } else {
-        cached_color(surface_colors, p_field, |q| field.surface_color(q))
+        cached_color(surface_colors, p_field, |q| field.surface_color(q, normal))
     };
     let idx = vertices.len() as u32;
     vertices.push(TerrainVertex {

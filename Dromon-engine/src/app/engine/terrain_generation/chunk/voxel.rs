@@ -1,9 +1,8 @@
 use crate::app::engine::terrain_generation::generation::material::MATERIAL_AIR;
 
 /// Composition d'un point de terrain : jusqu'à 4 **matériaux** dominants mélangés.
-/// Sert au choix du matériau de surface (cf. [`super::material::classify_solid`])
-/// et au calcul de couleur au maillage.
-
+/// Produit par le pipeline de matériaux (cf. `generation::material::evaluate`), sert
+/// au calcul de couleur au maillage.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Voxel {
     pub materials: [u16; 4],
@@ -16,14 +15,6 @@ impl Voxel {
         materials: [MATERIAL_AIR; 4],
         weights: [0; 4],
     };
-
-    /// Matériau unique (poids plein sur le premier canal).
-    pub fn solid(material: u16) -> Voxel {
-        Voxel {
-            materials: [material, MATERIAL_AIR, MATERIAL_AIR, MATERIAL_AIR],
-            weights: [255, 0, 0, 0],
-        }
-    }
 }
 
 impl Default for Voxel {

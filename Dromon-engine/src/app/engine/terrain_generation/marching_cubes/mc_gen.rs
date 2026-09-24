@@ -77,7 +77,7 @@ pub fn edge_vertex(
     let p = shrink.apply(p_field);
 
     let normal = vertex_normal(field, normal_cache, p_field);
-    let color = cached_color(surface_colors, p_field, |q| field.surface_color(q));
+    let color = cached_color(surface_colors, p_field, |q| field.surface_color(q, normal));
     let idx = vertices.len() as u32;
     vertices.push(TerrainVertex {
         pos: p,

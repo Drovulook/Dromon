@@ -19,10 +19,20 @@
 //! octave qu'un fBm nu, mais ça marche avec n'importe quelle source de bruit. Le
 //! jour où l'on voudra un bruit dérivable analytiquement, seul
 //! [`HeightField::noise_with_grad`] sera à remplacer.
+//!
+//! ## Non-stationnarité
+//! Un fBm seul a les mêmes statistiques partout (même relief à l'infini). Deux
+//! ajouts, appliqués dans [`HeightField::height`] :
+//! - **carte de massifs** : bruit très basse fréquence, tranché par `smoothstep`,
+//!   qui module l'amplitude (plaine ↔ massif) ;
+//! - **domain warping** : l'octave macro (et la carte de massifs) est évaluée en
+//!   `p + w(p)`, `w` étant un petit champ de déplacement bruité → chaînes pliées
+//!   et allongées, vallées qui serpentent (cf. <https://iquilezles.org/articles/warp/>).
+//!   Les octaves fines restent non déformées pour garder un grain isotrope.
 
 use noise::{NoiseFn, SuperSimplex};
 
-use crate::app::engine::terrain_generation::utils::smootherstep;
+use crate::app::engine::terrain_generation::utils::{smootherstep, smoothstep};
 
 /// Paramètres du champ d'altitude. Regroupe le contrôle du fBm et de l'érosion.
 #[derive(Clone, Copy)]
@@ -42,7 +52,8 @@ pub struct HeightParams {
     /// « persistence » : ~0.5 donne un relief équilibré).
     pub gain: f64,
     /// Force de l'érosion `k`. `0.0` = fBm classique sans érosion ; plus grand =
-    /// vallées plus creusées et crêtes plus marquées.
+    /// vallées plus creusées et crêtes plus marquées. Indépendante de `frequency`
+    /// et de `amplitude` (gradient pris dans l'espace du bruit).
     pub erosion: f64,
     /// Mélange `[0, 1]` entre bruit doux et bruit « ridged ». `0.0` = collines
     /// arrondies (fBm classique) ; `1.0` = arêtes vives (`1 − |bruit|`), aspect
@@ -56,6 +67,26 @@ pub struct HeightParams {
     /// `1.0` = arêtes vives réservées aux hauteurs, vallées entièrement arrondies.
     /// L'amplitude du relief, elle, ne bouge pas (cf. [`value_std`]).
     pub ridge_altitude: f64,
+    /// Arrondi des arêtes ridged, en unités de bruit (`0.0` = arête vive). Largeur
+    /// en voxels = `ridge_smoothness / freq` : large aux grandes octaves (plus
+    /// d'arête-lame kilométrique), négligeable aux fines. ~0.05.
+    pub ridge_smoothness: f64,
+
+    /// Fréquence de la carte de massifs. Longueur d'onde (`1/f`) de quelques fois
+    /// celle de l'octave de base, mais inférieure à la taille du monde.
+    pub massif_frequency: f64,
+    /// Bande `smoothstep` appliquée au bruit de massifs (∈ ~`[-1, 1]`) : sous
+    /// `massif_low` plaine, au-dessus de `massif_high` massif. Étroite = régions
+    /// tranchées ; large = gradient mou.
+    pub massif_low: f64,
+    pub massif_high: f64,
+    /// Facteur d'amplitude en plaine `[0, 1]`. `1.0` = carte de massifs désactivée.
+    pub massif_min: f64,
+    /// Fréquence du champ de déplacement du domain warping (~`frequency`).
+    pub warp_frequency: f64,
+    /// Déplacement maximal en voxels. `0.0` = warping désactivé. Trop fort (≫ la
+    /// longueur d'onde de base) → aspect marbre tourbillonnant.
+    pub warp_amplitude: f64,
 }
 
 impl Default for HeightParams {
@@ -71,12 +102,23 @@ impl Default for HeightParams {
             ridge: 0.0,
             lowland_flatness: 0.0,
             ridge_altitude: 0.0,
+            ridge_smoothness: 0.0,
+            massif_frequency: 0.002,
+            massif_low: -0.1,
+            massif_high: 0.2,
+            massif_min: 1.0,
+            warp_frequency: 0.02,
+            warp_amplitude: 0.0,
         }
     }
 }
 
 // Décalage propre à chaque octave : les réseaux ne coïncident plus.
 const OCT_OFF: [f64; 8] = [0.0, 137.3, 411.9, 79.1, 263.5, 521.7, 191.3, 347.9];
+// Décalages (espace bruit) des champs auxiliaires, décorrélés des octaves.
+const MASSIF_OFF: f64 = 877.3;
+const WARP_OFF_X: f64 = 311.7;
+const WARP_OFF_Y: f64 = 653.1;
 
 /// Écart-type de `value = (1−r)·n + r·(1−|n|)`, en forme fermée :
 /// `Cov[n, |n|] = 0` (fonction impaire, distribution symétrique) → les variances
@@ -116,11 +158,53 @@ impl HeightField {
     /// octave. C'est l'unique source de vérité de la hauteur du terrain.
     pub fn height(&self, wx: f64, wy: f64) -> f64 {
         // profile!(); pas possible (rayon)
-        self.params.base_height + self.fbm_eroded(wx, wy) * self.params.amplitude
+        let warped = self.warp(wx, wy);
+        let m = self.massif(warped.0, warped.1);
+        let min = self.params.massif_min;
+        let amp_factor = min + (1.0 - min) * m;
+        self.params.base_height
+            + self.fbm_eroded(wx, wy, warped, m) * self.params.amplitude * amp_factor
     }
 
-    /// fBm érodé, normalisé dans ~`[-1, 1]`.
-    fn fbm_eroded(&self, wx: f64, wy: f64) -> f64 {
+    /// Coordonnées déformées `p + w(p)` (domain warping). Deux bruits décorrélés
+    /// donnent le déplacement en x et en y.
+    fn warp(&self, wx: f64, wy: f64) -> (f64, f64) {
+        let a = self.params.warp_amplitude;
+        if a == 0.0 {
+            return (wx, wy);
+        }
+        let f = self.params.warp_frequency;
+        let dx = self.noise.get([wx * f + WARP_OFF_X, wy * f + WARP_OFF_X]);
+        let dy = self.noise.get([wx * f + WARP_OFF_Y, wy * f + WARP_OFF_Y]);
+        (wx + dx * a, wy + dy * a)
+    }
+
+    /// Carte de massifs `m ∈ [0, 1]` : 0 = plaine, 1 = massif (1 si désactivée).
+    fn massif(&self, wx: f64, wy: f64) -> f64 {
+        if self.params.massif_min >= 1.0 {
+            return 1.0;
+        }
+        let f = self.params.massif_frequency;
+        let n = self.noise.get([wx * f + MASSIF_OFF, wy * f + MASSIF_OFF]);
+        smoothstep(self.params.massif_low, self.params.massif_high, n)
+    }
+
+    /// Cosinus de la pente **moyenne** du relief sur un voisinage de rayon `r` autour
+    /// de `(wx, wy)`, par différences centrées d'écart `2r`. Une différence de hauteurs
+    /// sur `[x−r, x+r]` vaut la moyenne de la pente locale sur ce segment : les bosses
+    /// plus étroites que `2r` s'annulent, seules les grandes pentes restent.
+    pub fn macro_up(&self, wx: f64, wy: f64, r: f64) -> f64 {
+        let gx = (self.height(wx + r, wy) - self.height(wx - r, wy)) / (2.0 * r);
+        let gy = (self.height(wx, wy + r) - self.height(wx, wy - r)) / (2.0 * r);
+        // ‖∇h‖ = tan θ → cos θ = 1 / √(1 + tan² θ), comparable à `normal.z`.
+        1.0 / (1.0 + gx * gx + gy * gy).sqrt()
+    }
+
+    /// fBm érodé, normalisé dans ~`[-1, 1]`. L'octave macro est évaluée en `warped`
+    /// (forme des chaînes pliée), les suivantes en `(wx, wy)` : warper les octaves
+    /// fines les étire en stries parallèles. `massif` (carte de massifs) plafonne
+    /// `alt` : en plaine, pas de rugosité ni d'arêtes de haute montagne.
+    fn fbm_eroded(&self, wx: f64, wy: f64, warped: (f64, f64), massif: f64) -> f64 {
         let mut freq = self.params.frequency;
         let mut amp = 1.0;
         let mut sum = 0.0; // hauteur accumulée
@@ -136,13 +220,15 @@ impl HeightField {
         for i in 0..self.params.octaves {
             // Bruit et son gradient à la fréquence courante.
             let o = OCT_OFF[i % 8];
-            let (n, dx, dy) = self.noise_with_grad(wx * freq + o, wy * freq + o * 1.7);
+            let (px, py) = if i == 0 { warped } else { (wx, wy) };
+            let (n, dx, dy) = self.noise_with_grad(px * freq + o, py * freq + o * 1.7);
 
-            // Règle de la chaîne : la dérivée par rapport au MONDE est celle par
-            // rapport à l'argument du bruit, multipliée par la fréquence (car
-            // l'argument vaut `w * freq`). On accumule sur toutes les octaves.
-            grad[0] += dx * freq;
-            grad[1] += dy * freq;
+            // Gradient dans l'espace du BRUIT (sans `× freq`), comme chez Quilez :
+            // chaque octave pèse O(1), quelle que soit l'échelle du monde. La dérivée
+            // monde rendait `erosion` dépendante de `frequency` (quasi nulle aux
+            // basses fréquences).
+            grad[0] += dx;
+            grad[1] += dy;
 
             // Atténuation : ‖grad‖ grand (pente déjà raide) → facteur proche de 0,
             // l'octave n'ajoute presque rien. C'est le cœur de l'érosion.
@@ -155,7 +241,10 @@ impl HeightField {
             // donc le terrain ne fait que MONTER depuis le plancher de vallée
             // (`base_height`) — pas de creux négatifs qui passeraient sous z=0.
             // On interpole entre bruit doux (`n`) et ridged selon `ridge`.
-            let ridged = 1.0 - n.abs();
+            // `|n|` adouci (`√(n² + ε²) − ε`) : arrondit l'arête sur ~ε en unités de
+            // bruit, donc proportionnellement à la longueur d'onde de l'octave.
+            let eps = self.params.ridge_smoothness;
+            let ridged = 1.0 - ((n * n + eps * eps).sqrt() - eps);
             // L'octave macro (i == 0) donne l'altitude grossière, d'où l'on tire
             // `alt`. Calculée sur le mélange PLEIN : la valeur modulée dépend de
             // `alt`, on tournerait en rond.
@@ -178,7 +267,9 @@ impl HeightField {
                 // smootherstep (C2) plutôt que smoothstep (C1) : pas de saut de
                 // courbure aux seuils → on évite aussi le liseré d'éclairage (bande
                 // de Mach) qui trahissait les bornes.
-                alt = smootherstep(0.25, 0.6, macro_alt);
+                // × massif : `macro_alt` ignore la baisse d'amplitude en plaine, une
+                // colline s'y croirait en haute montagne.
+                alt = smootherstep(0.25, 0.6, macro_alt) * massif;
             }
 
             // Mélange EFFECTIF : `ridge` plein en altitude, arrondi en vallée. Même

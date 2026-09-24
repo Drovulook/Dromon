@@ -9,7 +9,10 @@ use crate::app::engine::terrain_generation::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Vo
 use crate::profile;
 
 use super::height_field::HeightField;
-use super::material::{classify_solid, material_color};
+use super::material::{
+    MACRO_SLOPE_RADIUS, MaterialQuery, SURFACE_JITTER_AMP, VOLUME_JITTER_AMP, evaluate,
+    material_color,
+};
 use glam::{IVec2, IVec3, Vec3};
 use rustc_hash::FxHashMap;
 
@@ -185,7 +188,8 @@ impl<'a> DensityField<'a> {
         (self.z_min, self.z_max)
     }
 
-    /// Couleur d'un sommet d'**iso-surface** : le biome de surface à son altitude.
+    /// Couleur d'un sommet d'**iso-surface** de normale `normal` : matériau de surface à
+    /// son altitude et selon sa pente.
     ///
     /// Sa profondeur sous le toit vaut zéro *par construction* — on ne la mesure donc
     /// pas. La mesurer serait même faux : le mailleur pose le sommet sur la corde
@@ -195,13 +199,20 @@ impl<'a> DensityField<'a> {
     /// en terre — d'où les étoiles marron isolées au loin (un seul sommet fautif
     /// colorie tout son 1-ring par interpolation de Gouraud).
     ///
-    /// L'altitude de biome vient de `p.z` lui-même : sur l'iso-surface c'est le relief,
+    /// L'altitude testée vient de `p.z` lui-même : sur l'iso-surface c'est le relief,
     /// en moins cher et sans écart de résolution.
     ///
     /// [`relief_interp`]: DensityField::relief_interp
-    pub fn surface_color(&self, p: Vec3) -> Vec3 {
-        let mat_alt = p.z as f64 + self.height.material_jitter(p.x as f64, p.y as f64, 40.0);
-        blend(classify_solid(0.0, mat_alt))
+    pub fn surface_color(&self, p: Vec3, normal: Vec3) -> Vec3 {
+        let (wx, wy) = (p.x as f64, p.y as f64);
+        let jitter = self.height.material_jitter(wx, wy, SURFACE_JITTER_AMP);
+        blend(evaluate(&MaterialQuery {
+            pos: p,
+            depth: 0.0,
+            mat_alt: p.z as f64 + jitter,
+            normal: Some(normal),
+            macro_up: Some(self.height.macro_up(wx, wy, MACRO_SLOPE_RADIUS)),
+        }))
     }
 
     /// Couleur d'un point **de volume** en `p` (coordonnées monde flottantes) : matériau
@@ -213,9 +224,14 @@ impl<'a> DensityField<'a> {
     /// soit le LOD. Pour un sommet d'iso-surface, prendre [`DensityField::surface_color`].
     pub fn volume_color(&self, p: Vec3) -> Vec3 {
         let surface = self.relief_interp(p.x as f64, p.y as f64) as f64;
-        let depth = surface - p.z as f64;
-        let mat_alt = surface + self.height.material_jitter(p.x as f64, p.y as f64, 20.0);
-        blend(classify_solid(depth, mat_alt))
+        let jitter = self.height.material_jitter(p.x as f64, p.y as f64, VOLUME_JITTER_AMP);
+        blend(evaluate(&MaterialQuery {
+            pos: p,
+            depth: surface - p.z as f64,
+            mat_alt: surface + jitter,
+            normal: None,
+            macro_up: None,
+        }))
     }
 }
 
