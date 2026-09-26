@@ -1,3 +1,5 @@
+pub(crate) mod atmosphere;
+pub(crate) mod light;
 pub(crate) mod terrain;
 
 use anyhow::Result;
@@ -5,14 +7,14 @@ use ash::vk;
 use std::sync::Arc;
 
 use crate::app::engine::inputs::InputState;
-use crate::app::engine::renderer::atmosphere::Atmosphere;
+use crate::app::engine::renderer::world::atmosphere::Atmosphere;
+use crate::app::engine::renderer::world::light::{DirectionalLight, ShadowConfig};
 use crate::app::engine::renderer::world::terrain::Terrain;
 use crate::app::{
     engine::{
         renderer::{
             camera::Camera,
             descriptors::DescriptorHandler,
-            light::{DirectionalLight, ShadowConfig},
             render_resources::{RenderObject, RenderResourceManager},
         },
         rendering_context::RenderingContext,
@@ -83,11 +85,8 @@ impl World {
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
         profile!();
-        self.rrm.initialize(command_buffer)?;
-        if let Some(terrain) = self.terrain.as_ref() {
-            terrain.initialize(command_buffer);
-        }
-        Ok(())
+        // Pas de terrain ici : ses meshes arrivent au fil des frames (`update_terrain`).
+        self.rrm.initialize(command_buffer)
     }
 
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use glam::{IVec2, Vec2, Vec3};
-use rayon::prelude::*;
 use std::sync::Arc;
 
 use crate::{
@@ -8,17 +7,19 @@ use crate::{
     app::{
         engine::{
             renderer::{
-                light::ShadowConfig,
-                render_resources::{MeshData, TerrainMesh},
-                world::terrain::{
-                    Terrain, culling::VisibleSet, graveyard::Graveyard, mesh_key,
-                    meshes::LoadedChunks,
+                render_resources::MeshData,
+                world::{
+                    light::ShadowConfig,
+                    terrain::{
+                        INITIAL_LOAD_BUDGET, Terrain, culling::VisibleSet, graveyard::Graveyard,
+                        mesh_job::MeshJob, meshes::LoadedChunks,
+                    },
                 },
             },
             rendering_context::RenderingContext,
             terrain_generation::{
                 CHUNK_SIZE, ChunkStore, LodFocus, LodGrid, LodUpdater, MAX_LOD, MeshCache,
-                TerrainSnapshot, TerrainSource, chunk_distance, mesh_chunk, static_lod,
+                TerrainSnapshot, TerrainSource, chunk_distance, static_lod,
             },
         },
         logger::Logger,
@@ -55,7 +56,8 @@ impl World {
 
 impl Terrain {
     /// Génère un **disque** de chunks de terrain de rayon `radius_chunks` (exprimé en
-    /// chunks) centré sur l'origine du monde, et construit un mesh par chunk non vide.
+    /// chunks) centré sur l'origine du monde, et lance son maillage en fond : le terrain
+    /// rend la main vide, ses meshes apparaissent au fil des frames suivantes.
     ///
     /// Disque plutôt que carré : la distance au bord du monde ne dépend plus de la
     /// direction. À nombre de chunks égal, un carré ne garantit que `0,89 · r` dans les
@@ -102,51 +104,35 @@ impl Terrain {
         let mut grid = LodGrid::new(coords.clone());
         grid.set_raw_lods(|coord, _| static_lod(coord, focus));
         grid.rebalance();
+        let grid = Arc::new(grid);
 
         // Vue figée du terrain pour ce lot : le relief plus les édits du moment (aucun
         // ici, mais la génération initiale suit le même chemin que le re-maillage).
         let store = ChunkStore::default();
         let snapshot = TerrainSnapshot::new(&source, &store);
 
-        // Meshing en parallèle : chaque chunk est indépendant et `mesh_chunk` ne lit que
-        //    des références partagées (sûr entre threads). Rayon répartit les milliers de
-        //    chunks sur tous les cœurs par vol de travail.
-        let meshed: Vec<(IVec2, MeshData)> = {
-            profile!("mesh chunks (parallel)");
-            coords
-                .par_iter()
-                .map(|&coord| (coord, mesh_chunk(&snapshot, &grid, coord)))
-                .collect()
-        };
-
-        log_terrain_stats(&logger, &grid, &meshed);
-
-        // Upload GPU séquentiel : `TerrainMesh::new` touche le contexte Vulkan et
-        //    renvoie un `Result` — on le garde hors du parallélisme. On saute les chunks
-        //    **vides** (buffer de taille 0 interdit par Vulkan), mais on les met quand
-        //    même au cache : ça évite de les re-mailler pour rien.
+        // Aucun maillage ici : le monde se construit en fond, frame après frame, pendant
+        //    que le jeu tourne. Du plus proche au plus lointain de la caméra, pour que le
+        //    terrain apparaisse en cercles concentriques autour du joueur.
+        let eye = camera_position.truncate();
+        coords.sort_by(|&a, &b| chunk_distance(a, eye).total_cmp(&chunk_distance(b, eye)));
         let mut mesh_cache = MeshCache::default();
-        let mut chunks = LoadedChunks::new();
-        {
-            profile!("upload terrain meshes");
-            for (coord, data) in meshed {
-                let data = Arc::new(data);
-                mesh_cache.insert(mesh_key(&grid, coord), data.clone());
-                if data.is_empty() {
-                    continue;
-                }
-                chunks.insert(coord, TerrainMesh::new(context.clone(), data)?);
-            }
-        }
+        let initial_load = MeshJob::start_initial_load(
+            grid.clone(),
+            coords,
+            &mut mesh_cache,
+            snapshot,
+            INITIAL_LOAD_BUDGET,
+        );
 
         Ok(Terrain {
             source,
             store,
-            chunks,
+            chunks: LoadedChunks::new(),
             lod_updater: LodUpdater::new(grid, focus),
             reference_z,
             mesh_cache,
-            mesh_job: None,
+            mesh_job: Some(initial_load),
             pending_uploads: Vec::new(),
             graveyard: Graveyard::new(frames_in_flight),
             visible: VisibleSet::default(),
@@ -162,7 +148,11 @@ impl Terrain {
 /// avg(L0)/16 (la nappe est 2D : doubler le pas quadruple l'aire couverte par cellule).
 /// Un peu au-dessus du ÷4 idéal en pratique — le quad de fond et les parois de bord ne
 /// rétrécissent pas.
-fn log_terrain_stats(logger: &Logger, grid: &LodGrid, meshed: &[(IVec2, MeshData)]) {
+pub(super) fn log_terrain_stats(
+    logger: &Logger,
+    grid: &LodGrid,
+    meshed: &[(IVec2, Arc<MeshData>)],
+) {
     let mut chunks_per = [0usize; MAX_LOD as usize + 1];
     let mut verts_per = [0usize; MAX_LOD as usize + 1];
     for (coord, data) in meshed {

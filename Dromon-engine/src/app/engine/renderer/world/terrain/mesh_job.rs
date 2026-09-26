@@ -1,12 +1,12 @@
 use anyhow::Result;
 use glam::IVec2;
-use rayon::prelude::*;
 use std::{
     sync::{
         Arc,
-        mpsc::{Receiver, TryRecvError, channel},
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{Receiver, Sender, TryRecvError, channel},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -33,6 +33,10 @@ use crate::{
 /// reste cohérent avec l'ancienne configuration. Afficher un LOD périmé ~20 frames est
 /// invisible ; une fissure ne l'est pas.
 ///
+/// Exception : le **chargement initial** ([`MeshJob::initial_load`]) est progressif.
+/// Tous ses chunks sont maillés contre la même grille et aucun ancien mesh n'existe, donc
+/// deux chunks installés sont toujours cohérents entre eux.
+///
 /// ## Trois phases, dont deux étalées dans le temps
 /// ```text
 /// 1. mailler       → threads rayon, hors frame                (2–10 ms/chunk)
@@ -47,7 +51,7 @@ use crate::{
 /// l'atomicité reste intacte, seule la latence du lot augmente de quelques frames.
 ///
 /// La phase 3 est la seule à toucher l'état du terrain : elle est donc restée sur
-/// [`Terrain`](super::Terrain), qui consomme le lot via [`MeshJob::into_built`].
+/// [`Terrain`](super::Terrain), qui consomme le lot via [`MeshJob::take_built`].
 pub struct MeshJob {
     /// Résultats des workers rayon. Se déconnecte quand tous ont fini.
     receiver: Receiver<(IVec2, MeshData)>,
@@ -65,14 +69,17 @@ pub struct MeshJob {
     grid: Arc<LodGrid>,
     /// Chunks confiés aux workers ; le reste du lot venait du cache.
     meshed_count: usize,
+    /// Installer au fil de l'eau plutôt qu'en bloc (chargement initial uniquement).
+    progressive: bool,
+    /// Temps de construction de buffers autorisé par frame.
+    budget: Duration,
+    /// Soumission du lot, pour mesurer sa durée totale.
+    started: Instant,
 }
 
 impl MeshJob {
     /// Demande une nouvelle configuration LOD à `updater` et, si elle change quelque
     /// chose, soumet le lot correspondant. `None` = rien à mailler.
-    ///
-    /// Le partage entre cache et maillage se fait ici, à la soumission : un hit économise
-    /// 2–10 ms de maillage contre ~50 µs de ré-upload.
     pub(super) fn start(
         updater: &mut LodUpdater,
         cache: &mut MeshCache,
@@ -80,11 +87,45 @@ impl MeshJob {
         focus: LodFocus,
     ) -> Option<MeshJob> {
         let update = updater.update(focus)?;
-        let grid = update.grid;
+        Some(Self::submit(
+            update.grid,
+            update.dirty,
+            cache,
+            snapshot,
+            false,
+            FRAME_BUDGET,
+        ))
+    }
 
-        let mut gathered = Vec::with_capacity(update.dirty.len());
+    /// Lot du chargement initial : tous les chunks de `grid`, installés **au fil de
+    /// l'eau** dans l'ordre de `coords` (trié du plus proche au plus lointain par
+    /// l'appelant), sous un budget par frame plus large que celui du LOD.
+    pub(super) fn start_initial_load(
+        grid: Arc<LodGrid>,
+        coords: Vec<IVec2>,
+        cache: &mut MeshCache,
+        snapshot: TerrainSnapshot,
+        budget: Duration,
+    ) -> MeshJob {
+        Self::submit(grid, coords, cache, snapshot, true, budget)
+    }
+
+    /// Répartit `dirty` entre cache et workers, et lance ces derniers.
+    ///
+    /// Le partage se fait ici, à la soumission : un hit économise 2–10 ms de maillage
+    /// contre ~50 µs de ré-upload.
+    fn submit(
+        grid: Arc<LodGrid>,
+        dirty: Vec<IVec2>,
+        cache: &mut MeshCache,
+        snapshot: TerrainSnapshot,
+        progressive: bool,
+        budget: Duration,
+    ) -> MeshJob {
+        let started = Instant::now();
+        let mut gathered = Vec::with_capacity(dirty.len());
         let mut todo = Vec::new();
-        for &coord in &update.dirty {
+        for coord in dirty {
             match cache.get(mesh_key(&grid, coord)) {
                 Some(data) => gathered.push((coord, data)),
                 None => todo.push(coord),
@@ -98,18 +139,10 @@ impl MeshJob {
             // collecte qui suit commitera dans cette même frame.
             drop(sender);
         } else {
-            let grid_for_job = grid.clone();
-            // `rayon::spawn` rend la main tout de suite : le `par_iter` s'exécute sur le
-            // pool pendant que le jeu continue d'afficher les anciens meshes.
-            rayon::spawn(move || {
-                todo.into_par_iter().for_each_with(sender, |sender, coord| {
-                    let data = mesh_chunk(&snapshot, &grid_for_job, coord);
-                    let _ = sender.send((coord, data));
-                });
-            });
+            dispatch(todo, snapshot, grid.clone(), sender);
         }
 
-        Some(MeshJob {
+        MeshJob {
             receiver,
             gathered,
             all_meshed: false,
@@ -117,7 +150,10 @@ impl MeshJob {
             built: Vec::new(),
             grid,
             meshed_count,
-        })
+            progressive,
+            budget,
+            started,
+        }
     }
 
     /// Phase 1 : ramasse ce que les workers ont produit depuis la dernière frame.
@@ -138,7 +174,7 @@ impl MeshJob {
     }
 
     /// Phase 2 : bâtit les buffers Vulkan des géométries reçues, **sous budget de temps**
-    /// et sans rien rendre visible. `true` ⇒ le lot est complet et prêt à installer.
+    /// et sans rien rendre visible. `true` ⇒ le lot est complet.
     ///
     /// C'est ici qu'était le pic : 4 allocations Vulkan par chunk × 200 chunks dans une
     /// seule frame donnaient une image de plusieurs centaines de millisecondes.
@@ -148,7 +184,7 @@ impl MeshJob {
         context: &Arc<RenderingContext>,
     ) -> Result<bool> {
         profile!();
-        let deadline = Instant::now() + FRAME_BUDGET;
+        let deadline = Instant::now() + self.budget;
 
         while self.next_build < self.gathered.len() {
             let (coord, data) = self.gathered[self.next_build].clone();
@@ -177,14 +213,59 @@ impl MeshJob {
         Ok(self.all_meshed)
     }
 
+    /// Lot à installer au fil de l'eau plutôt qu'en bloc.
+    pub(super) fn is_progressive(&self) -> bool {
+        self.progressive
+    }
+
+    /// Temps écoulé depuis la soumission du lot.
+    pub(super) fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
     /// Chunks réellement maillés — le complément vient du cache.
     pub(super) fn meshed_count(&self) -> usize {
         self.meshed_count
     }
 
-    /// Rend les meshes bâtis à installer. Ne s'appelle qu'après un `build` ayant
-    /// renvoyé `true` — le lot est alors définitivement complet.
-    pub(super) fn into_built(self) -> Vec<(IVec2, Option<TerrainMesh>)> {
-        self.built
+    /// Géométries du lot, cache compris. Complètes une fois le lot terminé.
+    pub(super) fn gathered(&self) -> &[(IVec2, Arc<MeshData>)] {
+        &self.gathered
     }
+
+    /// Configuration LOD du lot.
+    pub(super) fn grid(&self) -> &LodGrid {
+        &self.grid
+    }
+
+    /// Vide la zone d'attente. Un lot atomique ne s'appelle qu'une fois complet ; un lot
+    /// progressif, à chaque frame.
+    pub(super) fn take_built(&mut self) -> Vec<(IVec2, Option<TerrainMesh>)> {
+        std::mem::take(&mut self.built)
+    }
+}
+
+/// Lance le maillage de `todo` sur tous les threads du pool, **dans l'ordre** de `todo`.
+///
+/// Pas de `par_iter` : son découpage récursif fait voler aux threads inactifs la plus
+/// grosse moitié restante, donc la fin de la liste démarre presque tout de suite. Ici
+/// chaque thread prend le prochain index d'un compteur atomique partagé — une file.
+/// `spawn_broadcast` rend la main aussitôt : le jeu continue de tourner pendant ce temps.
+fn dispatch(
+    todo: Vec<IVec2>,
+    snapshot: TerrainSnapshot,
+    grid: Arc<LodGrid>,
+    sender: Sender<(IVec2, MeshData)>,
+) {
+    let next = AtomicUsize::new(0);
+    rayon::spawn_broadcast(move |_| {
+        // Chaque thread son `Sender` ; l'original meurt avec la closure, après le
+        // dernier thread — c'est ce qui déconnecte le canal.
+        let sender = sender.clone();
+        loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            let Some(&coord) = todo.get(i) else { return };
+            let _ = sender.send((coord, mesh_chunk(&snapshot, &grid, coord)));
+        }
+    });
 }

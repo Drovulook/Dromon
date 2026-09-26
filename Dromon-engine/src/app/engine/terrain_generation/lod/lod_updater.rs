@@ -45,9 +45,9 @@ pub struct LodUpdater {
 impl LodUpdater {
     /// Part d'une grille déjà calculée et du point focal qui l'a produite (typiquement
     /// la position initiale de la caméra, cf. `World::generate_terrain`).
-    pub fn new(grid: LodGrid, focus: LodFocus) -> LodUpdater {
+    pub fn new(grid: Arc<LodGrid>, focus: LodFocus) -> LodUpdater {
         LodUpdater {
-            grid: Arc::new(grid),
+            grid,
             last_focus: focus,
             threshold_sq: MOVE_THRESHOLD * MOVE_THRESHOLD,
         }

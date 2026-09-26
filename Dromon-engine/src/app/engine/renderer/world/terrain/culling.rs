@@ -11,7 +11,7 @@ use glam::IVec2;
 
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::frustum_culling::Frustum;
-use crate::app::engine::renderer::light::DirectionalLight;
+use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::terrain::meshes::LoadedChunks;
 use crate::profile;
 

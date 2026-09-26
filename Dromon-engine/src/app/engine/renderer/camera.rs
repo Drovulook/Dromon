@@ -43,11 +43,11 @@ impl Default for Camera {
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
-            move_speed: 100.0,
+            move_speed: 500.0,
             rotation_sensitivity: 0.002,
             zoom_speed: 0.05,
             boost_factor_rot: 4.0,
-            boost_factor_move: 6.0,
+            boost_factor_move: 4.0,
         };
         // au démarrage, on regarde l'origine (déduit yaw/pitch de la direction)
         camera.look_at(Vec3::ZERO);

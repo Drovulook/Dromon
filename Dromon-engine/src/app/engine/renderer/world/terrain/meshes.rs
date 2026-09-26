@@ -45,10 +45,6 @@ impl LoadedChunks {
         self.chunks.get(coord)
     }
 
-    pub fn values(&self) -> impl Iterator<Item = &LoadedChunk> {
-        self.chunks.values()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.chunks.is_empty()
     }

@@ -11,9 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app::engine::renderer::camera::Camera;
-use crate::app::engine::renderer::light::DirectionalLight;
 use crate::app::engine::renderer::render_resources::TerrainMesh;
+use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
+use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
 use crate::app::engine::renderer::world::terrain::mesh_job::MeshJob;
 use crate::app::engine::renderer::world::terrain::meshes::LoadedChunks;
@@ -35,6 +36,10 @@ use crate::profile;
 /// 1 ms sur les 16 d'une frame à 60 fps : le lot met quelques frames de plus à apparaître,
 /// ce qui ne se voit pas.
 pub(super) const FRAME_BUDGET: Duration = Duration::from_millis(1);
+
+/// Budget de construction par frame pendant le **chargement initial** : des milliers de
+/// meshes à bâtir, et une fluidité moins critique qu'en jeu.
+pub(super) const INITIAL_LOAD_BUDGET: Duration = Duration::from_millis(1);
 
 const LOG_BATCH_STATS: bool = true;
 
@@ -77,13 +82,6 @@ pub struct Terrain {
 }
 
 impl Terrain {
-    /// Enregistre les copies staging → device des meshes du chargement initial.
-    pub fn initialize(&self, command_buffer: &vk::CommandBuffer) {
-        for chunk in self.chunks.values() {
-            chunk.mesh.record_upload(command_buffer);
-        }
-    }
-
     /// **Point d'accroche unique du terrain qui suit la caméra**, appelé une fois par
     /// frame. Aujourd'hui : recalcul du niveau de détail. Demain, au même endroit :
     /// chargement des chunks qui entrent dans la portée et déchargement de ceux qui en
@@ -118,7 +116,8 @@ impl Terrain {
             MeshJob::start(&mut self.lod_updater, &mut self.mesh_cache, snapshot, focus);
     }
 
-    /// Fait avancer le lot en vol d'une frame, et l'installe dès qu'il est complet.
+    /// Fait avancer le lot en vol d'une frame, et l'installe dès qu'il est complet, ou
+    /// au fil de l'eau s'il est progressif.
     ///
     /// Les trois emprunts (`mesh_job`, `mesh_cache`, `context`) portent sur des **champs
     /// distincts** de `self` : le borrow checker les accepte simultanément, ce qu'il
@@ -129,23 +128,39 @@ impl Terrain {
             return Ok(());
         };
         job.collect();
-        if !job.build(&mut self.mesh_cache, &self.context)? {
+        let complete = job.build(&mut self.mesh_cache, &self.context)?;
+        if job.is_progressive() {
+            let built = job.take_built();
+            self.install(built);
+        }
+        if !complete {
             return Ok(());
         }
-        let job = self
+        let mut job = self
             .mesh_job
             .take()
             .expect("présent : `build` vient de signaler le lot complet");
-        let meshed = job.meshed_count();
-        self.install(job.into_built(), meshed);
+        self.install(job.take_built());
+        if job.is_progressive() {
+            self.logger.info(&format!(
+                "Génération du monde terminée : {} chunks en {:.2} s",
+                job.gathered().len(),
+                job.elapsed().as_secs_f32(),
+            ));
+            log_terrain_stats(&self.logger, job.grid(), job.gathered());
+        }
+        self.log_batch_stats(job.gathered().len(), job.meshed_count());
+        self.log_gpu_usage();
         Ok(())
     }
 
-    /// Bascule le lot entier. Ne fait que déplacer des `TerrainMesh` déjà construits —
+    /// Bascule des meshes bâtis. Ne fait que déplacer des `TerrainMesh` déjà construits —
     /// quelques microsecondes, donc sans risque pour la frame.
-    fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>, meshed: usize) {
+    fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>) {
+        if built.is_empty() {
+            return;
+        }
         profile!();
-        let batch = built.len();
         for (coord, mesh) in built {
             match mesh {
                 // Remplacement : `insert` rend l'ancien, la coordonnée ne bouge pas.
@@ -163,8 +178,6 @@ impl Terrain {
                 }
             }
         }
-        self.log_batch_stats(batch, meshed);
-        self.log_gpu_usage();
     }
 
     /// Enregistre les copies staging → device des meshes fraîchement installés.
