@@ -37,8 +37,8 @@ struct Cell {
 }
 
 /// Niveaux de LOD de tous les chunks chargés, sur une grille rectangulaire dont les
-/// cases hors monde valent `None`. Porte donc aussi la **topologie** : « chargé » se lit
-/// ici, et nulle part ailleurs (le mailleur en déduit les bords du monde).
+/// cases hors monde valent `None`. Porte donc aussi la **topologie** : « dans le monde »
+/// se lit ici, et nulle part ailleurs (le mailleur en déduit les bords du monde).
 #[derive(Clone)]
 pub struct LodGrid {
     /// Coin bas-gauche (coordonnées chunk) de la boîte englobante.
@@ -101,11 +101,11 @@ impl LodGrid {
         self.index(c).and_then(|i| self.cells[i])
     }
 
-    /// Le chunk `c` fait-il partie du monde chargé ? **Seul** critère de bord du monde
-    /// pour le mailleur : la forme du monde (disque aujourd'hui, streaming demain) n'est
-    /// décrite nulle part ailleurs que par l'ensemble des cases pleines.
+    /// Le chunk `c` fait-il partie du monde ? **Seul** critère de bord du monde pour le
+    /// mailleur : la forme du monde (un disque) n'est décrite nulle part ailleurs que par
+    /// l'ensemble des cases pleines.
     #[inline]
-    pub fn is_loaded(&self, c: IVec2) -> bool {
+    pub fn in_world(&self, c: IVec2) -> bool {
         self.cell(c).is_some()
     }
 

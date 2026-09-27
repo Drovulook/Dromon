@@ -189,8 +189,8 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // Elles ignorent `shrink` : le bord du monde est le point le plus éloigné du focus,
     // donc uniformément au LOD le plus grossier ⇒ aucun voisin plus grossier, aucune
     // dalle sur ces faces, rien à rétrécir. À revoir si le focus peut s'en approcher.
-    // Une face est au bord du monde si le chunk voisin de ce côté n'est pas chargé.
-    let border_faces = Face::ALL.map(|f| !lods.is_loaded(coord + f.offset()));
+    // Une face est au bord du monde si le chunk voisin de ce côté est hors du monde.
+    let border_faces = Face::ALL.map(|f| !lods.in_world(coord + f.offset()));
     add_mesh_borders(
         &field,
         coord,

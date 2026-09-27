@@ -157,7 +157,7 @@ impl MeshJob {
     }
 
     /// Phase 1 : ramasse ce que les workers ont produit depuis la dernière frame.
-    /// Ne fait qu'accumuler — rien n'est visible avant l'installation.
+    /// Ne fait qu'accumuler; rien n'est visible avant l'installation.
     pub(super) fn collect(&mut self) {
         loop {
             match self.receiver.try_recv() {
@@ -258,10 +258,9 @@ fn dispatch(
     sender: Sender<(IVec2, MeshData)>,
 ) {
     let next = AtomicUsize::new(0);
+    // Tous les threads partagent la closure (donc `sender`) par `&` : `Sender` est `Sync`.
+    // Elle meurt après le dernier thread, emportant le `sender`; ce qui déconnecte le canal.
     rayon::spawn_broadcast(move |_| {
-        // Chaque thread son `Sender` ; l'original meurt avec la closure, après le
-        // dernier thread — c'est ce qui déconnecte le canal.
-        let sender = sender.clone();
         loop {
             let i = next.fetch_add(1, Ordering::Relaxed);
             let Some(&coord) = todo.get(i) else { return };

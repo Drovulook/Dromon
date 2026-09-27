@@ -154,7 +154,7 @@ impl Terrain {
         Ok(())
     }
 
-    /// Bascule des meshes bâtis. Ne fait que déplacer des `TerrainMesh` déjà construits —
+    /// Bascule des meshes bâtis. Ne fait que déplacer des `TerrainMesh` déjà construits;
     /// quelques microsecondes, donc sans risque pour la frame.
     fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>) {
         if built.is_empty() {
@@ -212,14 +212,14 @@ impl Terrain {
         }
     }
 
-    /// Recalcule les chunks visibles — depuis la caméra et depuis la lumière.
+    /// Recalcule les chunks visibles depuis la caméra et depuis la lumière.
     pub fn update_visibility(&mut self, camera: &Camera, light: &DirectionalLight) {
         self.visible.update(&self.chunks, camera, light);
     }
 
     /// Trace de contrôle d'un lot : valide les estimations de charge (combien de chunks
     /// deviennent sales à chaque franchissement de seuil) et donne le taux de réutilisation
-    /// du cache — seule façon de savoir s'il est rentable pour un style de déplacement
+    /// du cache, seule façon de savoir s'il est rentable pour un style de déplacement
     /// donné, la réponse allant de ~0 % en exploration rectiligne à très rentable pour un
     /// joueur qui tourne autour d'une base.
     ///
