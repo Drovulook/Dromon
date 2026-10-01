@@ -163,7 +163,7 @@ impl GpuProfiler {
     }
 
     /// Lit les résultats du slot (frame précédente, complète car le fence est passé),
-    /// calcule les durées et les envoie — au plus une fois toutes les 500 ms.
+    /// calcule les durées et les envoie, au plus une fois toutes les 500 ms.
     pub fn resolve(&self, slot: usize) {
         if !self.supported {
             return;

@@ -7,7 +7,7 @@ use crate::{
     app::engine::{
         renderer::{
             descriptors::DescriptorHandler, render_resources::TerrainVertex,
-            world::terrain::meshes::LoadedChunks,
+            world::terrain::meshes::InstalledChunks,
         },
         rendering_context::RenderingContext,
     },
@@ -105,7 +105,7 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        chunks: &LoadedChunks,
+        chunks: &InstalledChunks,
         visible_chunks: &[IVec2],
     ) {
         if chunks.is_empty() {
@@ -185,7 +185,7 @@ impl TerrainRenderSystem {
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        chunks: &LoadedChunks,
+        chunks: &InstalledChunks,
         shadow_chunks: &[IVec2],
     ) {
         if chunks.is_empty() {

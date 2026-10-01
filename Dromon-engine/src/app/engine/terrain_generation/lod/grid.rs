@@ -1,5 +1,6 @@
-//! **Grille plate des niveaux de LOD** : topologie du monde chargé + niveau de chaque
-//! chunk + masque de coutures. C'est la *configuration* que lit le mailleur.
+//! **Grille plate des niveaux de LOD** : ensemble des chunks chargés + niveau de chaque
+//! chunk + masque de coutures. C'est la *configuration* que lit le mailleur. Recentrée
+//! sur la caméra à chaque lot par le [`ChunkStreamer`](super::super::streaming::ChunkStreamer).
 //!
 //! ## Pourquoi séparée du [`ChunkManager`](super::super::ChunkManager)
 //! Le LOD vivait autrefois sur le `Chunk`, donc dans le manager. Le re-maillage de fond
@@ -37,15 +38,18 @@ struct Cell {
 }
 
 /// Niveaux de LOD de tous les chunks chargés, sur une grille rectangulaire dont les
-/// cases hors monde valent `None`. Porte donc aussi la **topologie** : « dans le monde »
-/// se lit ici, et nulle part ailleurs (le mailleur en déduit les bords du monde).
+/// cases non chargées valent `None`.
+///
+/// ⚠ Ne dit **rien** du bord du monde : un chunk absent peut simplement être hors de la
+/// fenêtre chargée. Le bord du monde se lit dans le
+/// [`WorldDisc`](super::super::chunk::WorldDisc).
 #[derive(Clone)]
 pub struct LodGrid {
     /// Coin bas-gauche (coordonnées chunk) de la boîte englobante.
     min: IVec2,
     /// Dimensions de la boîte englobante, en chunks.
     size: IVec2,
-    /// `size.x · size.y` cases, en ordre ligne par ligne. `None` = hors monde.
+    /// `size.x · size.y` cases, en ordre ligne par ligne. `None` = non chargé.
     cells: Vec<Option<Cell>>,
     /// Les coordonnées chargées, pour itérer sans balayer les trous de la boîte.
     coords: Vec<IVec2>,
@@ -101,15 +105,25 @@ impl LodGrid {
         self.index(c).and_then(|i| self.cells[i])
     }
 
-    /// Le chunk `c` fait-il partie du monde ? **Seul** critère de bord du monde pour le
-    /// mailleur : la forme du monde (un disque) n'est décrite nulle part ailleurs que par
-    /// l'ensemble des cases pleines.
+    /// Le chunk `c` est-il chargé ?
     #[inline]
-    pub fn in_world(&self, c: IVec2) -> bool {
+    pub fn contains(&self, c: IVec2) -> bool {
         self.cell(c).is_some()
     }
 
-    /// Niveau effectif (équilibré) du chunk `c`. **0 si absent** : un chunk hors monde
+    /// Les chunks chargés.
+    pub fn coords(&self) -> &[IVec2] {
+        &self.coords
+    }
+
+    /// Niveau **brut** du chunk `c` (`None` s'il n'est pas chargé) : l'état que relit
+    /// l'hystérésis à la passe suivante.
+    #[inline]
+    pub fn raw(&self, c: IVec2) -> Option<u8> {
+        self.cell(c).map(|x| x.raw)
+    }
+
+    /// Niveau effectif (équilibré) du chunk `c`. **0 si absent** : un chunk non chargé
     /// n'est jamais « plus grossier », donc ne déclenche jamais de fausse couture au bord.
     #[inline]
     pub fn lod(&self, c: IVec2) -> u8 {
@@ -149,7 +163,7 @@ impl LodGrid {
     }
 
     /// Relaxation 2:1 en place : tant qu'un chunk dépasse `voisin + MAX_LOD_STEP`, on le
-    /// ramène à cette borne. Les cases hors monde ne contraignent rien.
+    /// ramène à cette borne. Les cases non chargées ne contraignent rien.
     ///
     /// Converge : abaisser un chunk ne peut créer de violation que chez ses voisins, et
     /// les niveaux ne font que décroître, bornés par 0 ⇒ point fixe en au plus `MAX_LOD`

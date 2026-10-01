@@ -60,8 +60,8 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     let step = 1i32 << lods.lod(coord);
 
     // Champ de densité échantillonnable sur la région du chunk. L'apron vaut le rayon
-    // des normales : le stencil de différences ne débordera jamais du pré-échantillon.
-    let field = terrain.density_field(coord, NORMAL_RADIUS);
+    // des normales : le stencil de différences ne débordera jamais de la région.
+    let field = terrain.density_field(coord, NORMAL_RADIUS, step);
 
     // Tranche verticale à mailler, fournie par le champ : hors d'elle, tout est plein
     // (dessous) ou vide (dessus). Se resserre automatiquement autour de la surface —
@@ -186,11 +186,13 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // et elles se cousent à la surface car leur arête haute est à `z = relief` aux mêmes
     // points entiers que les sommets de bord du maillage MC.
     //
-    // Elles ignorent `shrink` : le bord du monde est le point le plus éloigné du focus,
-    // donc uniformément au LOD le plus grossier ⇒ aucun voisin plus grossier, aucune
-    // dalle sur ces faces, rien à rétrécir. À revoir si le focus peut s'en approcher.
-    // Une face est au bord du monde si le chunk voisin de ce côté est hors du monde.
-    let border_faces = Face::ALL.map(|f| !lods.in_world(coord + f.offset()));
+    // Elles ignorent `shrink` : une face de bord n'a pas de voisin, donc jamais de
+    // dalle. ⚠ Mais la caméra peut désormais approcher du bord : un chunk de bord dont
+    // le voisin intérieur est plus grossier rétrécit ses sommets de coin, pas son mur —
+    // fente possible à ce coin.
+    // Le bord du monde se lit dans le monde, **pas** dans la grille : un voisin non
+    // chargé (bord de la fenêtre de streaming) ne doit pas faire pousser de mur.
+    let border_faces = Face::ALL.map(|f| !terrain.in_world(coord + f.offset()));
     add_mesh_borders(
         &field,
         coord,
@@ -255,13 +257,15 @@ mod tests {
     /// Maille deux chunks voisins de LOD 0 et 1 (le fin à l'ouest) et rend leurs sommets.
     /// Le fin porte donc une face de transition vers l'est, le grossier aucune.
     ///
-    /// La paire est isolée, donc au bord du monde de tous les côtés sauf le plan
-    /// frontière qu'inspectent les tests — celui-ci reste libre de toute paroi (et les
-    /// parois sont de toute façon désactivées, cf. `GENERATE_WORLD_WALLS`). Y demeurent
-    /// la surface et le fond à `WORLD_FLOOR`.
+    /// Le monde englobe largement la paire : aucune paroi, en particulier sur le plan
+    /// frontière qu'inspectent les tests. Y demeurent la surface et le fond à
+    /// `WORLD_FLOOR`.
     fn stitched_pair() -> (Vec<TerrainVertex>, Vec<TerrainVertex>) {
         let (fine, coarse) = (IVec2::new(0, 0), IVec2::new(1, 0));
-        let source = Arc::new(TerrainSource::new(GenParams::default()));
+        let source = Arc::new(TerrainSource::new(GenParams {
+            world_radius: 4,
+            ..GenParams::default()
+        }));
         let terrain = TerrainSnapshot::new(&source, &ChunkStore::default());
         let lods = lod_grid(&[(fine, 0), (coarse, 1)]);
 

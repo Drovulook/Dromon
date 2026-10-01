@@ -4,7 +4,7 @@ mod terrain_source;
 mod voxel;
 
 pub use chunk_store::{ChunkStore, TerrainSnapshot};
-pub use terrain_source::{GenParams, TerrainSource};
+pub use terrain_source::{GenParams, TerrainSource, WorldDisc};
 pub use voxel::Voxel;
 
 /// Côté horizontal d'un chunk en voxels (axes X et Y).

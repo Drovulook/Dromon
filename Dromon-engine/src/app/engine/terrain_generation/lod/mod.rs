@@ -6,11 +6,11 @@
 //! pleine résolution (÷1), LOD1 = ÷4 sommets, LOD2 = ÷16 (la surface est une nappe 2D,
 //! doubler le pas quadruple l'aire couverte par cellule).
 //!
-//! Le résultat de cette politique se range dans une [`grid::LodGrid`] ; c'est
-//! [`lod_updater::LodUpdater`] qui la recalcule quand la caméra a assez bougé.
+//! Le résultat de cette politique se range dans une [`grid::LodGrid`] ; c'est le
+//! [`ChunkStreamer`](super::streaming::ChunkStreamer) qui la recalcule quand la caméra a
+//! assez bougé.
 
 pub mod grid;
-pub mod lod_updater;
 pub mod transition_cells;
 pub mod transition_shrink;
 mod transvoxel_tables;
@@ -37,8 +37,8 @@ const HYSTERESIS: f32 = 0.08;
 const HEIGHT_WEIGHT: f32 = 1.0;
 
 /// Distance **horizontale** (monde) du centre du chunk `coord` au point `focus`. Sert à
-/// décrire la forme du monde chargé (le disque), pas à choisir le LOD — pour ça, cf.
-/// [`LodFocus::distance`].
+/// décrire des disques de chunks (le monde, la fenêtre chargée), pas à choisir le LOD —
+/// pour ça, cf. [`LodFocus::distance`].
 pub fn chunk_distance(coord: IVec2, focus: Vec2) -> f32 {
     let half = CHUNK_SIZE as f32 / 2.0;
     let cx = (coord.x * CHUNK_SIZE as i32) as f32 + half;
@@ -74,7 +74,7 @@ pub struct LodFocus {
 
 impl LodFocus {
     /// Point focal depuis la position caméra. `reference_z` est l'altitude moyenne du
-    /// relief (cf. `ChunkManager::mean_terrain_height`) : c'est le plan par rapport
+    /// relief (cf. `TerrainSource::mean_terrain_height`) : c'est le plan par rapport
     /// auquel on mesure « être haut ».
     ///
     /// Le `max(0.0)` traite le cas « caméra sous la référence » (fond de vallée, sous

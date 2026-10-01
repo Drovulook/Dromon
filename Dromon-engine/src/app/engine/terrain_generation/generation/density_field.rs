@@ -15,6 +15,12 @@ use super::material::{
 };
 use glam::{IVec2, IVec3, Vec3};
 use rustc_hash::FxHashMap;
+use std::cell::Cell;
+
+/// Marge de grille nécessaire à [`DensityField::macro_up`] : un sommet au bord du chunk
+/// lit le relief à `MACRO_SLOPE_RADIUS` au-delà, arrondi à la colonne entière la plus
+/// proche (`+1` couvre l'arrondi vers le haut).
+const MACRO_APRON: i32 = MACRO_SLOPE_RADIUS as i32 + 1;
 
 /// Vue échantillonnable du champ 3D sur la **région d'un chunk** (plus une marge
 /// « apron » pour les normales). Construite le temps d'un maillage.
@@ -27,9 +33,13 @@ use rustc_hash::FxHashMap;
 /// changement.
 ///
 /// ## Optimisation interne (invisible au mailleur)
-/// Le relief ne dépendant que de `(x, y)`, on le **pré-échantillonne** une fois par
-/// colonne sur la région (grille `relief`, une éval. de fBm par colonne) : `sample`
-/// redevient de l'arithmétique, sans hachage. Pur détail d'implémentation.
+/// Le relief ne dépendant que de `(x, y)`, on le **mémoïse** par colonne sur la région
+/// (grille `relief`, une éval. de fBm par colonne) : `sample` redevient de
+/// l'arithmétique, sans hachage.
+///
+/// Mémoïsé **à la demande**, pas pré-calculé : un chunk LOD `k` ne lit qu'une colonne
+/// sur `2^k` par axe (plus le voisinage des sommets pour les normales). Tout calculer
+/// d'avance faisait payer à un chunk LOD 3 le relief d'un LOD 0 (7,3 ms mesurées).
 pub struct DensityField<'a> {
     /// Générateur du relief (fBm 2D). Sert aussi au choix des matériaux (couleur).
     height: &'a HeightField,
@@ -43,74 +53,81 @@ pub struct DensityField<'a> {
     /// Coin `(x, y)` monde du chunk (avant apron).
     origin_x: i32,
     origin_y: i32,
-    /// Marge de pré-échantillonnage autour du chunk (couvre le débordement du mailleur :
-    /// coins de cube +1 et stencil des normales ±rayon).
+    /// Marge de la grille `relief` autour du chunk : couvre le débordement du mailleur
+    /// (coins de cube +1, stencil des normales ±rayon) et celui de
+    /// [`DensityField::macro_up`] (cf. [`MACRO_APRON`]).
     apron: i32,
     /// Côté de la grille `relief` : `CHUNK_SIZE + 2·apron + 1`.
     side: i32,
-    /// Relief pré-échantillonné, indexé `gx * side + gy` (apron compris).
-    relief: Vec<f32>,
+    /// Relief mémoïsé, indexé `gx * side + gy` (apron compris). `NaN` = pas encore
+    /// calculé. `Cell` : rempli depuis `&self`, le champ ne quittant jamais son thread.
+    relief: Vec<Cell<f32>>,
     /// Tranche verticale utile (cf. [`DensityField::vertical_bounds`]).
     z_min: i32,
     z_max: i32,
 }
 
 impl<'a> DensityField<'a> {
-    /// Prépare le champ sur la région du chunk `coord` : pré-échantillonne le relief
-    /// (chunk + `apron`) et calcule les bornes verticales. `apron` doit couvrir tout
-    /// ce que le mailleur échantillonne au-delà des bords (le rayon des normales).
+    /// Prépare le champ sur la région du chunk `coord` et calcule ses bornes verticales.
+    /// `apron` doit couvrir tout ce que le mailleur échantillonne au-delà des bords (le
+    /// rayon des normales) ; `step` est son pas d'échantillonnage (`1 << lod`).
     pub fn new(
         height: &'a HeightField,
         edits: FxHashMap<IVec3, f32>,
         coord: IVec2,
         apron: i32,
+        step: i32,
     ) -> DensityField<'a> {
-        let origin_x = coord.x * CHUNK_SIZE as i32;
-        let origin_y = coord.y * CHUNK_SIZE as i32;
+        // Élargir ne coûte que de la mémoire : les colonnes sont calculées à la lecture.
+        let apron = apron.max(MACRO_APRON);
         let side = CHUNK_SIZE as i32 + 2 * apron + 1;
+        let mut field = DensityField {
+            height,
+            edits,
+            origin_x: coord.x * CHUNK_SIZE as i32,
+            origin_y: coord.y * CHUNK_SIZE as i32,
+            apron,
+            side,
+            relief: vec![Cell::new(f32::NAN); (side * side) as usize],
+            z_min: 0,
+            z_max: 0,
+        };
 
-        // Une éval. de fBm par colonne, réutilisée pour tous les z : c'est ce qui rend
-        // `sample` bon marché dans la boucle chaude.
-        let mut relief = vec![0.0f32; (side * side) as usize];
-        for gx in 0..side {
-            for gy in 0..side {
-                let wx = (origin_x + gx - apron) as f64;
-                let wy = (origin_y + gy - apron) as f64;
-                relief[(gx * side + gy) as usize] = height.height(wx, wy) as f32;
-            }
-        }
-
-        // Bornes verticales, dérivées du champ lui-même : plus petit / plus grand
-        // relief SUR LES COLONNES DU CHUNK (les coins de cube vont de 0 à CHUNK_SIZE
-        // inclus). Sous `z_min` le champ est plein partout, au-dessus de `z_max` il est
-        // vide partout → aucune surface à mailler en dehors de `[z_min, z_max]`.
+        // Bornes verticales, dérivées du champ lui-même : plus petit / plus grand relief
+        // sur les colonnes que le mailleur échantillonne à ce pas (MC et transitions
+        // tombent sur les multiples de `step`, de 0 à CHUNK_SIZE inclus). Sous `z_min`
+        // le champ est plein partout, au-dessus de `z_max` vide partout → aucune surface
+        // à mailler en dehors de `[z_min, z_max]`.
         let mut mn = f32::INFINITY;
         let mut mx = f32::NEG_INFINITY;
-        for gx in apron..=apron + CHUNK_SIZE as i32 {
-            for gy in apron..=apron + CHUNK_SIZE as i32 {
-                let h = relief[(gx * side + gy) as usize];
+        for x in (0..=CHUNK_SIZE as i32).step_by(step as usize) {
+            for y in (0..=CHUNK_SIZE as i32).step_by(step as usize) {
+                let h = field.column(x + apron, y + apron);
                 mn = mn.min(h);
                 mx = mx.max(h);
             }
         }
-        let z_min = (mn.floor() as i32 - 1).max(0);
-        let z_max = (mx.ceil() as i32).min(CHUNK_HEIGHT as i32 - 2);
-
-        DensityField {
-            height,
-            edits,
-            origin_x,
-            origin_y,
-            apron,
-            side,
-            relief,
-            z_min,
-            z_max,
-        }
+        field.z_min = (mn.floor() as i32 - 1).max(0);
+        field.z_max = (mx.ceil() as i32).min(CHUNK_HEIGHT as i32 - 2);
+        field
     }
 
-    /// Relief (sommet de la couche pleine) pré-échantillonné à la colonne monde
-    /// `(wx, wy)`. Détail interne — suppose la colonne dans la région (garanti pour
+    /// Relief de la case `(gx, gy)` de la grille, calculé au premier accès.
+    #[inline]
+    fn column(&self, gx: i32, gy: i32) -> f32 {
+        let cell = &self.relief[(gx * self.side + gy) as usize];
+        let h = cell.get();
+        if !h.is_nan() {
+            return h;
+        }
+        let wx = (self.origin_x + gx - self.apron) as f64;
+        let wy = (self.origin_y + gy - self.apron) as f64;
+        let h = self.height.height(wx, wy) as f32;
+        cell.set(h);
+        h
+    }
+
+    /// Relief (sommet de la couche pleine) à la colonne monde `(wx, wy)`. Détail interne — suppose la colonne dans la région (garanti pour
     /// tout ce que le mailleur échantillonne, cf. `apron`).
     #[inline]
     fn relief(&self, wx: i32, wy: i32) -> f32 {
@@ -120,7 +137,7 @@ impl<'a> DensityField<'a> {
             gx >= 0 && gx < self.side && gy >= 0 && gy < self.side,
             "échantillon hors de la région pré-échantillonnée (apron trop petit ?)"
         );
-        self.relief[(gx * self.side + gy) as usize]
+        self.column(gx, gy)
     }
 
     /// Relief interpolé (bilinéaire) à la colonne monde **flottante** `(wx, wy)` :
@@ -138,10 +155,31 @@ impl<'a> DensityField<'a> {
         let y1 = (y0 + 1).min(self.side - 1);
         let tx = (fx - fx.floor()) as f32;
         let ty = (fy - fy.floor()) as f32;
-        let at = |gx: i32, gy: i32| self.relief[(gx * self.side + gy) as usize];
+        let at = |gx: i32, gy: i32| self.column(gx, gy);
         let h0 = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
         let h1 = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
         h0 + (h1 - h0) * ty
+    }
+
+    /// Cosinus de la pente **moyenne** du relief sur un voisinage de rayon
+    /// [`MACRO_SLOPE_RADIUS`] autour de `(wx, wy)`, par différences centrées d'écart
+    /// `2r`. Une différence de hauteurs sur `[x−r, x+r]` vaut la moyenne de la pente
+    /// locale sur ce segment : les bosses plus étroites que `2r` s'annulent, seules les
+    /// grandes pentes restent.
+    ///
+    /// Lue dans la grille mémoïsée plutôt qu'au fBm : les sommets voisins retombent sur
+    /// les mêmes colonnes. 4 `height()` par sommet coûtaient la moitié d'un chunk LOD 0.
+    ///
+    /// Colonne **arrondie**, pas interpolée : l'interpolation lit 4 colonnes par point,
+    /// soit 16 par sommet — ruineux aux LOD grossiers, où les sommets espacés partagent
+    /// peu de colonnes. 0,5 voxel d'écart sur une pente mesurée à 12 ne se voit pas.
+    fn macro_up(&self, wx: f64, wy: f64) -> f64 {
+        let r = MACRO_SLOPE_RADIUS;
+        let h = |x: f64, y: f64| self.relief(x.round() as i32, y.round() as i32) as f64;
+        let gx = (h(wx + r, wy) - h(wx - r, wy)) / (2.0 * r);
+        let gy = (h(wx, wy + r) - h(wx, wy - r)) / (2.0 * r);
+        // ‖∇h‖ = tan θ → cos θ = 1 / √(1 + tan² θ), comparable à `normal.z`.
+        1.0 / (1.0 + gx * gx + gy * gy).sqrt()
     }
 
     /// Altitude du **toit** du terrain (sommet de la couche pleine) à la colonne
@@ -211,7 +249,8 @@ impl<'a> DensityField<'a> {
             depth: 0.0,
             mat_alt: p.z as f64 + jitter,
             normal: Some(normal),
-            macro_up: Some(self.height.macro_up(wx, wy, MACRO_SLOPE_RADIUS)),
+            macro_up: Some(self.macro_up(wx, wy)),
+            patch_noise: Some(self.height.dirt_patch_noise(wx, wy)),
         }))
     }
 
@@ -231,6 +270,7 @@ impl<'a> DensityField<'a> {
             mat_alt: surface + jitter,
             normal: None,
             macro_up: None,
+            patch_noise: None,
         }))
     }
 }

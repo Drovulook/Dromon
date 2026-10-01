@@ -17,10 +17,11 @@ use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
 use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
 use crate::app::engine::renderer::world::terrain::mesh_job::MeshJob;
-use crate::app::engine::renderer::world::terrain::meshes::LoadedChunks;
+use crate::app::engine::renderer::world::terrain::meshes::InstalledChunks;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::{
-    ChunkStore, LodFocus, LodGrid, LodUpdater, MeshCache, MeshKey, TerrainSnapshot, TerrainSource,
+    ChunkStore, ChunkStreamer, LodFocus, LodGrid, MeshCache, MeshKey, TerrainSnapshot,
+    TerrainSource,
 };
 use crate::app::logger::Logger;
 use crate::profile;
@@ -46,24 +47,24 @@ const LOG_BATCH_STATS: bool = true;
 const LOG_GPU_USAGE: bool = true;
 
 /// **Le terrain vivant** : le relief, ce que le joueur en a modifié, les meshes GPU
-/// chargés, et toute la machinerie qui fait suivre les seconds aux mouvements de caméra.
+/// installés, et toute la machinerie qui fait suivre les seconds aux mouvements de caméra.
 ///
 /// Existe (`World::terrain` est `Some`) dès que la scène a appelé
 /// [`World::generate_terrain`](super::World::generate_terrain), et pas avant. Regrouper
 /// ces champs rend l'invariant structurel : il n'y avait aucun moyen d'avoir un
-/// `LodUpdater` sans relief quand les deux étaient deux `Option` séparées sur `World`.
+/// streamer sans relief quand les deux étaient deux `Option` séparées sur `World`.
 pub struct Terrain {
     /// Le relief procédural. Immuable, partagé en `Arc` avec les threads de maillage.
     source: Arc<TerrainSource>,
     /// Les édits du joueur : la seule donnée du monde qui ne se recalcule pas. Chaque lot
     /// de maillage en emporte un instantané figé plutôt que la version vivante.
     pub store: ChunkStore,
-    /// Un `LoadedChunk` par chunk **non vide**, indexé par coordonnée : c'est ce qui
+    /// Un `InstalledChunk` par chunk **non vide**, indexé par coordonnée : c'est ce qui
     /// permet de remplacer le mesh d'un chunk précis quand son LOD change (un `Vec`
     /// n'avait aucun lien avec les positions, les chunks vides décalant même les index).
-    pub chunks: LoadedChunks,
-    /// Politique de LOD suivant la caméra.
-    lod_updater: LodUpdater,
+    pub chunks: InstalledChunks,
+    /// Chunks chargés et leur LOD, suivant la caméra.
+    streamer: ChunkStreamer,
     /// Altitude moyenne du relief : plan de référence de la composante « hauteur de
     /// caméra » du LOD (cf. [`LodFocus`]).
     reference_z: f32,
@@ -83,13 +84,12 @@ pub struct Terrain {
 
 impl Terrain {
     /// **Point d'accroche unique du terrain qui suit la caméra**, appelé une fois par
-    /// frame. Aujourd'hui : recalcul du niveau de détail. Demain, au même endroit :
-    /// chargement des chunks qui entrent dans la portée et déchargement de ceux qui en
-    /// sortent — le pipeline (calculer une configuration cible → mailler en fond →
-    /// basculer le lot d'un coup) est déjà celui qu'il faudra.
+    /// frame : niveau de détail, chargement des chunks qui entrent dans la portée et
+    /// retrait de ceux qui en sortent — un seul pipeline (calculer une configuration
+    /// cible → mailler en fond → basculer le lot d'un coup).
     ///
     /// Ne fait presque rien la plupart du temps : le premier filtre est une comparaison
-    /// de distances au carré (cf. `LodUpdater::update`).
+    /// de distances au carré (cf. `ChunkStreamer::update`).
     pub fn update(&mut self, camera: &Camera) -> Result<()> {
         profile!();
         self.graveyard.tick();
@@ -112,8 +112,7 @@ impl Terrain {
         // que les workers voient la modification à mi-lot — même garantie que la `grid`.
         let snapshot = TerrainSnapshot::new(&self.source, &self.store);
         let focus = LodFocus::new(camera.position, self.reference_z);
-        self.mesh_job =
-            MeshJob::start(&mut self.lod_updater, &mut self.mesh_cache, snapshot, focus);
+        self.mesh_job = MeshJob::start(&mut self.streamer, &mut self.mesh_cache, snapshot, focus);
     }
 
     /// Fait avancer le lot en vol d'une frame, et l'installe dès qu'il est complet, ou
@@ -149,7 +148,7 @@ impl Terrain {
             ));
             log_terrain_stats(&self.logger, job.grid(), job.gathered());
         }
-        self.log_batch_stats(job.gathered().len(), job.meshed_count());
+        self.log_batch_stats(job.gathered().len(), job.meshed_count(), &job.mesh_report());
         self.log_gpu_usage();
         Ok(())
     }
@@ -225,14 +224,14 @@ impl Terrain {
     ///
     /// Éteinte par défaut : une ligne par lot noie le reste des logs. Basculer
     /// [`LOG_BATCH_STATS`] pour la rallumer.
-    fn log_batch_stats(&self, batch: usize, meshed: usize) {
+    fn log_batch_stats(&self, batch: usize, meshed: usize, mesh_report: &str) {
         if !LOG_BATCH_STATS {
             return;
         }
         let (hits, misses) = self.mesh_cache.stats();
         let (bytes, entries) = self.mesh_cache.usage();
         self.logger.info(&format!(
-            "LOD : {batch} chunks installés ({meshed} maillés, {} repris du cache) — cache {hits}/{} accès, {entries} entrées, {} Mo",
+            "LOD : {batch} chunks installés ({meshed} maillés, {} repris du cache), {mesh_report} — cache {hits}/{} accès, {entries} entrées, {} Mo",
             batch.saturating_sub(meshed),
             hits + misses,
             bytes / (1024 * 1024),

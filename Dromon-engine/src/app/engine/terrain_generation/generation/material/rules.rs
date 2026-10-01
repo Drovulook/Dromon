@@ -31,6 +31,19 @@ const SAND_BORDER: f64 = 10.0;
 /// frontière. Doit rester inférieure à l'écart entre deux frontières.
 const BLEND_WIDTH: f64 = 40.0;
 
+// ─── Plaques de terre ────────────────────────────────────────────────────────
+/// Altitude des premières plaques de terre (rares, petites).
+const PATCH_START: f64 = 350.0;
+/// Altitude où la terre a remplacé toute l'herbe, juste sous la neige.
+const PATCH_FULL: f64 = 600.0;
+/// Demi-largeur (en unités de bruit) du bord adouci d'une plaque.
+const PATCH_EDGE: f64 = 0.12;
+/// Seuil du bruit à `PATCH_START` : au-dessus du bruit presque partout → aucune
+/// plaque, puis les premiers pics émergent en montant.
+const PATCH_THRESHOLD_START: f64 = 1.0 + PATCH_EDGE;
+/// Seuil du bruit à `PATCH_FULL` : sous le bruit partout → terre pleine.
+const PATCH_THRESHOLD_FULL: f64 = -1.0 - PATCH_EDGE;
+
 // ─── Pentes ──────────────────────────────────────────────────────────────────
 // Seuils en cos(pente) : `normal.z` et `macro_up` valent tous deux cos θ.
 // La pente macro est une moyenne, donc plus douce que la pente locale : ses
@@ -74,6 +87,22 @@ fn altitude_cover(mat_alt: f64) -> MaterialMix {
         smoothstep(SNOW_BORDER - half, SNOW_BORDER + half, mat_alt),
     );
     mix
+}
+
+/// Plaques de terre dans l'herbe, d'autant plus étendues que l'altitude est élevée.
+///
+/// Le bruit est un relief imaginaire noyé sous un niveau d'eau (le seuil) : les
+/// plaques sont les îles qui émergent. En montant, le seuil baisse — les îles
+/// grossissent, fusionnent, et à `PATCH_FULL` tout a émergé. Ne convertit que la
+/// part d'**herbe** : sable et neige restent intacts.
+pub(super) fn dirt_patches(q: &MaterialQuery, mix: &mut MaterialMix) {
+    let Some(noise) = q.patch_noise else {
+        return;
+    };
+    let a = ((q.mat_alt - PATCH_START) / (PATCH_FULL - PATCH_START)).clamp(0.0, 1.0);
+    let threshold = PATCH_THRESHOLD_START + (PATCH_THRESHOLD_FULL - PATCH_THRESHOLD_START) * a;
+    let patch = smoothstep(threshold - PATCH_EDGE, threshold + PATCH_EDGE, noise);
+    mix.transfer(MATERIAL_GRASS, MATERIAL_DIRT, patch);
 }
 
 /// Grandes pentes → roche à nu, sauf sur les replats locaux (corniches) où la

@@ -189,17 +189,6 @@ impl HeightField {
         smoothstep(self.params.massif_low, self.params.massif_high, n)
     }
 
-    /// Cosinus de la pente **moyenne** du relief sur un voisinage de rayon `r` autour
-    /// de `(wx, wy)`, par différences centrées d'écart `2r`. Une différence de hauteurs
-    /// sur `[x−r, x+r]` vaut la moyenne de la pente locale sur ce segment : les bosses
-    /// plus étroites que `2r` s'annulent, seules les grandes pentes restent.
-    pub fn macro_up(&self, wx: f64, wy: f64, r: f64) -> f64 {
-        let gx = (self.height(wx + r, wy) - self.height(wx - r, wy)) / (2.0 * r);
-        let gy = (self.height(wx, wy + r) - self.height(wx, wy - r)) / (2.0 * r);
-        // ‖∇h‖ = tan θ → cos θ = 1 / √(1 + tan² θ), comparable à `normal.z`.
-        1.0 / (1.0 + gx * gx + gy * gy).sqrt()
-    }
-
     /// fBm érodé, normalisé dans ~`[-1, 1]`. L'octave macro est évaluée en `warped`
     /// (forme des chaînes pliée), les suivantes en `(wx, wy)` : warper les octaves
     /// fines les étire en stries parallèles. `massif` (carte de massifs) plafonne
@@ -333,6 +322,30 @@ impl HeightField {
         let macro_n = self.noise.get([x * FREQ, y * FREQ]);
         let detail_n = self.noise.get([x * FREQ * 4.0, y * FREQ * 4.0]);
         (macro_n + 0.35 * detail_n) * amp
+    }
+
+    /// Bruit des **plaques de terre**, normalisé dans `[-1, 1]` : la règle de matériau
+    /// le seuille, plus bas en altitude, pour découper des plaques (cf.
+    /// `rules::dirt_patches`). Décorrélé du relief et du jitter par son décalage.
+    ///
+    /// Divisé par la somme des amplitudes : borne garantie, pas seulement typique — un
+    /// seuil ≥ 1 + bord adouci n'émet donc **aucune** plaque. Revers : les extrêmes
+    /// (les deux octaves culminant ensemble) sont rares, l'essentiel tient dans ~±0,6.
+    ///
+    /// Longueur d'onde ~200 voxels : les plaques doivent rester grandes devant
+    /// l'espacement des sommets en LOD 3 (8 voxels), sinon elles apparaissent et
+    /// disparaissent au changement de LOD. L'octave de détail (~75 voxels, ratio non
+    /// entier) dentelle les bords sans créer de petites plaques.
+    pub fn dirt_patch_noise(&self, wx: f64, wy: f64) -> f64 {
+        const OFFSET: f64 = 8192.0;
+        const FREQ: f64 = 0.001;
+        const DETAIL_AMP: f64 = 0.25;
+
+        let x = wx + OFFSET;
+        let y = wy + OFFSET;
+        let macro_n = self.noise.get([x * FREQ, y * FREQ]);
+        let detail_n = self.noise.get([x * FREQ * 2.7, y * FREQ * 2.7]);
+        (macro_n + DETAIL_AMP * detail_n) / (1.0 + DETAIL_AMP)
     }
 
     /// Valeur du bruit + gradient `(∂/∂x, ∂/∂y)` en `(x, y)` (espace bruit), par

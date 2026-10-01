@@ -17,7 +17,7 @@ use crate::{
         },
         rendering_context::RenderingContext,
         terrain_generation::{
-            LodFocus, LodGrid, LodUpdater, MeshCache, TerrainSnapshot, mesh_chunk,
+            ChunkStreamer, LodFocus, LodGrid, MAX_LOD, MeshCache, TerrainSnapshot, mesh_chunk,
         },
     },
     profile,
@@ -54,7 +54,7 @@ use crate::{
 /// [`Terrain`](super::Terrain), qui consomme le lot via [`MeshJob::take_built`].
 pub struct MeshJob {
     /// Résultats des workers rayon. Se déconnecte quand tous ont fini.
-    receiver: Receiver<(IVec2, MeshData)>,
+    receiver: Receiver<Meshed>,
     /// Géométries déjà rassemblées : hits du cache dès la soumission, puis résultats
     /// des workers au fil des frames.
     gathered: Vec<(IVec2, Arc<MeshData>)>,
@@ -63,7 +63,7 @@ pub struct MeshJob {
     /// Index du prochain élément de `gathered` dont il faut bâtir les buffers.
     next_build: usize,
     /// Zone d'attente : buffers déjà bâtis, pas encore visibles. `None` = chunk devenu
-    /// vide (il faudra retirer son mesh sans en installer d'autre).
+    /// vide ou sorti de la fenêtre (il faudra retirer son mesh sans en installer d'autre).
     built: Vec<(IVec2, Option<TerrainMesh>)>,
     /// Configuration LOD contre laquelle ce lot a été maillé.
     grid: Arc<LodGrid>,
@@ -75,26 +75,38 @@ pub struct MeshJob {
     budget: Duration,
     /// Soumission du lot, pour mesurer sa durée totale.
     started: Instant,
+    /// Durée du maillage (soumission → dernier worker fini), une fois connue.
+    meshing_time: Option<Duration>,
+    /// Par LOD : chunks maillés et temps CPU cumulé de `mesh_chunk`.
+    mesh_cost: [(u32, Duration); MAX_LOD as usize + 1],
 }
 
+/// Résultat d'un worker : le chunk, sa géométrie, le temps passé à la mailler.
+type Meshed = (IVec2, MeshData, Duration);
+
 impl MeshJob {
-    /// Demande une nouvelle configuration LOD à `updater` et, si elle change quelque
-    /// chose, soumet le lot correspondant. `None` = rien à mailler.
+    /// Demande une nouvelle configuration (fenêtre + LOD) au `streamer` et, si elle
+    /// change quelque chose, soumet le lot correspondant. `None` = rien à faire.
     pub(super) fn start(
-        updater: &mut LodUpdater,
+        streamer: &mut ChunkStreamer,
         cache: &mut MeshCache,
         snapshot: TerrainSnapshot,
         focus: LodFocus,
     ) -> Option<MeshJob> {
-        let update = updater.update(focus)?;
-        Some(Self::submit(
+        let update = streamer.update(focus)?;
+        let mut job = Self::submit(
             update.grid,
             update.dirty,
             cache,
             snapshot,
             false,
             FRAME_BUDGET,
-        ))
+        );
+        // Les sortants partent avec le lot, pas avant : retirer un chunk change les
+        // coutures de ses voisins, re-maillés dans ce même lot.
+        job.built
+            .extend(update.removed.into_iter().map(|coord| (coord, None)));
+        Some(job)
     }
 
     /// Lot du chargement initial : tous les chunks de `grid`, installés **au fil de
@@ -153,6 +165,8 @@ impl MeshJob {
             progressive,
             budget,
             started,
+            meshing_time: None,
+            mesh_cost: Default::default(),
         }
     }
 
@@ -161,11 +175,19 @@ impl MeshJob {
     pub(super) fn collect(&mut self) {
         loop {
             match self.receiver.try_recv() {
-                Ok((coord, data)) => self.gathered.push((coord, Arc::new(data))),
+                Ok((coord, data, time)) => {
+                    let cost = &mut self.mesh_cost[self.grid.lod(coord) as usize];
+                    cost.0 += 1;
+                    cost.1 += time;
+                    self.gathered.push((coord, Arc::new(data)));
+                }
                 // Rien de neuf pour l'instant ; on repassera à la frame suivante.
                 Err(TryRecvError::Empty) => return,
                 // Tous les workers ont rendu leur `sender` ⇒ plus rien n'arrivera.
                 Err(TryRecvError::Disconnected) => {
+                    if !self.all_meshed {
+                        self.meshing_time = Some(self.started.elapsed());
+                    }
                     self.all_meshed = true;
                     return;
                 }
@@ -223,6 +245,20 @@ impl MeshJob {
         self.started.elapsed()
     }
 
+    /// Bilan du maillage : durée murale, puis coût moyen par chunk pour chaque LOD
+    /// (temps CPU d'un worker — ce qui permet de comparer les niveaux entre eux).
+    pub(super) fn mesh_report(&self) -> String {
+        let wall = self.meshing_time.unwrap_or_default().as_millis();
+        let per_lod: Vec<String> = self
+            .mesh_cost
+            .iter()
+            .enumerate()
+            .filter(|(_, (n, _))| *n > 0)
+            .map(|(lod, (n, t))| format!("L{lod} {} µs ×{n}", t.as_micros() / *n as u128))
+            .collect();
+        format!("maillage {wall} ms [{}]", per_lod.join(", "))
+    }
+
     /// Chunks réellement maillés — le complément vient du cache.
     pub(super) fn meshed_count(&self) -> usize {
         self.meshed_count
@@ -255,7 +291,7 @@ fn dispatch(
     todo: Vec<IVec2>,
     snapshot: TerrainSnapshot,
     grid: Arc<LodGrid>,
-    sender: Sender<(IVec2, MeshData)>,
+    sender: Sender<Meshed>,
 ) {
     let next = AtomicUsize::new(0);
     // Tous les threads partagent la closure (donc `sender`) par `&` : `Sender` est `Sync`.
@@ -264,7 +300,9 @@ fn dispatch(
         loop {
             let i = next.fetch_add(1, Ordering::Relaxed);
             let Some(&coord) = todo.get(i) else { return };
-            let _ = sender.send((coord, mesh_chunk(&snapshot, &grid, coord)));
+            let t = Instant::now();
+            let data = mesh_chunk(&snapshot, &grid, coord);
+            let _ = sender.send((coord, data, t.elapsed()));
         }
     });
 }

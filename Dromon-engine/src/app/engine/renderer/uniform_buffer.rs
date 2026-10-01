@@ -22,6 +22,7 @@ struct UniformBufferObject {
     light_color: Vec4,
     fog: Vec4,        // xyz = couleur du ciel, w =  σ₀
     fog_params: Vec4, // x = H, y= fog_anisotropy, zw inutilisés (pour l'instant)
+    shadow_params: Vec4, // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
 }
 
 pub struct UniformBuffer {
@@ -64,6 +65,8 @@ impl UniformBuffer {
         fog_density: f32,
         fog_scale_height: f32,
         fog_anisotropy: f32,
+        shadow_depth_range: f32,
+        shadow_texel_size: f32,
     ) {
         profile!();
         let ubo = UniformBufferObject {
@@ -75,6 +78,7 @@ impl UniformBuffer {
             light_color: light_color.extend(light_intensity),
             fog: sky_color.extend(fog_density),
             fog_params: Vec4::new(fog_scale_height, fog_anisotropy, 0.0, 0.0),
+            shadow_params: Vec4::new(shadow_depth_range, shadow_texel_size, 0.0, 0.0),
         };
 
         unsafe {

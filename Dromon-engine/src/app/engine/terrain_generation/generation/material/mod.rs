@@ -31,7 +31,7 @@ pub const MATERIAL_COUNT: usize = 6;
 pub fn material_color(material: u16) -> Vec3 {
     match material {
         MATERIAL_ROCK => Vec3::new(0.40, 0.38, 0.35),
-        MATERIAL_DIRT => Vec3::new(0.36, 0.25, 0.16),
+        MATERIAL_DIRT => Vec3::new(0.38, 0.31, 0.22),
         MATERIAL_GRASS => Vec3::new(0.27, 0.42, 0.18),
         MATERIAL_SNOW => Vec3::new(0.95, 0.96, 0.98),
         MATERIAL_SAND => Vec3::new(0.80, 0.73, 0.52),
@@ -65,6 +65,9 @@ pub struct MaterialQuery {
     /// Cosinus de la pente macro (moyenne sur [`MACRO_SLOPE_RADIUS`]) ; `None` hors
     /// surface exposée.
     pub macro_up: Option<f64>,
+    /// Bruit des plaques de terre (cf. `HeightField::dirt_patch_noise`) ; `None` hors
+    /// surface exposée.
+    pub patch_noise: Option<f64>,
 }
 
 /// Matériau (ou mélange) **plein** d'un point : couche de base, puis
@@ -72,6 +75,7 @@ pub struct MaterialQuery {
 /// précédentes.
 pub fn evaluate(q: &MaterialQuery) -> Voxel {
     let mut mix = rules::base_layer(q);
+    rules::dirt_patches(q, &mut mix);
     rules::slope_rock(q, &mut mix);
     mix.to_voxel()
 }

@@ -35,6 +35,14 @@ impl MaterialMix {
         self.0[material as usize] += t;
     }
 
+    /// Convertit la fraction `t ∈ [0, 1]` de `from` en `to`, sans toucher aux autres
+    /// matériaux (contrairement à [`MaterialMix::overlay`]). Préserve la somme.
+    pub fn transfer(&mut self, from: u16, to: u16, t: f64) {
+        let moved = self.0[from as usize] * t.clamp(0.0, 1.0);
+        self.0[from as usize] -= moved;
+        self.0[to as usize] += moved;
+    }
+
     /// Quantifie vers le format stocké : les 4 matériaux les plus présents,
     /// renormalisés, poids `u8` de somme exacte 255.
     pub fn to_voxel(&self) -> Voxel {

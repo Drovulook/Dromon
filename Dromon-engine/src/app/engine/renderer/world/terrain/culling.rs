@@ -12,7 +12,7 @@ use glam::IVec2;
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::frustum_culling::Frustum;
 use crate::app::engine::renderer::world::light::DirectionalLight;
-use crate::app::engine::renderer::world::terrain::meshes::LoadedChunks;
+use crate::app::engine::renderer::world::terrain::meshes::InstalledChunks;
 use crate::profile;
 
 /// Chunks retenus pour la frame courante. Les `Vec` sont réutilisés d'une frame à
@@ -28,7 +28,7 @@ pub struct VisibleSet {
 impl VisibleSet {
     pub(super) fn update(
         &mut self,
-        chunks: &LoadedChunks,
+        chunks: &InstalledChunks,
         camera: &Camera,
         light: &DirectionalLight,
     ) {

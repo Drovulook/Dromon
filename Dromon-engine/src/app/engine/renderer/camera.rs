@@ -39,18 +39,18 @@ impl Default for Camera {
             pitch: 0.0,
             fov_y: 45.0_f32.to_radians(),
             near: 0.1,
-            far: 6000.0,
+            far: 8000.0,
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
-            move_speed: 500.0,
+            move_speed: 400.0,
             rotation_sensitivity: 0.002,
             zoom_speed: 0.05,
             boost_factor_rot: 4.0,
-            boost_factor_move: 4.0,
+            boost_factor_move: 3.8,
         };
-        // au démarrage, on regarde l'origine (déduit yaw/pitch de la direction)
-        camera.look_at(Vec3::ZERO);
+        // au démarrage, on regarde l'horizon vers +X : cible à la même altitude → pitch 0
+        camera.look_at(camera.position + Vec3::X - Vec3::Z);
         camera
     }
 }

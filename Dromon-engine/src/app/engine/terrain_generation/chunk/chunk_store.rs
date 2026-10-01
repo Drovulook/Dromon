@@ -68,18 +68,26 @@ impl TerrainSnapshot {
         }
     }
 
+    /// Le chunk `coord` fait-il partie du monde (cf. [`WorldDisc`](super::WorldDisc)) ?
+    #[inline]
+    pub fn in_world(&self, coord: IVec2) -> bool {
+        self.source.world().contains(coord)
+    }
+
     /// Construit le [`DensityField`] échantillonnable sur la région du chunk `coord`.
     /// C'est l'unique interface entre le terrain et le mailleur : celui-ci n'appelle
     /// que `sample`/`vertical_bounds`, sans rien savoir du relief ni des grottes.
     ///
     /// `apron` = marge (en voxels) autour du chunk que le mailleur échantillonnera
-    /// au-delà de ses bords (le rayon du stencil des normales).
-    pub fn density_field(&self, coord: IVec2, apron: i32) -> DensityField<'_> {
+    /// au-delà de ses bords (le rayon du stencil des normales) ; `step` = son pas
+    /// d'échantillonnage.
+    pub fn density_field(&self, coord: IVec2, apron: i32, step: i32) -> DensityField<'_> {
         DensityField::new(
             self.source.height_field(),
             self.region_edits(coord, apron),
             coord,
             apron,
+            step,
         )
     }
 

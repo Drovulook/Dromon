@@ -1,3 +1,4 @@
+use crate::app::engine::renderer::shadow_map::SHADOW_MAP_RESOLUTION;
 use crate::profile;
 
 // Paramètres du « frustum » orthographique de la lumière (la boîte qui doit
@@ -48,6 +49,20 @@ impl Default for ShadowConfig {
             follow_camera: false,
             focus_distance: 0.0,
         }
+    }
+}
+
+impl ShadowConfig {
+    /// Épaisseur de la boîte le long des rayons : convertit un biais en unités monde
+    /// vers la profondeur normalisée de la shadow map.
+    pub fn depth_range(&self) -> f32 {
+        self.far - self.near
+    }
+
+    /// Côté d'un texel de la shadow map, en unités monde : l'échelle naturelle du
+    /// biais anti-acné (l'erreur de profondeur grandit avec le texel).
+    pub fn texel_size(&self) -> f32 {
+        2.0 * self.half_size / SHADOW_MAP_RESOLUTION as f32
     }
 }
 

@@ -73,7 +73,7 @@ impl World {
             },
             atmosphere: Atmosphere {
                 sky_color: glam::Vec3::new(0.4, 0.6, 0.8),
-                fog_density: 0.0006,
+                fog_density: 0.0005,
                 fog_scale_height: 1200.0,
                 fog_anisotropy: 0.7,
             },
@@ -97,8 +97,8 @@ impl World {
         }
     }
 
-    /// Fait suivre le terrain aux mouvements de caméra (LOD aujourd'hui, streaming
-    /// demain). Sans terrain, ne fait rien.
+    /// Fait suivre le terrain aux mouvements de caméra (LOD et streaming). Sans terrain,
+    /// ne fait rien.
     pub fn update_terrain(&mut self) -> Result<()> {
         let Some(terrain) = self.terrain.as_mut() else {
             return Ok(());

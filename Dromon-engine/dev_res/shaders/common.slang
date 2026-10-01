@@ -10,6 +10,7 @@ struct UniformBuffer {
     float4 lightColor;      // rgb = couleur, w = intensité
     float4 fog;
     float4 fogParams;
+    float4 shadowParams;    // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;
@@ -33,8 +34,15 @@ Sampler2DShadow shadowMap;
 // ⚠ doit rester synchronisé avec SHADOW_MAP_RESOLUTION (shadow_map.rs).
 static const float SHADOW_MAP_TEXEL_SIZE = 1.0 / 2048.0;
 
+// Interrupteur de debug : `false` = tout est éclairé (la passe d'ombre tourne quand
+// même, seul son résultat est ignoré).
+static const bool SHADOWS_ENABLED = true;
+
 // Renvoie un facteur d'éclairement ∈ [0,1] : 1 = pleinement éclairé, 0 = ombré.
 float computeShadow(float4 shadowCoord, float NdotL) {
+  if (!SHADOWS_ENABLED) {
+    return 1.0;
+  }
 
   // Division perspective (triviale en orthographique, où w = 1).
   float3 proj = shadowCoord.xyz / shadowCoord.w;
@@ -47,12 +55,14 @@ float computeShadow(float4 shadowCoord, float NdotL) {
   // NDC xy ∈ [-1,1] → coordonnées de texture uv ∈ [0,1].
   float2 uv = proj.xy * 0.5 + 0.5;
 
-  // Biais dépendant de la pente : plus la surface est rasante (NdotL faible),
-  // plus on décale, pour limiter le « shadow acne ». ⚠ Exprimé en profondeur
-  // NORMALISÉE [0,1] : avec `far` grand (terrain, ~600), un même biais NDC vaut
-  // beaucoup plus en unités monde → ces valeurs suffisent à tuer l'acné du
-  // terrain sans trop décoller l'ombre des petits objets (far ~60).
-  float bias = max(0.002, 0.008 * (1.0 - NdotL));
+  // Biais anti-acné dépendant de la pente (plus la surface est rasante, plus on
+  // décale), pensé en UNITÉS MONDE à l'échelle du texel : l'erreur de profondeur
+  // vient de ce qu'un texel couvre une surface inclinée. Divisé ensuite par
+  // l'épaisseur de la boîte → profondeur normalisée. Ainsi le même réglage vaut
+  // pour une petite scène et pour un terrain, quels que soient half_size et far.
+  float texel = ubo.shadowParams.y;
+  float biasWorld = texel * (1.5 + 4.0 * (1.0 - NdotL));
+  float bias = biasWorld / ubo.shadowParams.x;
 
   // PCF 3×3 : on moyenne 9 texels voisins. Chaque tap est déjà filtré 2×2 par le
   // hardware (sampler LINEAR) → bord lissé sans escalier, mais sans le flou

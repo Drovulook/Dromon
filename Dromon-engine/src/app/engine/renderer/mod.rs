@@ -298,6 +298,8 @@ impl Renderer {
                 self.world.atmosphere.fog_density,
                 self.world.atmosphere.fog_scale_height,
                 self.world.atmosphere.fog_anisotropy,
+                self.world.light.shadow.depth_range(),
+                self.world.light.shadow.texel_size(),
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent
