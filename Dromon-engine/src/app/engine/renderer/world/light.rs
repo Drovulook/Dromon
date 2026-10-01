@@ -66,10 +66,34 @@ impl ShadowConfig {
     }
 }
 
+/// Apparence du disque solaire dessiné dans le ciel (sky.slang). N'influe pas
+/// sur l'éclairage de la scène.
+pub struct SunDisk {
+    /// Rayon angulaire, en radians. Le vrai soleil fait ~0.27° ; en jeu on prend
+    /// plus gros (~1°) pour la lisibilité.
+    pub angular_radius: f32,
+    /// Fraction du rayon où commence le fondu du bord (1 = bord net).
+    pub edge_softness: f32,
+    /// Multiplicateur de `color * intensity` : le disque doit éclipser le halo.
+    /// Sans tonemapping, tout ce qui dépasse 1 sature en blanc.
+    pub intensity: f32,
+}
+
+impl Default for SunDisk {
+    fn default() -> Self {
+        SunDisk {
+            angular_radius: 1.0_f32.to_radians(),
+            edge_softness: 0.85,
+            intensity: 10.0,
+        }
+    }
+}
+
 pub struct DirectionalLight {
     pub direction: glam::Vec3,
     pub color: glam::Vec3,
     pub intensity: f32,
+    pub disk: SunDisk,
     pub shadow: ShadowConfig,
 }
 

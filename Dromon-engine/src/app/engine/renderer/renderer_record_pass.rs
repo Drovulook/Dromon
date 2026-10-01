@@ -81,7 +81,7 @@ impl Renderer {
         );
     }
 
-    pub(super) fn record_render_pass(&self, frame: &Frame, image_index: u32, clear_color: Vec3) {
+    pub(super) fn record_render_pass(&self, frame: &Frame, image_index: u32) {
         profile!();
         self.context.transition_image_layout(
             frame.command_buffer,
@@ -119,7 +119,7 @@ impl Renderer {
                 self.swapchain.color_image_views[image_index as usize],
                 self.swapchain.depth_image_view,
                 vk::ClearColorValue {
-                    float32: clear_color.extend(1.0).to_array(),
+                    float32: self.world.atmosphere.sky_color.extend(1.0).to_array(),
                 },
                 vk::Rect2D::default().extent(self.swapchain.extent),
             );
@@ -159,6 +159,9 @@ impl Renderer {
                     &terrain.visible.camera,
                 );
             }
+
+            self.sky_render_system
+                .record_render_sky(frame.command_buffer, self.frame_index);
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 

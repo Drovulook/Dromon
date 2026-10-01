@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
-use crate::app::engine::renderer::world::light::{DirectionalLight, ShadowConfig};
+use crate::app::engine::renderer::world::light::{DirectionalLight, ShadowConfig, SunDisk};
 use crate::app::engine::renderer::world::terrain::Terrain;
 use crate::app::{
     engine::{
@@ -64,9 +64,12 @@ impl World {
             render_objects: Vec::new(),
             camera: Camera::default(),
             light: DirectionalLight {
-                direction: glam::Vec3::new(-0.3, -0.5, -1.0),
-                color: glam::Vec3::ONE,
+                // élévation ≈ 30° : atan(0.34 / |(0.3, 0.5)|)
+                direction: glam::Vec3::new(-0.3, -0.5, -0.34),
+                // blanc chaud de soleil d'après-midi
+                color: glam::Vec3::new(1.0, 0.85, 0.65),
                 intensity: 1.0,
+                disk: SunDisk::default(),
                 // Défaut « petite scène » : boîte fixe à l'origine. `generate_terrain`
                 // bascule en mode terrain si la scène crée un terrain.
                 shadow: ShadowConfig::default(),
@@ -75,7 +78,8 @@ impl World {
                 sky_color: glam::Vec3::new(0.4, 0.6, 0.8),
                 fog_density: 0.0005,
                 fog_scale_height: 1200.0,
-                fog_anisotropy: 0.7,
+                fog_anisotropy: 0.9,
+                halo_strength: 0.003,
             },
             terrain: None,
             context,

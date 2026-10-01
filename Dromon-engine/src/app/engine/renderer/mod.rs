@@ -15,7 +15,7 @@ pub(crate) mod world;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::render_systems::TerrainRenderSystem;
+use crate::app::engine::renderer::render_systems::{SkyRenderSystem, TerrainRenderSystem};
 use crate::app::engine::renderer::shadow_map::ShadowMap;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::renderer::world::World;
@@ -46,6 +46,7 @@ pub struct Renderer {
     frame_command_pool: vk::CommandPool,
     object_render_system: ObjectRenderSystem,
     terrain_render_sytem: TerrainRenderSystem,
+    sky_render_system: SkyRenderSystem,
     shadow_map: ShadowMap,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
@@ -165,6 +166,14 @@ impl Renderer {
                 shadow_map.format,
             )?;
 
+            let sky_render_system = SkyRenderSystem::new(
+                context.clone(),
+                descriptor_handler.clone(),
+                swapchain.color_format,
+                swapchain.depth_format,
+                swapchain.msaa_samples,
+            )?;
+
             Renderer::initialize(context.clone(), &world)?;
 
             // Profiler GPU : nb de nanosecondes par tick + support des timestamps sur
@@ -193,6 +202,7 @@ impl Renderer {
                 frame_command_pool,
                 object_render_system,
                 terrain_render_sytem,
+                sky_render_system,
                 shadow_map,
                 swapchain,
                 context,
@@ -285,21 +295,9 @@ impl Renderer {
             // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
             // passe principale lisent la même `light_view_proj` depuis le set 0.
             frame.uniform_buffer.update(
-                self.world.camera.view,
-                self.world.camera.proj,
-                self.world.camera.position,
-                self.world
-                    .light
-                    .view_proj(self.world.camera.position, self.world.camera.front()),
-                self.world.light.direction,
-                self.world.light.color,
-                self.world.light.intensity,
-                self.world.atmosphere.sky_color,
-                self.world.atmosphere.fog_density,
-                self.world.atmosphere.fog_scale_height,
-                self.world.atmosphere.fog_anisotropy,
-                self.world.light.shadow.depth_range(),
-                self.world.light.shadow.texel_size(),
+                &self.world.camera,
+                &self.world.light,
+                &self.world.atmosphere,
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent
@@ -321,7 +319,7 @@ impl Renderer {
                 let _gpu =
                     self.gpu_profiler
                         .scope(frame.command_buffer, self.frame_index, "render pass");
-                self.record_render_pass(frame, image_index, self.world.atmosphere.sky_color);
+                self.record_render_pass(frame, image_index);
             }
 
             drop(gpu_frame);

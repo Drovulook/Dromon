@@ -1,5 +1,7 @@
 use super::buffer::Buffer;
-use crate::app::engine::rendering_context::RenderingContext;
+use crate::app::engine::renderer::world::atmosphere::Atmosphere;
+use crate::app::engine::renderer::world::light::DirectionalLight;
+use crate::app::engine::{renderer::camera::Camera, rendering_context::RenderingContext};
 use crate::profile;
 use anyhow::Result;
 use ash::vk;
@@ -18,11 +20,12 @@ struct UniformBufferObject {
     light_view_proj: Mat4,
     // des uniform buffers Vulkan : un vec3 est aligné sur 16 octets mais n'en
     // occupe que 12
-    light_direction: Vec4,
+    light_direction: Vec4, // xyz = direction de propagation, w inutilisé
     light_color: Vec4,
-    fog: Vec4,        // xyz = couleur du ciel, w =  σ₀
-    fog_params: Vec4, // x = H, y= fog_anisotropy, zw inutilisés (pour l'instant)
+    fog: Vec4,           // xyz = couleur du ciel, w =  σ₀
+    fog_params: Vec4,    // x = H, y = fog_anisotropy, z = halo_strength, w inutilisé
     shadow_params: Vec4, // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
+    sun_disk: Vec4,      // x = rayon angulaire (rad), y = edge_softness, z = intensité, w inutilisé
 }
 
 pub struct UniformBuffer {
@@ -52,33 +55,29 @@ impl UniformBuffer {
         self.buffer.buffer
     }
 
-    pub fn update(
-        &self,
-        view: Mat4,
-        proj: Mat4,
-        camera_position: Vec3,
-        light_view_proj: Mat4,
-        light_direction: Vec3,
-        light_color: Vec3,
-        light_intensity: f32,
-        sky_color: Vec3,
-        fog_density: f32,
-        fog_scale_height: f32,
-        fog_anisotropy: f32,
-        shadow_depth_range: f32,
-        shadow_texel_size: f32,
-    ) {
+    pub fn update(&self, camera: &Camera, sun: &DirectionalLight, atmosphere: &Atmosphere) {
         profile!();
         let ubo = UniformBufferObject {
-            view,
-            proj,
-            camera_position: camera_position.extend(1.0),
-            light_view_proj,
-            light_direction: light_direction.extend(0.0),
-            light_color: light_color.extend(light_intensity),
-            fog: sky_color.extend(fog_density),
-            fog_params: Vec4::new(fog_scale_height, fog_anisotropy, 0.0, 0.0),
-            shadow_params: Vec4::new(shadow_depth_range, shadow_texel_size, 0.0, 0.0),
+            view: camera.view,
+            proj: camera.proj,
+            camera_position: camera.position.extend(1.0),
+            light_view_proj: sun.view_proj(camera.position, camera.front()),
+            light_direction: sun.direction.extend(0.0),
+            light_color: sun.color.extend(sun.intensity),
+            fog: atmosphere.sky_color.extend(atmosphere.fog_density),
+            shadow_params: Vec4::new(sun.shadow.depth_range(), sun.shadow.texel_size(), 0.0, 0.0),
+            fog_params: Vec4::new(
+                atmosphere.fog_scale_height,
+                atmosphere.fog_anisotropy,
+                atmosphere.halo_strength,
+                0.0,
+            ),
+            sun_disk: Vec4::new(
+                sun.disk.angular_radius,
+                sun.disk.edge_softness,
+                sun.disk.intensity,
+                0.0,
+            ),
         };
 
         unsafe {

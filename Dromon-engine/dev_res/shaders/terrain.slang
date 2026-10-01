@@ -1,6 +1,7 @@
 // Shader du terrain volumétrique (géométrie issue de Surface Nets).
 
-#include "common.slang"
+#include "lib/shadow.slang"
+#include "lib/atmosphere.slang"
 
 // Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1,2).
 struct VSInput {
@@ -14,7 +15,6 @@ struct VSOutput {
   float3 worldPos;
   float3 worldNormal; // normale monde, interpolée pour l'éclairage lisse
   float3 color;       // couleur interpolée entre les sommets par le rasterizer
-  float4 shadowCoord;
 }
 
 [shader("vertex")]
@@ -26,7 +26,6 @@ VSOutput terrainVertMain(VSInput input) {
   // cohérence (gère un éventuel scale non uniforme).
   output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
   output.color = input.inColor;
-  output.shadowCoord = mul(ubo.lightViewProj, worldPos);
   output.worldPos = worldPos.xyz;
   return output;
 }
@@ -56,7 +55,7 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   float3 L = normalize(-ubo.lightDirection.xyz);
   float NdotL = max(dot(N, L), 0.0);
 
-  float shadow = computeShadow(vertIn.shadowCoord, NdotL);
+  float shadow = computeShadow(vertIn.worldPos, N, NdotL);
   float3 lightCol = ubo.lightColor.rgb * ubo.lightColor.w;
   // Ambiant = lumière indirecte du ciel, légèrement bleutée. MULTIPLIÉ par la
   // couleur du matériau (et non ajouté) : les zones à l'ombre gardent leur teinte
@@ -65,17 +64,7 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   float3 color = material * (ambient + lightCol * NdotL * shadow);
   
   // appliquer le brouillard (à distance)
-  float tau = opticalDepth(
-    ubo.cameraPosition.xyz, vertIn.worldPos,
-    ubo.fog.w, ubo.fogParams.x);
-  float fog = 1.0 - exp(-tau);
-
-  // Couleur du brouillard = ciel + halo solaire. Le halo est DANS la couleur du
-  // brouillard, donc pondéré par `fog` : sans air entre l'œil et le fragment, pas
-  // de diffusion, donc pas de halo.
-  float3 V = normalize(vertIn.worldPos - ubo.cameraPosition.xyz);
-  float3 fogCol = ubo.fog.rgb + fogSunTint(V, L, lightCol, ubo.fogParams.y);
-  color = lerp(color, fogCol, fog);
+  color = applyFog(color, vertIn.worldPos, L, lightCol);
 
   return float4(color, 1.0);
 }

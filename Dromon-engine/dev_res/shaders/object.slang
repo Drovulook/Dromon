@@ -1,7 +1,7 @@
 // Shader des render objects (modèles 3D texturés).
-// Les déclarations partagées (UBO caméra, push constants, shadow map,
-// computeShadow) sont dans common.slang.
-#include "common.slang"
+// UBO caméra et push constants : lib/bindings.slang ; shadow map et
+// computeShadow : lib/shadow.slang.
+#include "lib/shadow.slang"
 
 struct VSInput {
   float3 inPosition;
@@ -15,13 +15,12 @@ struct VSOutput {
   float3 color;
   float2 fragTexCoord;
   float3 normal;
-  // Position du fragment dans l'espace de la lumière (avant division perspective).
-  // Sert à échantillonner la shadow map dans le fragment shader.
-  float4 shadowCoord;
+  // Position monde : sert à échantillonner la shadow map (avec normal offset).
+  float3 worldPos;
 }
 
 // set 1, binding 0 : la texture du matériau (un descriptor set par texture).
-// Propre aux objets → reste hors de common.slang.
+// Propre aux objets → reste hors de lib/.
 [[vk::binding(0, 1)]]
 Sampler2D texture;
 
@@ -34,8 +33,7 @@ VSOutput vertMain(VSInput input) {
   output.fragTexCoord = input.inTexCoord;
 
   output.normal = mul((float3x3)pc.normalMatrix, input.inNormal);
-  // Projection dans l'espace de la lumière (utilisée pour l'ombre).
-  output.shadowCoord = mul(ubo.lightViewProj, worldPos);
+  output.worldPos = worldPos.xyz;
   return output;
 }
 
@@ -58,7 +56,7 @@ float4 fragMain(VSOutput vertIn) : SV_Target {
   float NdotL = max(dot(N, L), 0.0);
 
   // Facteur d'ombre : la lumière directe est atténuée là où un objet occulte.
-  float shadow = computeShadow(vertIn.shadowCoord, NdotL);
+  float shadow = computeShadow(vertIn.worldPos, N, NdotL);
 
   float3 lightCol = ubo.lightColor.rgb * ubo.lightColor.w;
   float3 ambient = 0.05 * baseColor;
