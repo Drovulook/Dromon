@@ -60,7 +60,11 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   // Ambiant = lumière indirecte du ciel, légèrement bleutée. MULTIPLIÉ par la
   // couleur du matériau (et non ajouté) : les zones à l'ombre gardent leur teinte
   // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
-  float3 ambient = float3(0.28, 0.32, 0.40);
+  // Ambiant hémisphérique : une face voit d'autant plus de ciel qu'elle est tournée
+  // vers le haut ; le reste de son hémisphère voit le sol, plus sombre.
+  float skyFactor = saturate(N.z); // 1 = face au ciel, 0 = face au sol; on peut aussi utiliser N.z * 0.5 + 0.5
+  float3 skyAmbient = ubo.ambient.rgb; // varie avec l'heure (day_night.rs)
+  float3 ambient = lerp(skyAmbient * ubo.ambient.w, skyAmbient, skyFactor);
   float3 color = material * (ambient + lightCol * NdotL * shadow);
   
   // appliquer le brouillard (à distance)

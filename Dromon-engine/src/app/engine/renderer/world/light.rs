@@ -89,12 +89,42 @@ impl Default for SunDisk {
     }
 }
 
+/// Direction de la lumière solaire (du soleil VERS la scène) à une heure donnée.
+/// Repère : Z = haut, X = est, Y = nord. Trajectoire d'équinoxe (pas de saisons).
+///
+/// `time_of_day` ∈ [0, 1[ (0 = minuit, 0.5 = midi) ; `latitude` en radians :
+/// à midi le soleil culmine à `90° - latitude`, plein sud (hémisphère nord).
+pub fn sun_direction(time_of_day: f64, latitude: f32) -> glam::Vec3 {
+    // angle horaire : 0 à midi, ±π à minuit
+    let h = (std::f64::consts::TAU * (time_of_day - 0.5)) as f32;
+    let (sin_h, cos_h) = h.sin_cos();
+    let (sin_lat, cos_lat) = latitude.sin_cos();
+    let to_sun = glam::Vec3::new(-sin_h, -sin_lat * cos_h, cos_lat * cos_h);
+    -to_sun
+}
+
 pub struct DirectionalLight {
     pub direction: glam::Vec3,
     pub color: glam::Vec3,
     pub intensity: f32,
     pub disk: SunDisk,
     pub shadow: ShadowConfig,
+}
+
+impl Default for DirectionalLight {
+    /// `direction`, `color` et `intensity` sont des valeurs d'attente : recalculées
+    /// d'après l'heure par `World::sync_sky` (dès `World::new`).
+    fn default() -> Self {
+        DirectionalLight {
+            direction: glam::Vec3::NEG_Z,
+            color: glam::Vec3::ONE,
+            intensity: 1.0,
+            disk: SunDisk::default(),
+            // Défaut « petite scène » : boîte fixe à l'origine. `generate_terrain`
+            // bascule en mode terrain si la scène crée un terrain.
+            shadow: ShadowConfig::default(),
+        }
+    }
 }
 
 impl DirectionalLight {

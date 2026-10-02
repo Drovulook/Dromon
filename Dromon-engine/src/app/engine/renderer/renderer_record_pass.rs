@@ -119,7 +119,7 @@ impl Renderer {
                 self.swapchain.color_image_views[image_index as usize],
                 self.swapchain.depth_image_view,
                 vk::ClearColorValue {
-                    float32: self.world.atmosphere.sky_color.extend(1.0).to_array(),
+                    float32: self.world.atmosphere.horizon_color.extend(1.0).to_array(),
                 },
                 vk::Rect2D::default().extent(self.swapchain.extent),
             );

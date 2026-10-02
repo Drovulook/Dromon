@@ -22,10 +22,12 @@ struct UniformBufferObject {
     // occupe que 12
     light_direction: Vec4, // xyz = direction de propagation, w inutilisé
     light_color: Vec4,
-    fog: Vec4,           // xyz = couleur du ciel, w =  σ₀
+    fog: Vec4,           // xyz = couleur de l'horizon, w =  σ₀
     fog_params: Vec4,    // x = H, y = fog_anisotropy, z = halo_strength, w inutilisé
     shadow_params: Vec4, // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
     sun_disk: Vec4,      // x = rayon angulaire (rad), y = edge_softness, z = intensité, w inutilisé
+    sky_zenith: Vec4,    // xyz = couleur du zénith, w = exposant du dégradé
+    ambient: Vec4,       // xyz = lumière ambiante du ciel, w = ground_bounce
 }
 
 pub struct UniformBuffer {
@@ -64,7 +66,7 @@ impl UniformBuffer {
             light_view_proj: sun.view_proj(camera.position, camera.front()),
             light_direction: sun.direction.extend(0.0),
             light_color: sun.color.extend(sun.intensity),
-            fog: atmosphere.sky_color.extend(atmosphere.fog_density),
+            fog: atmosphere.horizon_color.extend(atmosphere.fog_density),
             shadow_params: Vec4::new(sun.shadow.depth_range(), sun.shadow.texel_size(), 0.0, 0.0),
             fog_params: Vec4::new(
                 atmosphere.fog_scale_height,
@@ -78,6 +80,10 @@ impl UniformBuffer {
                 sun.disk.intensity,
                 0.0,
             ),
+            sky_zenith: atmosphere
+                .zenith_color
+                .extend(atmosphere.sky_gradient_exponent),
+            ambient: atmosphere.ambient_color.extend(atmosphere.ground_bounce),
         };
 
         unsafe {

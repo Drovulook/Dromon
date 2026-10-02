@@ -11,10 +11,12 @@ struct UniformBuffer {
     float4x4 lightViewProj; // view*proj de la lumière (projection orthographique)
     float4 lightDirection;  // xyz = direction de propagation des rayons
     float4 lightColor;      // rgb = couleur, w = intensité
-    float4 fog;             // rgb = couleur du ciel, w = σ₀
+    float4 fog;             // rgb = couleur de l'horizon, w = σ₀
     float4 fogParams;       // x = H, y = anisotropie du halo, z = intensité du halo
     float4 shadowParams;    // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
     float4 sunDisk;         // x = rayon angulaire (rad), y = fraction du rayon où commence le fondu, z = intensité
+    float4 skyZenith;       // rgb = couleur du zénith, w = exposant du dégradé horizon → zénith
+    float4 ambient;         // rgb = lumière ambiante du ciel, w = part renvoyée par le sol
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

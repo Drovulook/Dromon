@@ -1,4 +1,6 @@
 pub(crate) mod atmosphere;
+mod day_night;
+pub(crate) mod game_clock;
 pub(crate) mod light;
 pub(crate) mod terrain;
 
@@ -8,7 +10,7 @@ use std::sync::Arc;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
-use crate::app::engine::renderer::world::light::{DirectionalLight, ShadowConfig, SunDisk};
+use crate::app::engine::renderer::world::light::{DirectionalLight, sun_direction};
 use crate::app::engine::renderer::world::terrain::Terrain;
 use crate::app::{
     engine::{
@@ -23,6 +25,7 @@ use crate::app::{
     logger::Logger,
 };
 use crate::profile;
+use game_clock::GameClock;
 
 /// Le contenu de la scène : ce que l'application décrit via le trait
 /// [`Scene`](crate::Scene), plus le terrain quand il y en a un.
@@ -42,6 +45,9 @@ pub struct World {
     /// Nombre de frames que le renderer garde en vol — le terrain en a besoin pour dater
     /// la destruction différée de ses meshes.
     frames_in_flight: u64,
+    game_clock: GameClock,
+    /// Latitude (radians) : fixe la hauteur du soleil à midi (`90° - latitude`).
+    pub latitude: f32,
 }
 
 impl World {
@@ -58,33 +64,28 @@ impl World {
     ) -> Result<World> {
         let rrm = RenderResourceManager::new(context.clone(), logger.clone(), descriptor_handler)?;
 
-        Ok(World {
+        let mut world = World {
             logger,
             rrm,
             render_objects: Vec::new(),
             camera: Camera::default(),
-            light: DirectionalLight {
-                // élévation ≈ 30° : atan(0.34 / |(0.3, 0.5)|)
-                direction: glam::Vec3::new(-0.3, -0.5, -0.34),
-                // blanc chaud de soleil d'après-midi
-                color: glam::Vec3::new(1.0, 0.85, 0.65),
-                intensity: 1.0,
-                disk: SunDisk::default(),
-                // Défaut « petite scène » : boîte fixe à l'origine. `generate_terrain`
-                // bascule en mode terrain si la scène crée un terrain.
-                shadow: ShadowConfig::default(),
-            },
-            atmosphere: Atmosphere {
-                sky_color: glam::Vec3::new(0.4, 0.6, 0.8),
-                fog_density: 0.0005,
-                fog_scale_height: 1200.0,
-                fog_anisotropy: 0.9,
-                halo_strength: 0.003,
-            },
+            light: DirectionalLight::default(),
+            atmosphere: Atmosphere::default(),
             terrain: None,
             context,
             frames_in_flight: frames_in_flight as u64,
-        })
+            game_clock: GameClock::default(),
+            latitude: 40.0_f32.to_radians(),
+        };
+        // Soleil et ciel cohérents avec l'heure de départ dès `Scene::setup`.
+        world.sync_sky();
+        Ok(world)
+    }
+
+    /// Recalcule la position du soleil et les couleurs du ciel d'après l'heure courante.
+    fn sync_sky(&mut self) {
+        self.light.direction = sun_direction(self.game_clock.time_of_day, self.latitude);
+        day_night::apply(&mut self.light, &mut self.atmosphere);
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
@@ -95,6 +96,8 @@ impl World {
 
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {
         profile!();
+        self.game_clock.advance(timer.delta_secs() as f64);
+        self.sync_sky();
         self.camera.update(input_state, timer, aspect);
         if let Some(terrain) = self.terrain.as_mut() {
             terrain.update_visibility(&self.camera, &self.light);

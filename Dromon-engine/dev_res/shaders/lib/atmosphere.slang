@@ -24,10 +24,17 @@ float3 fogSunTint(float3 V, float3 L, float3 sunCol, float g, float strength) {
   return sunCol * hg * strength;
 }
 
+// Dégradé horizon → zénith selon la hauteur du regard (V.z = sin de l'élévation).
+// En plongée (V.z < 0) : couleur de l'horizon.
+float3 skyGradient(float3 V) {
+  float t = pow(saturate(V.z), ubo.skyZenith.w);
+  return lerp(ubo.fog.rgb, ubo.skyZenith.rgb, t);
+}
+
 // Couleur de l'air vu dans la direction V (normalisée) : ciel + halo solaire.
 // C'est la couleur du ciel ET celle vers laquelle tend le brouillard.
 float3 airColor(float3 V, float3 L, float3 sunCol) {
-  return ubo.fog.rgb + fogSunTint(V, L, sunCol, ubo.fogParams.y, ubo.fogParams.z);
+  return skyGradient(V) + fogSunTint(V, L, sunCol, ubo.fogParams.y, ubo.fogParams.z);
 }
 
 // Noie `color` (surface située en worldPos) dans le brouillard, selon la quantité
