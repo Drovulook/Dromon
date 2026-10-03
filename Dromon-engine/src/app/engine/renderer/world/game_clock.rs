@@ -20,7 +20,7 @@ impl Default for GameClock {
     fn default() -> Self {
         Self {
             day: 0,
-            time_of_day: 12.0 / 24.0,
+            time_of_day: 9.0 / 24.0,
             day_length_secs: 30.0,
             time_scale: 1.0,
         }

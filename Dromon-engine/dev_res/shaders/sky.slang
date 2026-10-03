@@ -2,6 +2,7 @@
 // La pipeline (test LESS_OR_EQUAL, sans écriture) ne le laisse passer que là où
 // rien n'a été dessiné.
 #include "lib/atmosphere.slang"
+#include "lib/stars.slang"
 
 struct SkyVSOutput {
   float4 pos : SV_Position;
@@ -33,7 +34,7 @@ float4 skyFragMain(SkyVSOutput vertIn) : SV_Target {
   float3 L = normalize(-ubo.lightDirection.xyz);
   float3 sunCol = ubo.lightColor.rgb * ubo.lightColor.w;
 
-  float3 color = airColor(V, L, sunCol);
+  float3 color = airColor(V, L, sunCol) + stars(V);
 
   // Disque solaire : V est dans le disque si l'angle (V, L) < rayon, i.e.
   // cos(angle) = dot(V, L) > cos(rayon).

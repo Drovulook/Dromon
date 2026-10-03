@@ -1,6 +1,7 @@
 use super::buffer::Buffer;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::DirectionalLight;
+use crate::app::engine::renderer::world::stars::Stars;
 use crate::app::engine::{renderer::camera::Camera, rendering_context::RenderingContext};
 use crate::profile;
 use anyhow::Result;
@@ -28,6 +29,10 @@ struct UniformBufferObject {
     sun_disk: Vec4,      // x = rayon angulaire (rad), y = edge_softness, z = intensité, w inutilisé
     sky_zenith: Vec4,    // xyz = couleur du zénith, w = exposant du dégradé
     ambient: Vec4,       // xyz = lumière ambiante du ciel, w = ground_bounce
+    // Rotation monde → ciel fixe (3x3 dans une Mat4 : un mat3 std140 a des colonnes
+    // paddées à 16 octets, que glam::Mat3 n'a pas).
+    sky_rotation: Mat4,
+    stars: Vec4, // x = luminosité × visibilité, y = temps réel (s), z = densité, w = scintillation
 }
 
 pub struct UniformBuffer {
@@ -57,7 +62,13 @@ impl UniformBuffer {
         self.buffer.buffer
     }
 
-    pub fn update(&self, camera: &Camera, sun: &DirectionalLight, atmosphere: &Atmosphere) {
+    pub fn update(
+        &self,
+        camera: &Camera,
+        sun: &DirectionalLight,
+        atmosphere: &Atmosphere,
+        stars: &Stars,
+    ) {
         profile!();
         let ubo = UniformBufferObject {
             view: camera.view,
@@ -84,6 +95,13 @@ impl UniformBuffer {
                 .zenith_color
                 .extend(atmosphere.sky_gradient_exponent),
             ambient: atmosphere.ambient_color.extend(atmosphere.ground_bounce),
+            sky_rotation: Mat4::from_mat3(stars.world_to_sky),
+            stars: Vec4::new(
+                stars.brightness * stars.visibility,
+                stars.time_secs,
+                stars.density,
+                stars.twinkle,
+            ),
         };
 
         unsafe {

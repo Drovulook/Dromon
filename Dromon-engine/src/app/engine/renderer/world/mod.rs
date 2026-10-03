@@ -2,6 +2,7 @@ pub(crate) mod atmosphere;
 mod day_night;
 pub(crate) mod game_clock;
 pub(crate) mod light;
+pub(crate) mod stars;
 pub(crate) mod terrain;
 
 use anyhow::Result;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::{DirectionalLight, sun_direction};
+use crate::app::engine::renderer::world::stars::{Stars, world_to_sky};
 use crate::app::engine::renderer::world::terrain::Terrain;
 use crate::app::{
     engine::{
@@ -36,6 +38,7 @@ pub struct World {
     pub camera: Camera,
     pub light: DirectionalLight,
     pub atmosphere: Atmosphere,
+    pub stars: Stars,
     /// Le terrain vivant. `None` tant que la scène n'a pas appelé
     /// [`World::generate_terrain`] — une scène n'est pas obligée d'en avoir un.
     pub(crate) terrain: Option<Terrain>,
@@ -71,6 +74,7 @@ impl World {
             camera: Camera::default(),
             light: DirectionalLight::default(),
             atmosphere: Atmosphere::default(),
+            stars: Stars::default(),
             terrain: None,
             context,
             frames_in_flight: frames_in_flight as u64,
@@ -82,10 +86,12 @@ impl World {
         Ok(world)
     }
 
-    /// Recalcule la position du soleil et les couleurs du ciel d'après l'heure courante.
+    /// Recalcule soleil, couleurs du ciel et étoiles d'après l'heure courante.
     fn sync_sky(&mut self) {
-        self.light.direction = sun_direction(self.game_clock.time_of_day, self.latitude);
-        day_night::apply(&mut self.light, &mut self.atmosphere);
+        let time_of_day = self.game_clock.time_of_day;
+        self.light.direction = sun_direction(time_of_day, self.latitude);
+        self.stars.world_to_sky = world_to_sky(time_of_day, self.latitude);
+        day_night::apply(&mut self.light, &mut self.atmosphere, &mut self.stars);
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
@@ -98,6 +104,7 @@ impl World {
         profile!();
         self.game_clock.advance(timer.delta_secs() as f64);
         self.sync_sky();
+        self.stars.time_secs = timer.elapsed_secs();
         self.camera.update(input_state, timer, aspect);
         if let Some(terrain) = self.terrain.as_mut() {
             terrain.update_visibility(&self.camera, &self.light);

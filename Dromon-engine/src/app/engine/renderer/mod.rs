@@ -298,6 +298,7 @@ impl Renderer {
                 &self.world.camera,
                 &self.world.light,
                 &self.world.atmosphere,
+                &self.world.stars,
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent

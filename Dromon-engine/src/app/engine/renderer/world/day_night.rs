@@ -5,6 +5,7 @@ use glam::Vec3;
 
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::DirectionalLight;
+use crate::app::engine::renderer::world::stars::Stars;
 
 /// État du ciel pour une élévation solaire donnée. Couleurs linéaires.
 struct SkyKeyframe {
@@ -73,8 +74,14 @@ const KEYFRAMES: [SkyKeyframe; 6] = [
 const SUN_FADE_START_DEG: f32 = -7.0;
 const SUN_FADE_END_DEG: f32 = 1.0;
 
-/// Met à jour lumière et atmosphère d'après `light.direction` (déjà calculée pour l'heure).
-pub fn apply(light: &mut DirectionalLight, atmosphere: &mut Atmosphere) {
+/// Élévations (degrés) du soleil entre lesquelles les étoiles s'effacent : visibles en
+/// pleine nuit, disparues avant que le ciel ne s'éclaircisse franchement.
+const STARS_FADE_START_DEG: f32 = -14.0;
+const STARS_FADE_END_DEG: f32 = -5.0;
+
+/// Met à jour lumière, atmosphère et étoiles d'après `light.direction` (déjà calculée
+/// pour l'heure).
+pub fn apply(light: &mut DirectionalLight, atmosphere: &mut Atmosphere, stars: &mut Stars) {
     let elevation_deg = (-light.direction.normalize().z).asin().to_degrees();
 
     let (a, b, t) = surrounding_keyframes(elevation_deg);
@@ -83,6 +90,7 @@ pub fn apply(light: &mut DirectionalLight, atmosphere: &mut Atmosphere) {
     atmosphere.ambient_color = a.ambient.lerp(b.ambient, t);
     light.color = a.sun_color.lerp(b.sun_color, t);
     light.intensity = smoothstep(SUN_FADE_START_DEG, SUN_FADE_END_DEG, elevation_deg);
+    stars.visibility = 1.0 - smoothstep(STARS_FADE_START_DEG, STARS_FADE_END_DEG, elevation_deg);
 }
 
 /// Les deux keyframes qui encadrent `elevation_deg`, et la position `t` ∈ [0, 1] entre elles.

@@ -17,6 +17,8 @@ struct UniformBuffer {
     float4 sunDisk;         // x = rayon angulaire (rad), y = fraction du rayon où commence le fondu, z = intensité
     float4 skyZenith;       // rgb = couleur du zénith, w = exposant du dégradé horizon → zénith
     float4 ambient;         // rgb = lumière ambiante du ciel, w = part renvoyée par le sol
+    float4x4 skyRotation;   // rotation monde → ciel fixe (partie 3x3)
+    float4 stars;           // x = luminosité × visibilité, y = temps réel (s), z = densité, w = scintillation
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

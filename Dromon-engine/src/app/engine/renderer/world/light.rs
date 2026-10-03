@@ -89,15 +89,19 @@ impl Default for SunDisk {
     }
 }
 
+/// Angle horaire (radians) : 0 à midi, ±π à minuit. Calculé en f64 avant la
+/// conversion, `time_of_day` étant stocké en f64.
+pub fn hour_angle(time_of_day: f64) -> f32 {
+    (std::f64::consts::TAU * (time_of_day - 0.5)) as f32
+}
+
 /// Direction de la lumière solaire (du soleil VERS la scène) à une heure donnée.
 /// Repère : Z = haut, X = est, Y = nord. Trajectoire d'équinoxe (pas de saisons).
 ///
 /// `time_of_day` ∈ [0, 1[ (0 = minuit, 0.5 = midi) ; `latitude` en radians :
 /// à midi le soleil culmine à `90° - latitude`, plein sud (hémisphère nord).
 pub fn sun_direction(time_of_day: f64, latitude: f32) -> glam::Vec3 {
-    // angle horaire : 0 à midi, ±π à minuit
-    let h = (std::f64::consts::TAU * (time_of_day - 0.5)) as f32;
-    let (sin_h, cos_h) = h.sin_cos();
+    let (sin_h, cos_h) = hour_angle(time_of_day).sin_cos();
     let (sin_lat, cos_lat) = latitude.sin_cos();
     let to_sun = glam::Vec3::new(-sin_h, -sin_lat * cos_h, cos_lat * cos_h);
     -to_sun
