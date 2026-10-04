@@ -22,6 +22,7 @@ use crate::app::engine::renderer::world::World;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
+use crate::config::EngineConfig;
 use crate::profile;
 use crate::profiling::render::GpuProfiler;
 use crate::{Scene, app::engine::renderer::render_systems::ObjectRenderSystem};
@@ -61,9 +62,14 @@ impl Renderer {
         window: Arc<Window>,
         logger: Arc<Logger>,
         scene: &mut dyn Scene,
+        config: Arc<EngineConfig>,
     ) -> Result<Self> {
-        let mut swapchain =
-            swapchain::Swapchain::new(context.clone(), window.clone(), logger.clone())?;
+        let mut swapchain = swapchain::Swapchain::new(
+            context.clone(),
+            window.clone(),
+            logger.clone(),
+            config.render.present_mode,
+        )?;
         swapchain.update_size()?;
 
         unsafe {
@@ -98,7 +104,8 @@ impl Renderer {
 
             // Shadow map : créée avant les descriptor sets car son image view et son
             // sampler sont écrits dans le descriptor set 2 dès la construction.
-            let shadow_map = ShadowMap::new(context.clone())?;
+            let shadow_map =
+                ShadowMap::new(context.clone(), config.render.shadow.map_resolution)?;
 
             // creating descriptor sets
             let uniform_buffer_handles: Vec<vk::Buffer> = frames
@@ -117,6 +124,7 @@ impl Renderer {
                 context.clone(),
                 descriptor_handler.clone(),
                 in_flight_frames_count,
+                config,
             )?;
 
             // La scène peuple le monde (assets + RenderObject) AVANT l'upload GPU

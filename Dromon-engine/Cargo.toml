@@ -19,7 +19,8 @@ anyhow = "1.0.102"
 ash = "0.38.0"
 ash-window = "0.13.0"
 bytemuck = { version = "1.25.0", features = ["derive"] }
-glam = { version = "0.29", features = ["bytemuck"] }
+# `serde` : les `Vec3` des fichiers de config s'écrivent `(x, y, z)` en RON.
+glam = { version = "0.29", features = ["bytemuck", "serde"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 softbuffer = "0.4"
@@ -33,3 +34,6 @@ rustc-hash = "2"
 # Parallélisme de données par vol de travail (work-stealing) : maille les chunks sur
 # tous les cœurs. Chaque chunk est indépendant, `mesh_chunk` ne lit que `&manager`.
 rayon = "1"
+# Configuration du monde : `WorldGenConfig` (serde) lue depuis un fichier RON.
+serde = { version = "1.0.229", features = ["derive"] }
+ron = "0.12.2"

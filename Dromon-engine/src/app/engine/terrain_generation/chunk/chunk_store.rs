@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use super::{CHUNK_SIZE, chunk_data::ChunkData, terrain_source::TerrainSource};
 use crate::app::engine::terrain_generation::generation::DensityField;
+use crate::config::MeshDebug;
 
 /// Chunk contenant la colonne monde `(wx, wy)`, et coordonnée locale associée.
 #[inline]
@@ -58,14 +59,26 @@ impl ChunkStore {
 pub struct TerrainSnapshot {
     source: Arc<TerrainSource>,
     edits: FxHashMap<IVec2, Arc<ChunkData>>,
+    /// Options de maillage (`debug.ron`), lues par les workers.
+    mesh_debug: MeshDebug,
 }
 
 impl TerrainSnapshot {
-    pub fn new(source: &Arc<TerrainSource>, store: &ChunkStore) -> TerrainSnapshot {
+    pub fn new(
+        source: &Arc<TerrainSource>,
+        store: &ChunkStore,
+        mesh_debug: MeshDebug,
+    ) -> TerrainSnapshot {
         TerrainSnapshot {
             source: source.clone(),
             edits: store.chunks.clone(),
+            mesh_debug,
         }
+    }
+
+    /// Options de maillage de debug.
+    pub fn mesh_debug(&self) -> MeshDebug {
+        self.mesh_debug
     }
 
     /// Le chunk `coord` fait-il partie du monde (cf. [`WorldDisc`](super::WorldDisc)) ?
@@ -88,6 +101,7 @@ impl TerrainSnapshot {
             coord,
             apron,
             step,
+            self.source.max_height(),
         )
     }
 

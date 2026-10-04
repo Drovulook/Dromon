@@ -70,6 +70,7 @@ impl UniformBuffer {
         stars: &Stars,
     ) {
         profile!();
+        let atmo = &atmosphere.params;
         let ubo = UniformBufferObject {
             view: camera.view,
             proj: camera.proj,
@@ -77,30 +78,28 @@ impl UniformBuffer {
             light_view_proj: sun.view_proj(camera.position, camera.front()),
             light_direction: sun.direction.extend(0.0),
             light_color: sun.color.extend(sun.intensity),
-            fog: atmosphere.horizon_color.extend(atmosphere.fog_density),
-            shadow_params: Vec4::new(sun.shadow.depth_range(), sun.shadow.texel_size(), 0.0, 0.0),
+            fog: atmosphere.horizon_color.extend(atmo.fog_density),
+            shadow_params: Vec4::new(sun.shadow.depth_range(), sun.shadow_texel_size(), 0.0, 0.0),
             fog_params: Vec4::new(
-                atmosphere.fog_scale_height,
-                atmosphere.fog_anisotropy,
-                atmosphere.halo_strength,
+                atmo.fog_scale_height,
+                atmo.fog_anisotropy,
+                atmo.halo_strength,
                 0.0,
             ),
             sun_disk: Vec4::new(
-                sun.disk.angular_radius,
+                sun.disk.angular_radius_deg.to_radians(),
                 sun.disk.edge_softness,
                 sun.disk.intensity,
                 0.0,
             ),
-            sky_zenith: atmosphere
-                .zenith_color
-                .extend(atmosphere.sky_gradient_exponent),
-            ambient: atmosphere.ambient_color.extend(atmosphere.ground_bounce),
+            sky_zenith: atmosphere.zenith_color.extend(atmo.sky_gradient_exponent),
+            ambient: atmosphere.ambient_color.extend(atmo.ground_bounce),
             sky_rotation: Mat4::from_mat3(stars.world_to_sky),
             stars: Vec4::new(
-                stars.brightness * stars.visibility,
+                stars.params.brightness * stars.visibility,
                 stars.time_secs,
-                stars.density,
-                stars.twinkle,
+                stars.params.density,
+                stars.params.twinkle,
             ),
         };
 

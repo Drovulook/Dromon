@@ -3,10 +3,6 @@ use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
-/// Résolution (carrée) de la shadow map, en texels. Indépendante de la fenêtre :
-/// plus c'est grand, plus les ombres sont fines, mais plus ça coûte en mémoire
-pub const SHADOW_MAP_RESOLUTION: u32 = 2048;
-
 /// Format de la shadow map : profondeur 32 bits flottante, sans stencil.
 const SHADOW_MAP_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 
@@ -24,10 +20,11 @@ pub struct ShadowMap {
 }
 
 impl ShadowMap {
-    pub fn new(context: Arc<RenderingContext>) -> Result<Self> {
+    /// `resolution` : côté de la shadow map carrée, en texels (indépendant de la fenêtre).
+    pub fn new(context: Arc<RenderingContext>, resolution: u32) -> Result<Self> {
         let extent = vk::Extent2D {
-            width: SHADOW_MAP_RESOLUTION,
-            height: SHADOW_MAP_RESOLUTION,
+            width: resolution,
+            height: resolution,
         };
 
         // DEPTH_STENCIL_ATTACHMENT : cible de rendu de la passe d'ombre.

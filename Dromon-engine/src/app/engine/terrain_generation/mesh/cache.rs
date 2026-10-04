@@ -28,9 +28,8 @@ use glam::IVec2;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-/// Budget mémoire par défaut du cache. Borné en **octets** et non en nombre d'entrées :
-/// les tailles sont très inégales (LOD1 ≈ ¼ du LOD0, LOD2 ≈ 6 %, LOD3 ≈ 1,5 %).
-pub const DEFAULT_BUDGET_BYTES: usize = 2000 * 1024 * 1024;
+// Budget mémoire : `TerrainRenderParams::mesh_cache_mb`. Borné en **octets** et non en
+// nombre d'entrées : les tailles sont très inégales (LOD1 ≈ ¼ du LOD0, LOD2 ≈ 6 %…).
 
 /// Fraction du budget visée après une éviction : on descend franchement sous la barre
 /// plutôt que de re-trier à chaque insertion suivante.
@@ -187,11 +186,5 @@ impl MeshCache {
             }
         }
         self.evict_floor = 0;
-    }
-}
-
-impl Default for MeshCache {
-    fn default() -> Self {
-        MeshCache::new(DEFAULT_BUDGET_BYTES)
     }
 }

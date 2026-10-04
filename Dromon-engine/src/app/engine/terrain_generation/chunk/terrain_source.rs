@@ -1,19 +1,9 @@
-use crate::{HeightParams, app::engine::terrain_generation::generation::height_field::HeightField};
+use crate::app::engine::terrain_generation::generation::height_field::HeightField;
+use crate::config::WorldGenConfig;
 use crate::app::engine::terrain_generation::lod::chunk_distance;
 use glam::{IVec2, Vec2};
 
 use super::CHUNK_SIZE;
-
-/// Paramètres de génération du monde : graine, forme du champ d'altitude, étendue.
-#[derive(Default)]
-pub struct GenParams {
-    pub seed: u32,
-    /// Réglages du fBm érodé (cf. [`HeightParams`]).
-    pub height: HeightParams,
-    /// Rayon du monde, en chunks (cf. [`WorldDisc`]). Sans rapport avec la portée de
-    /// chargement, qui se règle à part.
-    pub world_radius: u32,
-}
 
 /// **Forme du monde** : un disque de chunks centré sur l'origine. Seul critère de bord du
 /// monde pour le mailleur (murs de bordure), indépendant de ce qui est chargé.
@@ -81,14 +71,22 @@ pub struct TerrainSource {
     /// Générateur du relief (fBm). Alimente le champ de densité.
     height: HeightField,
     world: WorldDisc,
+    /// Plafond du monde, en voxels.
+    max_height: u32,
 }
 
 impl TerrainSource {
-    pub fn new(params: GenParams) -> TerrainSource {
+    pub fn new(config: &WorldGenConfig) -> TerrainSource {
         TerrainSource {
-            height: HeightField::new(params.seed, params.height),
-            world: WorldDisc::new(params.world_radius),
+            height: HeightField::new(config.seed, config.relief),
+            world: WorldDisc::new(config.world.radius_chunks),
+            max_height: config.world.max_height,
         }
+    }
+
+    /// Plafond du monde, en voxels.
+    pub fn max_height(&self) -> u32 {
+        self.max_height
     }
 
     /// Le générateur de relief, pour le [`DensityField`](super::super::generation::DensityField).

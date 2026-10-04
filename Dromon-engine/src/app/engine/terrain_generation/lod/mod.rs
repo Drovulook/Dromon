@@ -16,25 +16,11 @@ pub mod transition_shrink;
 mod transvoxel_tables;
 
 use super::chunk::CHUNK_SIZE;
+use crate::config::LodParams;
 use glam::{IVec2, Vec2, Vec3};
 
-/// Niveau de détail maximal (pas = `1 << MAX_LOD`). 3 paliers pour commencer.
-pub const MAX_LOD: u8 = 4;
-
-/// Rayons (unités monde) des anneaux, mesurés depuis le point focal. `RADII[k]` est la
-/// distance à partir de laquelle on passe du niveau `k` au niveau `k + 1`.
-const RADII: [f32; MAX_LOD as usize] = [800.0, 1600.0, 3200.0, 6400.0];
-
-/// Demi-largeur relative de la **bande morte** de l'hystérésis. Un chunk pile sur une
-/// frontière d'anneau oscillerait sinon entre deux niveaux et se ferait re-mailler en
-/// boucle : on exige de passer nettement sous le rayon pour gagner en détail, et
-/// nettement au-dessus pour en perdre. Principe du thermostat. 0.08 ⇒ le rayon 220 se
-/// dédouble en 202 / 238.
-const HYSTERESIS: f32 = 0.08;
-
-/// Poids de la hauteur de caméra dans la distance qui pilote le LOD (cf. [`LodFocus`]).
-/// `1.0` = distance euclidienne 3D honnête ; baisser pour atténuer l'effet de l'altitude.
-const HEIGHT_WEIGHT: f32 = 1.0;
+// Rayons des anneaux, hystérésis et poids de la hauteur : `LodParams` (`render.ron`).
+// Le LOD max vaut le nombre de rayons (`LodParams::max_lod`).
 
 /// Distance **horizontale** (monde) du centre du chunk `coord` au point `focus`. Sert à
 /// décrire des disques de chunks (le monde, la fenêtre chargée), pas à choisir le LOD —
@@ -88,11 +74,12 @@ impl LodFocus {
         }
     }
 
-    /// Distance œil → chunk qui pilote le LOD (horizontale composée avec la hauteur).
+    /// Distance œil → chunk qui pilote le LOD (horizontale composée avec la hauteur,
+    /// pondérée par `height_weight`).
     #[inline]
-    pub fn distance(self, coord: IVec2) -> f32 {
+    pub fn distance(self, coord: IVec2, height_weight: f32) -> f32 {
         let d = chunk_distance(coord, self.pos);
-        let h = self.height * HEIGHT_WEIGHT;
+        let h = self.height * height_weight;
         (d * d + h * h).sqrt()
     }
 
@@ -106,28 +93,28 @@ impl LodFocus {
 
 /// LOD **brut** d'un chunk sans mémoire de son état précédent : le nombre d'anneaux
 /// franchis. Sert à l'initialisation, avant que l'hystérésis n'ait un état à relire.
-pub fn static_lod(coord: IVec2, focus: LodFocus) -> u8 {
-    let d = focus.distance(coord);
-    RADII.iter().take_while(|&&r| d >= r).count() as u8
+pub fn static_lod(coord: IVec2, focus: LodFocus, params: &LodParams) -> u8 {
+    let d = focus.distance(coord, params.height_weight);
+    params.radii.iter().take_while(|&&r| d >= r).count() as u8
 }
 
 /// LOD **brut** avec hystérésis : même règle que [`static_lod`], mais chaque rayon est
-/// décalé selon le niveau `current` déjà occupé par le chunk.
+/// décalé selon le niveau `current` déjà occupé par le chunk (`h` = `hysteresis`).
 ///
 /// - le chunk a déjà franchi le rayon `k` (`current > k`) → pour revenir en deçà, il doit
-///   descendre sous `RADII[k]·(1 − HYSTERESIS)` ;
-/// - il ne l'a pas franchi → pour le franchir, il doit dépasser `RADII[k]·(1 + HYSTERESIS)`.
+///   descendre sous `radii[k]·(1 − h)` ;
+/// - il ne l'a pas franchi → pour le franchir, il doit dépasser `radii[k]·(1 + h)`.
 ///
 /// ⚠ `current` doit être le niveau **brut** du chunk, jamais celui d'après équilibrage
 /// 2:1 — sinon l'hystérésis dérive (cf. [`grid::LodGrid`]).
-pub fn hysteretic_lod(coord: IVec2, focus: LodFocus, current: u8) -> u8 {
-    let d = focus.distance(coord);
+pub fn hysteretic_lod(coord: IVec2, focus: LodFocus, current: u8, params: &LodParams) -> u8 {
+    let d = focus.distance(coord, params.height_weight);
     let mut lod = 0;
-    for (k, &radius) in RADII.iter().enumerate() {
+    for (k, &radius) in params.radii.iter().enumerate() {
         let threshold = if current > k as u8 {
-            radius * (1.0 - HYSTERESIS)
+            radius * (1.0 - params.hysteresis)
         } else {
-            radius * (1.0 + HYSTERESIS)
+            radius * (1.0 + params.hysteresis)
         };
         if d < threshold {
             break;

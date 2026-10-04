@@ -1,58 +1,47 @@
 use anyhow::Result;
 use glam::{IVec2, Vec3};
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::{
-    GenParams, World,
+    World,
     app::{
         engine::{
             renderer::{
                 render_resources::MeshData,
                 world::{
-                    light::ShadowConfig,
                     terrain::{
-                        INITIAL_LOAD_BUDGET, Terrain, culling::VisibleSet, graveyard::Graveyard,
-                        mesh_job::MeshJob, meshes::InstalledChunks,
+                        Terrain, culling::VisibleSet, graveyard::Graveyard, mesh_job::MeshJob,
+                        meshes::InstalledChunks,
                     },
                 },
             },
             rendering_context::RenderingContext,
             terrain_generation::{
-                ChunkStore, ChunkStreamer, LodFocus, LodGrid, MAX_LOD, MeshCache, TerrainSnapshot,
+                ChunkStore, ChunkStreamer, LodFocus, LodGrid, MeshCache, TerrainSnapshot,
                 TerrainSource, chunk_distance,
             },
         },
         logger::Logger,
     },
+    config::{DebugConfig, TerrainRenderParams, WorldGenConfig},
     profile,
 };
 
 impl World {
     /// Crée le terrain de la scène. Appelée par la scène dans `setup`. Rend la main
     /// aussitôt : les chunks sont maillés en fond et apparaissent au fil des frames.
-    ///
-    /// `load_radius_chunks` = portée du streaming autour de la caméra ; l'étendue du
-    /// monde, elle, est dans `params.world_radius`.
-    pub fn generate_terrain(&mut self, params: GenParams, load_radius_chunks: u32) -> Result<()> {
-        // Le terrain s'étend sur tout le monde et on le survole : la boîte d'ombre
-        // doit être grande et suivre la caméra.
-        // Boîte de 4000 unités (~2 u/texel) : couvre une vallée entière devant la
-        // caméra, au prix d'ombres plus floues de près. L'œil recule de 3000 le long
-        // des rayons pour passer au-dessus des plus hauts sommets (relief ≤ ~1300,
-        // lumière à ~30° de la verticale) ; `far` couvre ensuite tout le relief,
-        // inclinaison de la boîte comprise (4000 · tan 30° ≈ 2300 de plus).
-        self.light.shadow = ShadowConfig {
-            half_size: 2000.0,
-            near: 1.0,
-            far: 8000.0,
-            eye_distance: 3000.0,
-            follow_camera: true,
-            focus_distance: 1500.0,
-        };
+    pub fn generate_terrain(&mut self, config: &WorldGenConfig) -> Result<()> {
+        // Départ au-dessus des plus hauts sommets possibles.
+        self.camera.position.z = config.world.max_height as f32 * 1.1;
+
+        // Terrain survolé : grande boîte d'ombre qui suit la caméra (`render.ron`).
+        self.light.shadow = self.config.render.shadow.terrain.clone();
 
         self.terrain = Some(Terrain::new(
-            params,
-            load_radius_chunks,
+            config,
+            &self.config.render.terrain,
+            &self.config.debug,
             self.camera.position,
             self.context.clone(),
             self.logger.clone(),
@@ -66,8 +55,9 @@ impl Terrain {
     /// Crée le monde et lance le maillage en fond de la fenêtre chargée initiale : le
     /// terrain rend la main vide, ses meshes apparaissent au fil des frames suivantes.
     fn new(
-        params: GenParams,
-        load_radius_chunks: u32,
+        config: &WorldGenConfig,
+        params: &TerrainRenderParams,
+        debug: &DebugConfig,
         camera_position: Vec3,
         context: Arc<RenderingContext>,
         logger: Arc<Logger>,
@@ -75,7 +65,7 @@ impl Terrain {
     ) -> Terrain {
         profile!();
 
-        let source = Arc::new(TerrainSource::new(params));
+        let source = Arc::new(TerrainSource::new(config));
 
         // Altitude moyenne du relief : plan de référence de la composante verticale du
         //    LOD. Mesurée une seule fois — le relief ne bouge pas.
@@ -84,13 +74,13 @@ impl Terrain {
         // Fenêtre chargée initiale et ses LOD (distance horizontale ET verticale au
         //    point de vue de départ, équilibrés 2:1 — cf. `LodGrid::rebalance`).
         let focus = LodFocus::new(camera_position, reference_z);
-        let streamer = ChunkStreamer::new(source.world(), load_radius_chunks, focus);
+        let streamer = ChunkStreamer::new(source.world(), params, focus);
         let grid = streamer.grid();
 
         // Vue figée du terrain pour ce lot : le relief plus les édits du moment (aucun
         // ici, mais la génération initiale suit le même chemin que le re-maillage).
         let store = ChunkStore::default();
-        let snapshot = TerrainSnapshot::new(&source, &store);
+        let snapshot = TerrainSnapshot::new(&source, &store, debug.mesh);
 
         // Aucun maillage ici : le monde se construit en fond, frame après frame, pendant
         //    que le jeu tourne. Du plus proche au plus lointain de la caméra, pour que le
@@ -99,13 +89,15 @@ impl Terrain {
         coords.sort_by(|&a, &b| {
             chunk_distance(a, focus.pos).total_cmp(&chunk_distance(b, focus.pos))
         });
-        let mut mesh_cache = MeshCache::default();
+        let mut mesh_cache = MeshCache::new(params.mesh_cache_mb * 1024 * 1024);
+        let ms = |v: f32| Duration::from_secs_f32(v / 1000.0);
+        let frame_budget = ms(params.frame_budget_ms);
         let initial_load = MeshJob::start_initial_load(
             grid,
             coords,
             &mut mesh_cache,
             snapshot,
-            INITIAL_LOAD_BUDGET,
+            ms(params.initial_load_budget_ms),
         );
 
         Terrain {
@@ -117,8 +109,11 @@ impl Terrain {
             mesh_cache,
             mesh_job: Some(initial_load),
             pending_uploads: Vec::new(),
-            graveyard: Graveyard::new(frames_in_flight),
+            graveyard: Graveyard::new(frames_in_flight, frame_budget),
             visible: VisibleSet::default(),
+            frame_budget,
+            max_lod: params.lod.max_lod(),
+            debug: debug.clone(),
             context,
             logger,
         }
@@ -135,9 +130,11 @@ pub(super) fn log_terrain_stats(
     logger: &Logger,
     grid: &LodGrid,
     meshed: &[(IVec2, Arc<MeshData>)],
+    max_lod: u8,
 ) {
-    let mut chunks_per = [0usize; MAX_LOD as usize + 1];
-    let mut verts_per = [0usize; MAX_LOD as usize + 1];
+    let levels = max_lod as usize + 1;
+    let mut chunks_per = vec![0usize; levels];
+    let mut verts_per = vec![0usize; levels];
     for (coord, data) in meshed {
         let lod = grid.lod(*coord) as usize;
         chunks_per[lod] += 1;
@@ -153,7 +150,7 @@ pub(super) fn log_terrain_stats(
         "Terrain : {total_chunks} chunks, {total_verts} sommets"
     )];
     records.extend(
-        (0..=MAX_LOD as usize).map(|l| format!("{l}\u{1f}{}\u{1f}{}", chunks_per[l], verts_per[l])),
+        (0..levels).map(|l| format!("{l}\u{1f}{}\u{1f}{}", chunks_per[l], verts_per[l])),
     );
     logger.world(&records.join("\u{1e}"));
 }

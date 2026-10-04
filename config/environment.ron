@@ -1,0 +1,91 @@
+// Ciel, soleil et écoulement du temps, lus au démarrage du moteur
+// (cf. `EnvironmentConfig`). Un champ absent prend sa valeur par défaut ; un champ
+// inconnu est une erreur. Couleurs : (r, g, b) linéaires.
+(
+    // Le soleil culmine à 90° − latitude, plein sud.
+    latitude_deg: 40.0,
+
+    clock: (
+        day_length_secs: 30.0, // durée d'un jour de jeu en secondes réelles
+        time_scale: 1.0,       // 0 = pause, 60 = accéléré
+        start_hour: 9.0,       // heure de départ, dans [0, 24[
+    ),
+
+    // Disque solaire dessiné dans le ciel (n'influe pas sur l'éclairage).
+    sun: (
+        angular_radius_deg: 1.0, // le vrai soleil fait ~0.27°, plus gros pour la lisibilité
+        edge_softness: 0.85,     // fraction du rayon où commence le fondu (1 = bord net)
+        intensity: 10.0,         // doit éclipser le halo ; > 1 sature en blanc
+    ),
+
+    // Couleurs en fonction de l'élévation du soleil (degrés), interpolées entre deux
+    // keyframes voisines. Triées par élévation croissante.
+    day_night: (
+        keyframes: [
+            ( // nuit noire (fin du crépuscule astronomique)
+                elevation_deg: -18.0,
+                horizon:   (0.010, 0.012, 0.025),
+                zenith:    (0.003, 0.005, 0.015),
+                sun_color: (1.0, 0.35, 0.10),
+                ambient:   (0.02, 0.025, 0.045),
+            ),
+            ( // crépuscule civil : lueur violacée à l'horizon
+                elevation_deg: -6.0,
+                horizon:   (0.22, 0.13, 0.17),
+                zenith:    (0.03, 0.05, 0.14),
+                sun_color: (1.0, 0.35, 0.10),
+                ambient:   (0.07, 0.07, 0.11),
+            ),
+            ( // coucher / lever
+                elevation_deg: 0.0,
+                horizon:   (0.85, 0.45, 0.22),
+                zenith:    (0.12, 0.18, 0.42),
+                sun_color: (1.0, 0.45, 0.15),
+                ambient:   (0.17, 0.16, 0.20),
+            ),
+            ( // heure dorée
+                elevation_deg: 8.0,
+                horizon:   (0.72, 0.65, 0.62),
+                zenith:    (0.10, 0.23, 0.58),
+                sun_color: (1.0, 0.72, 0.45),
+                ambient:   (0.24, 0.26, 0.33),
+            ),
+            ( // après-midi
+                elevation_deg: 25.0,
+                horizon:   (0.55, 0.70, 0.88),
+                zenith:    (0.10, 0.25, 0.65),
+                sun_color: (1.0, 0.85, 0.65),
+                ambient:   (0.28, 0.32, 0.40),
+            ),
+            ( // soleil haut : lumière plus blanche
+                elevation_deg: 50.0,
+                horizon:   (0.55, 0.70, 0.90),
+                zenith:    (0.09, 0.24, 0.66),
+                sun_color: (1.0, 0.93, 0.83),
+                ambient:   (0.29, 0.33, 0.41),
+            ),
+        ],
+        // Éclairage direct : éteint sous -7°, plein au-dessus de 1° (sous -3° le
+        // disque est entièrement caché par l'horizon).
+        sun_fade_start_deg: -7.0,
+        sun_fade_end_deg: 1.0,
+        // Étoiles : pleinement visibles sous -14°, disparues au-dessus de -5°.
+        stars_fade_start_deg: -14.0,
+        stars_fade_end_deg: -5.0,
+    ),
+
+    atmosphere: (
+        ground_bounce: 0.25,         // part de l'ambiant renvoyée par le sol
+        sky_gradient_exponent: 0.75, // < 1 = dégradé resserré près de l'horizon
+        fog_density: 0.0005,         // σ₀ de Beer-Lambert
+        fog_scale_height: 1200.0,    // H ≈ 3 × étendue verticale du terrain
+        fog_anisotropy: 0.9,         // g de Henyey-Greenstein, dans [0, 1[
+        halo_strength: 0.003,        // halo solaire (ciel et brouillard)
+    ),
+
+    stars: (
+        brightness: 1.0, // luminosité des plus brillantes
+        density: 0.03,   // fraction des cases du ciel occupées
+        twinkle: 0.25,   // amplitude de la scintillation
+    ),
+)

@@ -1,0 +1,66 @@
+// Réglages du rendu, lus au démarrage du moteur (cf. `RenderConfig`).
+// Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
+(
+    // Synchronisation verticale : Fifo (vsync stricte, seul mode garanti), FifoRelaxed,
+    // Mailbox (vsync à faible latence), Immediate (sans vsync, pour mesurer les perfs).
+    // Repli sur Fifo si le mode n'est pas supporté.
+    present_mode: Mailbox,
+
+    camera: (
+        fov_deg: 45.0,      // champ de vision vertical au démarrage
+        min_fov_deg: 20.0,  // bornes du zoom (molette)
+        max_fov_deg: 110.0,
+        near: 0.1,
+        far: 8000.0,        // distance d'affichage : inutile au-delà de la portée de chargement
+        move_speed: 400.0,  // unités monde par seconde
+        rotation_sensitivity: 0.002, // radians par pixel de souris
+        zoom_speed: 0.05,   // radians de FOV par cran de molette
+        boost_factor_rot: 4.0,  // × tant que Alt est maintenue (rotation et zoom)
+        boost_factor_move: 3.8, // × tant que Alt est maintenue (déplacement)
+    ),
+
+    terrain: (
+        load_radius_chunks: 80,     // portée de chargement autour de la caméra (~20 000 chunks)
+        unload_margin_chunks: 2.0,  // un chunk ne sort qu'au-delà de portée + marge
+        lod: (
+            // Distances (unités monde) de passage au niveau suivant. Leur nombre fixe le
+            // LOD max (pas = 1 << lod voxels) : 4 rayons → LOD 0 à 4.
+            radii: [800.0, 1600.0, 3200.0, 6400.0],
+            hysteresis: 0.08,   // bande morte relative autour de chaque rayon
+            height_weight: 1.0, // 1 = distance 3D œil → chunk, 0 = horizontale seule
+        ),
+        frame_budget_ms: 1.0,        // construction / destruction de buffers par frame
+        initial_load_budget_ms: 1.0, // idem pendant le chargement initial
+        mesh_cache_mb: 2000,         // cache des géométries (allers-retours de caméra)
+    ),
+
+    shadow: (
+        // Côté de la shadow map, en texels. Résolution des ombres :
+        // 2 · half_size / map_resolution unités monde par texel.
+        map_resolution: 2048,
+
+        // Petite scène d'objets fixes : boîte centrée sur l'origine.
+        static_scene: (
+            half_size: 15.0,
+            near: 0.1,
+            far: 60.0,
+            eye_distance: 30.0,
+            follow_camera: false,
+            focus_distance: 0.0,
+        ),
+
+        // Terrain survolé (appliquée par `generate_terrain`). Boîte de 4000 unités
+        // (~2 u/texel) : couvre une vallée devant la caméra, au prix d'ombres plus
+        // floues de près. L'œil recule de 3000 pour passer au-dessus des sommets
+        // (relief ≤ ~1300, lumière à ~30° de la verticale) ; `far` couvre tout le
+        // relief, inclinaison de la boîte comprise (4000 · tan 30° ≈ 2300 de plus).
+        terrain: (
+            half_size: 2000.0,
+            near: 1.0,
+            far: 8000.0,
+            eye_distance: 3000.0,
+            follow_camera: true,
+            focus_distance: 1500.0, // centre de la boîte, devant la caméra
+        ),
+    ),
+)

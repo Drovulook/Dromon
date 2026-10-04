@@ -15,7 +15,7 @@
 //!
 //! [`ChunkStore`]: super::chunk_store::ChunkStore
 
-use super::{CHUNK_HEIGHT, CHUNK_SIZE};
+use super::CHUNK_SIZE;
 use glam::IVec3;
 use rustc_hash::FxHashMap;
 
@@ -36,12 +36,13 @@ pub struct ChunkData {
 }
 
 impl ChunkData {
-    /// Écrit une densité en coordonnées **locales** au chunk.
+    /// Écrit une densité en coordonnées **locales** au chunk. Le plafond (`max_height`)
+    /// n'est pas vérifié ici : il appartient à la config du monde, pas au chunk.
     pub fn set_edit(&mut self, local: IVec3, density: f32) {
         debug_assert!(
             (0..CHUNK_SIZE as i32).contains(&local.x)
                 && (0..CHUNK_SIZE as i32).contains(&local.y)
-                && (0..CHUNK_HEIGHT as i32).contains(&local.z),
+                && local.z >= 0,
             "coordonnée voxel hors du chunk (coordonnées monde passées par erreur ?) : {local}"
         );
         self.edits.insert(local, density);

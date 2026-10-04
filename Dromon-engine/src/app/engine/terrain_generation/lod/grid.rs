@@ -166,7 +166,7 @@ impl LodGrid {
     /// ramène à cette borne. Les cases non chargées ne contraignent rien.
     ///
     /// Converge : abaisser un chunk ne peut créer de violation que chez ses voisins, et
-    /// les niveaux ne font que décroître, bornés par 0 ⇒ point fixe en au plus `MAX_LOD`
+    /// les niveaux ne font que décroître, bornés par 0 ⇒ point fixe en au plus `max_lod`
     /// passes.
     ///
     /// ⚠ **Aujourd'hui c'est un no-op**, et c'est voulu. Deux voisins ont leurs centres à

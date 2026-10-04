@@ -1,6 +1,6 @@
 use glam::{IVec2, Vec3};
 
-use crate::app::engine::terrain_generation::{CHUNK_HEIGHT, CHUNK_SIZE};
+use crate::app::engine::terrain_generation::CHUNK_SIZE;
 
 // pistes d'amélioration:
 // - éviter d'être trop conservateur sur la hauteur des chunks
@@ -53,10 +53,10 @@ impl Frustum {
         true
     }
 
-    pub fn chunk_aabb(coord: IVec2) -> (Vec3, Vec3) {
+    /// Boîte englobante du chunk `coord`, du sol au plafond du monde `max_height`.
+    pub fn chunk_aabb(coord: IVec2, max_height: f32) -> (Vec3, Vec3) {
         let size = CHUNK_SIZE as f32;
-        let height = CHUNK_HEIGHT as f32;
         let min = Vec3::new(coord.x as f32 * size, coord.y as f32 * size, 0.0);
-        (min, min + Vec3::new(size, size, CHUNK_HEIGHT as f32))
+        (min, min + Vec3::new(size, size, max_height))
     }
 }

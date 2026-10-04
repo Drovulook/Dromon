@@ -31,6 +31,7 @@ impl VisibleSet {
         chunks: &InstalledChunks,
         camera: &Camera,
         light: &DirectionalLight,
+        max_height: f32,
     ) {
         profile!();
         let camera_frustum = Frustum::from_view_proj(camera.proj * camera.view);
@@ -40,7 +41,7 @@ impl VisibleSet {
         self.camera.clear();
         self.shadow.clear();
         for &coord in chunks.coords() {
-            let (min, max) = Frustum::chunk_aabb(coord);
+            let (min, max) = Frustum::chunk_aabb(coord, max_height);
             if camera_frustum.intersects_aabb(min, max) {
                 self.camera.push(coord);
             }

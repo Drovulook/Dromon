@@ -193,11 +193,13 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // Le bord du monde se lit dans le monde, **pas** dans la grille : un voisin non
     // chargé (bord de la fenêtre de streaming) ne doit pas faire pousser de mur.
     let border_faces = Face::ALL.map(|f| !terrain.in_world(coord + f.offset()));
+    let debug = terrain.mesh_debug();
     add_mesh_borders(
         &field,
         coord,
         border_faces,
         step,
+        debug,
         &mut vertices,
         &mut indices,
         &mut volume_colors,
@@ -209,6 +211,9 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // surface ci-dessus, mais le rétrécissement demi-pas a rendu les positions
     // confondues (cf. [`HalfStepShrink`]) : la couture ferme quand même.
     if !lod_transition_faces.is_empty() {
+        // Les cellules de transition n'ajoutent des sommets qu'à la suite (table de
+        // mutualisation à part) : tout ce qui est poussé après ce point leur appartient.
+        let first_transition_vertex = vertices.len();
         let mut trans_map: FxHashMap<EdgeKey, u32> = FxHashMap::default();
         for face in lod_transition_faces.iter() {
             debug_assert_eq!(
@@ -230,6 +235,11 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
                 &mut surface_colors,
             );
         }
+        if debug.transition_color {
+            for v in &mut vertices[first_transition_vertex..] {
+                v.color = Vec3::new(1.0, 0.0, 1.0);
+            }
+        }
     }
 
     MeshData { vertices, indices }
@@ -237,7 +247,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 
 #[cfg(test)]
 mod tests {
-    use crate::GenParams;
+    use crate::config::{MeshDebug, WorldGenConfig};
     use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ChunkStore, TerrainSource};
     use crate::app::engine::terrain_generation::lod::Face;
     use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
@@ -262,11 +272,10 @@ mod tests {
     /// `WORLD_FLOOR`.
     fn stitched_pair() -> (Vec<TerrainVertex>, Vec<TerrainVertex>) {
         let (fine, coarse) = (IVec2::new(0, 0), IVec2::new(1, 0));
-        let source = Arc::new(TerrainSource::new(GenParams {
-            world_radius: 4,
-            ..GenParams::default()
-        }));
-        let terrain = TerrainSnapshot::new(&source, &ChunkStore::default());
+        // Monde par défaut : rayon 4 chunks.
+        let source = Arc::new(TerrainSource::new(&WorldGenConfig::default()));
+        let terrain =
+            TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
         let lods = lod_grid(&[(fine, 0), (coarse, 1)]);
 
         (

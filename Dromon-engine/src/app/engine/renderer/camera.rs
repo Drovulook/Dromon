@@ -2,60 +2,47 @@ use glam::{Mat4, Vec3};
 use winit::keyboard::KeyCode;
 
 use crate::app::engine::inputs::InputState;
-use crate::app::engine::terrain_generation::CHUNK_HEIGHT;
 use crate::app::engine::timer::Timer;
+use crate::config::CameraParams;
 use crate::profile;
 
 const MAX_PITCH: f32 = 1.55; // ≈ 89° : on ne regarde jamais pile à la verticale
-const MIN_FOV: f32 = 0.350; // ≈ 20°
-const MAX_FOV: f32 = 1.92; // ≈ 110°
 
 /// Caméra du monde. Monde en Z-up (le « haut » est l'axe +Z).
 pub struct Camera {
+    /// Réglages (`render.ron`) : projection et contrôles.
+    pub params: CameraParams,
+
     pub position: Vec3,
     pub yaw: f32,
     pub pitch: f32,
-
+    /// FOV vertical courant (radians), modifié par le zoom.
     pub fov_y: f32,
-    pub near: f32,
-    pub far: f32,
 
     pub view: Mat4,
     pub proj: Mat4,
 
     pub is_primary: bool,
-    pub move_speed: f32,
-    pub rotation_sensitivity: f32,
-    pub zoom_speed: f32,
-    pub boost_factor_rot: f32, // multiplicateur appliqué tant qu'Alt est maintenue
-    pub boost_factor_move: f32,
 }
 
-impl Default for Camera {
-    fn default() -> Self {
-        let mut camera = Self {
-            position: Vec3::new(0.0, 0.0, (CHUNK_HEIGHT as f32) * 1.1),
+impl Camera {
+    pub fn new(params: &CameraParams) -> Camera {
+        let mut camera = Camera {
+            params: params.clone(),
+            // Remontée au-dessus du plafond du monde par `generate_terrain`.
+            position: Vec3::new(0.0, 0.0, 1100.0),
             yaw: 0.0,
             pitch: 0.0,
-            fov_y: 45.0_f32.to_radians(),
-            near: 0.1,
-            far: 8000.0,
+            fov_y: params.fov_deg.to_radians(),
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
-            move_speed: 400.0,
-            rotation_sensitivity: 0.002,
-            zoom_speed: 0.05,
-            boost_factor_rot: 4.0,
-            boost_factor_move: 3.8,
         };
         // au démarrage, on regarde l'horizon vers +X : cible à la même altitude → pitch 0
         camera.look_at(camera.position + Vec3::X - Vec3::Z);
         camera
     }
-}
 
-impl Camera {
     /// Vecteur « avant » (direction du regard), reconstruit depuis yaw/pitch.
     pub fn front(&self) -> Vec3 {
         Vec3::new(
@@ -77,10 +64,11 @@ impl Camera {
     pub fn update(&mut self, input: &InputState, timer: &Timer, aspect: f32) {
         profile!();
         let dt = timer.delta_secs();
+        let p = &self.params;
 
         // Alt maintenue → on amplifie déplacement, rotation et zoom.
         let boost = if input.is_held(KeyCode::AltLeft) {
-            self.boost_factor_rot
+            p.boost_factor_rot
         } else {
             1.0
         };
@@ -88,13 +76,13 @@ impl Camera {
         // Tant que R est maintenue, la souris ne fait plus pivoter la caméra.
         if !input.is_held(KeyCode::KeyR) {
             let (dx, dy) = input.mouse_delta();
-            self.yaw -= dx as f32 * self.rotation_sensitivity * boost;
-            self.pitch -= dy as f32 * self.rotation_sensitivity * boost;
+            self.yaw -= dx as f32 * p.rotation_sensitivity * boost;
+            self.pitch -= dy as f32 * p.rotation_sensitivity * boost;
             self.pitch = self.pitch.clamp(-MAX_PITCH, MAX_PITCH);
         }
 
-        self.fov_y =
-            (self.fov_y - input.scroll_delta() * self.zoom_speed * boost).clamp(MIN_FOV, MAX_FOV);
+        self.fov_y = (self.fov_y - input.scroll_delta() * p.zoom_speed * boost)
+            .clamp(p.min_fov_deg.to_radians(), p.max_fov_deg.to_radians());
 
         let front = self.front();
         let world_up = Vec3::Z;
@@ -122,12 +110,12 @@ impl Camera {
 
         // normalize() évite d'aller plus vite en diagonale (front + right).
         let boost = if input.is_held(KeyCode::AltLeft) {
-            self.boost_factor_move
+            p.boost_factor_move
         } else {
             1.0
         };
         if direction != Vec3::ZERO {
-            self.position += direction.normalize() * self.move_speed * boost * dt;
+            self.position += direction.normalize() * p.move_speed * boost * dt;
         }
 
         self.recompute_matrices(aspect);
@@ -138,7 +126,8 @@ impl Camera {
         let front = self.front();
         self.view = Mat4::look_at_rh(self.position, self.position + front, Vec3::Z);
 
-        let mut proj = Mat4::perspective_rh(self.fov_y, aspect, self.near, self.far);
+        let mut proj =
+            Mat4::perspective_rh(self.fov_y, aspect, self.params.near, self.params.far);
         proj.y_axis.y *= -1.0; // Vulkan a l'axe Y de l'écran vers le bas
         self.proj = proj;
     }

@@ -1,8 +1,11 @@
 mod app;
+/// Fichiers de configuration RON (`dromon_engine::config::WorldGenConfig`…).
+pub mod config;
 pub mod profiling;
 mod scene;
 
 use crate::app::{App, logger::Logger};
+use crate::config::EngineConfig;
 use anyhow::Result;
 use std::sync::Arc;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -13,7 +16,6 @@ use winit::event_loop::{ControlFlow, EventLoop};
 // sans rien savoir de l'arborescence `app::engine::renderer::…`.
 pub use app::engine::renderer::render_resources::{RenderObject, Transform};
 pub use app::engine::renderer::world::World;
-pub use app::engine::terrain_generation::{GenParams, HeightParams};
 pub use app::engine::timer::Timer;
 pub use scene::Scene;
 
@@ -27,6 +29,12 @@ pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
     // Arme la collecte de profiling selon le flag `--use-profiling`.
     profiling::set_enabled(use_profiling);
 
+    // Lue avant toute création Vulkan : la shadow map en dépend.
+    let config = Arc::new(EngineConfig::load().map_err(|e| {
+        logger.error(&format!("Configuration invalide : {e:#}"));
+        e
+    })?);
+
     let event_loop = EventLoop::new().map_err(|e| {
         logger.error(&format!("Impossible de créer l'EventLoop : {e}"));
         e
@@ -34,7 +42,7 @@ pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
 
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::new(logger.clone(), Box::new(scene));
+    let mut app = App::new(logger.clone(), Box::new(scene), config);
     let loop_result = event_loop.run_app(&mut app);
 
     let pending = app.pending_error.take();

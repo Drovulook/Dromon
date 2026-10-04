@@ -13,11 +13,11 @@ use crate::{
     app::engine::{
         renderer::{
             render_resources::{MeshData, TerrainMesh},
-            world::terrain::{FRAME_BUDGET, mesh_key},
+            world::terrain::mesh_key,
         },
         rendering_context::RenderingContext,
         terrain_generation::{
-            ChunkStreamer, LodFocus, LodGrid, MAX_LOD, MeshCache, TerrainSnapshot, mesh_chunk,
+            ChunkStreamer, LodFocus, LodGrid, MeshCache, TerrainSnapshot, mesh_chunk,
         },
     },
     profile,
@@ -47,7 +47,7 @@ use crate::{
 /// (create + allocate, pour le vertex et l'index buffer) plus le memcpy vers le staging.
 /// `vkAllocateMemory` est une opération noyau à ~100 µs–1 ms — bâtir 200 meshes d'un coup
 /// coûte donc des centaines de millisecondes, soit une image figée à chaque lot.
-/// On construit sous **budget de temps** (cf. [`FRAME_BUDGET`]) sans rien installer :
+/// On construit sous **budget de temps** (`frame_budget_ms` de `render.ron`) sans rien installer :
 /// l'atomicité reste intacte, seule la latence du lot augmente de quelques frames.
 ///
 /// La phase 3 est la seule à toucher l'état du terrain : elle est donc restée sur
@@ -77,8 +77,9 @@ pub struct MeshJob {
     started: Instant,
     /// Durée du maillage (soumission → dernier worker fini), une fois connue.
     meshing_time: Option<Duration>,
-    /// Par LOD : chunks maillés et temps CPU cumulé de `mesh_chunk`.
-    mesh_cost: [(u32, Duration); MAX_LOD as usize + 1],
+    /// Par LOD : chunks maillés et temps CPU cumulé de `mesh_chunk`. Agrandi à la
+    /// demande : le nombre de niveaux vient de la config.
+    mesh_cost: Vec<(u32, Duration)>,
 }
 
 /// Résultat d'un worker : le chunk, sa géométrie, le temps passé à la mailler.
@@ -92,16 +93,10 @@ impl MeshJob {
         cache: &mut MeshCache,
         snapshot: TerrainSnapshot,
         focus: LodFocus,
+        budget: Duration,
     ) -> Option<MeshJob> {
         let update = streamer.update(focus)?;
-        let mut job = Self::submit(
-            update.grid,
-            update.dirty,
-            cache,
-            snapshot,
-            false,
-            FRAME_BUDGET,
-        );
+        let mut job = Self::submit(update.grid, update.dirty, cache, snapshot, false, budget);
         // Les sortants partent avec le lot, pas avant : retirer un chunk change les
         // coutures de ses voisins, re-maillés dans ce même lot.
         job.built
@@ -166,7 +161,7 @@ impl MeshJob {
             budget,
             started,
             meshing_time: None,
-            mesh_cost: Default::default(),
+            mesh_cost: Vec::new(),
         }
     }
 
@@ -176,7 +171,11 @@ impl MeshJob {
         loop {
             match self.receiver.try_recv() {
                 Ok((coord, data, time)) => {
-                    let cost = &mut self.mesh_cost[self.grid.lod(coord) as usize];
+                    let lod = self.grid.lod(coord) as usize;
+                    if lod >= self.mesh_cost.len() {
+                        self.mesh_cost.resize(lod + 1, (0, Duration::ZERO));
+                    }
+                    let cost = &mut self.mesh_cost[lod];
                     cost.0 += 1;
                     cost.1 += time;
                     self.gathered.push((coord, Arc::new(data)));

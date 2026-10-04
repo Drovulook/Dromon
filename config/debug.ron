@@ -1,0 +1,13 @@
+// Traces et aides visuelles de développement, lues au démarrage du moteur
+// (cf. `DebugConfig`). Un champ absent prend sa valeur par défaut ; un champ inconnu
+// est une erreur.
+(
+    log_batch_stats: true, // une ligne par lot de re-maillage (cache, coût par LOD)
+    log_gpu_usage: true,   // occupation / fragmentation de l'allocateur GPU par lot
+
+    mesh: (
+        world_walls: true,        // parois verticales au bord du monde
+        world_bottom: true,       // face du dessous des chunks
+        transition_color: false,  // cellules de transition Transvoxel en magenta
+    ),
+)

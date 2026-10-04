@@ -5,7 +5,7 @@
 //! (`sample` + `vertical_bounds`) et ignore comment la densité est produite → on peut
 //! enrichir le terrain (grottes, surplombs, filons) sans toucher au mailleur.
 
-use crate::app::engine::terrain_generation::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Voxel};
+use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, Voxel};
 use crate::profile;
 
 use super::height_field::HeightField;
@@ -70,13 +70,15 @@ pub struct DensityField<'a> {
 impl<'a> DensityField<'a> {
     /// Prépare le champ sur la région du chunk `coord` et calcule ses bornes verticales.
     /// `apron` doit couvrir tout ce que le mailleur échantillonne au-delà des bords (le
-    /// rayon des normales) ; `step` est son pas d'échantillonnage (`1 << lod`).
+    /// rayon des normales) ; `step` est son pas d'échantillonnage (`1 << lod`) ;
+    /// `max_height` le plafond du monde.
     pub fn new(
         height: &'a HeightField,
         edits: FxHashMap<IVec3, f32>,
         coord: IVec2,
         apron: i32,
         step: i32,
+        max_height: u32,
     ) -> DensityField<'a> {
         // Élargir ne coûte que de la mémoire : les colonnes sont calculées à la lecture.
         let apron = apron.max(MACRO_APRON);
@@ -108,7 +110,7 @@ impl<'a> DensityField<'a> {
             }
         }
         field.z_min = (mn.floor() as i32 - 1).max(0);
-        field.z_max = (mx.ceil() as i32).min(CHUNK_HEIGHT as i32 - 2);
+        field.z_max = (mx.ceil() as i32).min(max_height as i32 - 2);
         field
     }
 

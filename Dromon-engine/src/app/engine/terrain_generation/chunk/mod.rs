@@ -4,13 +4,12 @@ mod terrain_source;
 mod voxel;
 
 pub use chunk_store::{ChunkStore, TerrainSnapshot};
-pub use terrain_source::{GenParams, TerrainSource, WorldDisc};
+pub use terrain_source::{TerrainSource, WorldDisc};
 pub use voxel::Voxel;
 
-/// Côté horizontal d'un chunk en voxels (axes X et Y).
+/// Côté horizontal d'un chunk en voxels (axes X et Y). La hauteur, elle, est réglable
+/// (`WorldShape::max_height`).
 pub const CHUNK_SIZE: usize = 64;
-/// Hauteur d'un chunk en voxels (axe Z — le monde est en Z-up).
-pub const CHUNK_HEIGHT: usize = 1024;
 
 /// Densité de l'iso-surface : la surface est l'ensemble des points où
 /// `density == ISO_LEVEL` (au-dessus = air, en dessous = matière). Le mailleur

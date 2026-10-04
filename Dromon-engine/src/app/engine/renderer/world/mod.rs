@@ -26,6 +26,7 @@ use crate::app::{
     },
     logger::Logger,
 };
+use crate::config::EngineConfig;
 use crate::profile;
 use game_clock::GameClock;
 
@@ -51,6 +52,8 @@ pub struct World {
     game_clock: GameClock,
     /// Latitude (radians) : fixe la hauteur du soleil à midi (`90° - latitude`).
     pub latitude: f32,
+    /// Configs moteur lues au démarrage (`render.ron`, `environment.ron`).
+    pub(crate) config: Arc<EngineConfig>,
 }
 
 impl World {
@@ -59,27 +62,30 @@ impl World {
     /// (assets + `RenderObject`, terrain) est fourni par la `Scene` via
     /// `Scene::setup`, appelée juste après la construction du `Renderer`. La
     /// scène peut aussi modifier `world.light` à ce moment-là.
-    pub fn new(
+    pub(crate) fn new(
         logger: Arc<Logger>,
         context: Arc<RenderingContext>,
         descriptor_handler: Arc<DescriptorHandler>,
         frames_in_flight: usize,
+        config: Arc<EngineConfig>,
     ) -> Result<World> {
         let rrm = RenderResourceManager::new(context.clone(), logger.clone(), descriptor_handler)?;
+        let env = &config.environment;
 
         let mut world = World {
             logger,
             rrm,
             render_objects: Vec::new(),
-            camera: Camera::default(),
-            light: DirectionalLight::default(),
-            atmosphere: Atmosphere::default(),
-            stars: Stars::default(),
+            camera: Camera::new(&config.render.camera),
+            light: DirectionalLight::new(&config),
+            atmosphere: Atmosphere::new(env.atmosphere),
+            stars: Stars::new(env.stars),
             terrain: None,
             context,
             frames_in_flight: frames_in_flight as u64,
-            game_clock: GameClock::default(),
-            latitude: 40.0_f32.to_radians(),
+            game_clock: GameClock::new(&env.clock),
+            latitude: env.latitude_deg.to_radians(),
+            config,
         };
         // Soleil et ciel cohérents avec l'heure de départ dès `Scene::setup`.
         world.sync_sky();
@@ -91,7 +97,12 @@ impl World {
         let time_of_day = self.game_clock.time_of_day;
         self.light.direction = sun_direction(time_of_day, self.latitude);
         self.stars.world_to_sky = world_to_sky(time_of_day, self.latitude);
-        day_night::apply(&mut self.light, &mut self.atmosphere, &mut self.stars);
+        day_night::apply(
+            &self.config.environment.day_night,
+            &mut self.light,
+            &mut self.atmosphere,
+            &mut self.stars,
+        );
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {

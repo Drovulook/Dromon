@@ -24,27 +24,8 @@ use crate::app::engine::terrain_generation::{
     TerrainSource,
 };
 use crate::app::logger::Logger;
+use crate::config::DebugConfig;
 use crate::profile;
-
-/// Temps que l'on s'autorise **par frame** pour chacune des deux opérations qui appellent
-/// le driver en masse : bâtir les buffers d'un lot, et détruire les anciens.
-///
-/// Un budget en temps plutôt qu'en nombre de meshes : le coût d'une allocation Vulkan
-/// varie fortement selon le driver et la taille du chunk, alors qu'une limite en
-/// millisecondes s'ajuste d'elle-même. Au moins un mesh est toujours traité, pour garantir
-/// la progression même si le budget est déjà dépassé.
-///
-/// 1 ms sur les 16 d'une frame à 60 fps : le lot met quelques frames de plus à apparaître,
-/// ce qui ne se voit pas.
-pub(super) const FRAME_BUDGET: Duration = Duration::from_millis(1);
-
-/// Budget de construction par frame pendant le **chargement initial** : des milliers de
-/// meshes à bâtir, et une fluidité moins critique qu'en jeu.
-pub(super) const INITIAL_LOAD_BUDGET: Duration = Duration::from_millis(1);
-
-const LOG_BATCH_STATS: bool = true;
-
-const LOG_GPU_USAGE: bool = true;
 
 /// **Le terrain vivant** : le relief, ce que le joueur en a modifié, les meshes GPU
 /// installés, et toute la machinerie qui fait suivre les seconds aux mouvements de caméra.
@@ -78,6 +59,14 @@ pub struct Terrain {
     graveyard: Graveyard,
     /// Chunks retenus par le frustum culling, recalculés à chaque frame.
     pub visible: VisibleSet,
+    /// Temps de construction de buffers autorisé par frame (`render.ron`). 1 ms sur les
+    /// 16 d'une frame à 60 fps : un lot met quelques frames de plus à apparaître, ce qui
+    /// ne se voit pas.
+    frame_budget: Duration,
+    /// LOD maximal (nombre de rayons de `render.ron`), pour les statistiques par niveau.
+    max_lod: u8,
+    /// Traces et options de maillage (`debug.ron`).
+    debug: DebugConfig,
     context: Arc<RenderingContext>,
     logger: Arc<Logger>,
 }
@@ -110,9 +99,15 @@ impl Terrain {
         // Instantané du terrain pour ce lot : relief immuable + `Arc` des chunks édités
         // tels qu'ils sont maintenant. Le joueur peut creuser pendant le maillage sans
         // que les workers voient la modification à mi-lot — même garantie que la `grid`.
-        let snapshot = TerrainSnapshot::new(&self.source, &self.store);
+        let snapshot = TerrainSnapshot::new(&self.source, &self.store, self.debug.mesh);
         let focus = LodFocus::new(camera.position, self.reference_z);
-        self.mesh_job = MeshJob::start(&mut self.streamer, &mut self.mesh_cache, snapshot, focus);
+        self.mesh_job = MeshJob::start(
+            &mut self.streamer,
+            &mut self.mesh_cache,
+            snapshot,
+            focus,
+            self.frame_budget,
+        );
     }
 
     /// Fait avancer le lot en vol d'une frame, et l'installe dès qu'il est complet, ou
@@ -146,7 +141,7 @@ impl Terrain {
                 job.gathered().len(),
                 job.elapsed().as_secs_f32(),
             ));
-            log_terrain_stats(&self.logger, job.grid(), job.gathered());
+            log_terrain_stats(&self.logger, job.grid(), job.gathered(), self.max_lod);
         }
         self.log_batch_stats(job.gathered().len(), job.meshed_count(), &job.mesh_report());
         self.log_gpu_usage();
@@ -213,7 +208,8 @@ impl Terrain {
 
     /// Recalcule les chunks visibles depuis la caméra et depuis la lumière.
     pub fn update_visibility(&mut self, camera: &Camera, light: &DirectionalLight) {
-        self.visible.update(&self.chunks, camera, light);
+        let max_height = self.source.max_height() as f32;
+        self.visible.update(&self.chunks, camera, light, max_height);
     }
 
     /// Trace de contrôle d'un lot : valide les estimations de charge (combien de chunks
@@ -222,10 +218,9 @@ impl Terrain {
     /// donné, la réponse allant de ~0 % en exploration rectiligne à très rentable pour un
     /// joueur qui tourne autour d'une base.
     ///
-    /// Éteinte par défaut : une ligne par lot noie le reste des logs. Basculer
-    /// [`LOG_BATCH_STATS`] pour la rallumer.
+    /// Une ligne par lot peut noyer le reste des logs : `log_batch_stats` de `debug.ron`.
     fn log_batch_stats(&self, batch: usize, meshed: usize, mesh_report: &str) {
-        if !LOG_BATCH_STATS {
+        if !self.debug.log_batch_stats {
             return;
         }
         let (hits, misses) = self.mesh_cache.stats();
@@ -242,7 +237,7 @@ impl Terrain {
     /// d'un lot : il vient de libérer les anciens meshes et d'en allouer autant de
     /// nouveaux, c'est le moment où les trous apparaissent.
     fn log_gpu_usage(&self) {
-        if !LOG_GPU_USAGE {
+        if !self.debug.log_gpu_usage {
             return;
         }
         const MB: u64 = 1024 * 1024;

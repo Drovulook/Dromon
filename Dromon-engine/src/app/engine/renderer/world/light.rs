@@ -1,93 +1,5 @@
-use crate::app::engine::renderer::shadow_map::SHADOW_MAP_RESOLUTION;
+use crate::config::{EngineConfig, ShadowConfig, SunDisk};
 use crate::profile;
-
-// Paramètres du « frustum » orthographique de la lumière (la boîte qui doit
-// englober toute la scène projetant des ombres). La boîte SUIT la caméra
-// ; ces valeurs fixent sa taille, pas sa position.
-//
-// Compromis résolution : la shadow map (2048²) est étalée sur `2*HALF_SIZE`
-// unités → ~`2*HALF_SIZE / 2048` u/texel. Plus la boîte est grande, plus on
-// couvre de terrain mais plus les ombres deviennent grossières. ~150 ⇒ ~0.15
-// u/texel, correct à l'échelle voxel.
-/// Réglages du « frustum » orthographique de la shadow map. Portés par la scène
-/// (via [`DirectionalLight`]) car l'échelle dépend du contenu : une petite scène
-/// d'objets fixes et un terrain géant qu'on survole ne veulent ni la même taille
-/// de boîte, ni la même stratégie de centrage.
-///
-/// La shadow map (2048²) est étalée sur `2 * half_size` unités → résolution
-/// `2 * half_size / 2048` u/texel : plus la boîte est grande, plus on couvre de
-/// monde mais plus les ombres deviennent grossières.
-pub struct ShadowConfig {
-    /// Demi-largeur/hauteur de la boîte orthographique, en unités monde.
-    pub half_size: f32,
-    /// Plans near/far le long de l'axe lumière, depuis l'« œil » virtuel.
-    /// ⚠ `far` élargit aussi le biais anti-acné (exprimé en profondeur
-    /// normalisée) : un `far` énorme sur de petits objets décolle leur ombre.
-    pub near: f32,
-    pub far: f32,
-    /// Recul de l'« œil » virtuel le long de `-direction`.
-    pub eye_distance: f32,
-    /// Si `true`, la boîte suit la caméra (indispensable pour un grand terrain) ;
-    /// sinon elle reste centrée sur l'origine (idéal pour une scène d'objets
-    /// fixes autour de l'origine).
-    pub follow_camera: bool,
-    /// Quand `follow_camera`, distance devant la caméra (le long du regard) du
-    /// point de centrage : on dépense le budget d'ombre là où le joueur regarde.
-    pub focus_distance: f32,
-}
-
-impl Default for ShadowConfig {
-    /// Défauts pour une **petite scène statique** centrée sur l'origine.
-    /// `generate_terrain` les remplace par des valeurs
-    /// adaptées au terrain.
-    fn default() -> Self {
-        ShadowConfig {
-            half_size: 15.0,
-            near: 0.1,
-            far: 60.0,
-            eye_distance: 30.0,
-            follow_camera: false,
-            focus_distance: 0.0,
-        }
-    }
-}
-
-impl ShadowConfig {
-    /// Épaisseur de la boîte le long des rayons : convertit un biais en unités monde
-    /// vers la profondeur normalisée de la shadow map.
-    pub fn depth_range(&self) -> f32 {
-        self.far - self.near
-    }
-
-    /// Côté d'un texel de la shadow map, en unités monde : l'échelle naturelle du
-    /// biais anti-acné (l'erreur de profondeur grandit avec le texel).
-    pub fn texel_size(&self) -> f32 {
-        2.0 * self.half_size / SHADOW_MAP_RESOLUTION as f32
-    }
-}
-
-/// Apparence du disque solaire dessiné dans le ciel (sky.slang). N'influe pas
-/// sur l'éclairage de la scène.
-pub struct SunDisk {
-    /// Rayon angulaire, en radians. Le vrai soleil fait ~0.27° ; en jeu on prend
-    /// plus gros (~1°) pour la lisibilité.
-    pub angular_radius: f32,
-    /// Fraction du rayon où commence le fondu du bord (1 = bord net).
-    pub edge_softness: f32,
-    /// Multiplicateur de `color * intensity` : le disque doit éclipser le halo.
-    /// Sans tonemapping, tout ce qui dépasse 1 sature en blanc.
-    pub intensity: f32,
-}
-
-impl Default for SunDisk {
-    fn default() -> Self {
-        SunDisk {
-            angular_radius: 1.0_f32.to_radians(),
-            edge_softness: 0.85,
-            intensity: 10.0,
-        }
-    }
-}
 
 /// Angle horaire (radians) : 0 à midi, ±π à minuit. Calculé en f64 avant la
 /// conversion, `time_of_day` étant stocké en f64.
@@ -112,26 +24,33 @@ pub struct DirectionalLight {
     pub color: glam::Vec3,
     pub intensity: f32,
     pub disk: SunDisk,
+    /// Boîte d'ombre. Portée par la lumière car son échelle dépend de la scène :
+    /// `generate_terrain` remplace la boîte de petite scène par celle du terrain.
     pub shadow: ShadowConfig,
+    /// Côté de la shadow map, fixé à sa création (cf. `ShadowMap::new`).
+    pub(crate) shadow_map_resolution: u32,
 }
 
-impl Default for DirectionalLight {
+impl DirectionalLight {
     /// `direction`, `color` et `intensity` sont des valeurs d'attente : recalculées
     /// d'après l'heure par `World::sync_sky` (dès `World::new`).
-    fn default() -> Self {
+    pub(crate) fn new(config: &EngineConfig) -> DirectionalLight {
+        let shadow = &config.render.shadow;
         DirectionalLight {
             direction: glam::Vec3::NEG_Z,
             color: glam::Vec3::ONE,
             intensity: 1.0,
-            disk: SunDisk::default(),
-            // Défaut « petite scène » : boîte fixe à l'origine. `generate_terrain`
-            // bascule en mode terrain si la scène crée un terrain.
-            shadow: ShadowConfig::default(),
+            disk: config.environment.sun,
+            shadow: shadow.static_scene.clone(),
+            shadow_map_resolution: shadow.map_resolution,
         }
     }
-}
 
-impl DirectionalLight {
+    /// Côté d'un texel de la shadow map, en unités monde.
+    pub fn shadow_texel_size(&self) -> f32 {
+        self.shadow.texel_size(self.shadow_map_resolution)
+    }
+
     /// Matrice view*proj de la lumière : on place une caméra orthographique le
     /// long de la direction du soleil, regardant le centre de la boîte d'ombre.
     /// C'est l'équivalent de `camera.view * camera.proj`, mais pour la lumière,

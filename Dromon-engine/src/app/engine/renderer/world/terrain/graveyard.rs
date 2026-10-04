@@ -5,10 +5,9 @@
 //! voire un crash. Le cimetière retient donc les meshes retirés le temps que toutes les
 //! frames qui ont pu les enregistrer soient terminées.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::app::engine::renderer::render_resources::TerrainMesh;
-use crate::app::engine::renderer::world::terrain::FRAME_BUDGET;
 use crate::profile;
 
 /// Meshes en attente de destruction, datés de leur mise au rebut.
@@ -19,6 +18,8 @@ pub(super) struct Graveyard {
     frame: u64,
     /// Nombre de frames à attendre avant qu'un mesh soit sûrement libérable.
     guard: u64,
+    /// Temps de destruction autorisé par frame.
+    budget: Duration,
 }
 
 impl Graveyard {
@@ -26,11 +27,12 @@ impl Graveyard {
     /// `f` : seules les frames `< f` ont pu le référencer. Attendre `frames_in_flight + 1`
     /// frames laisse à toutes le temps d'être signalées, avec une frame de marge (le
     /// rebut a lieu avant le `wait_for_fences` de la frame courante).
-    pub(super) fn new(frames_in_flight: u64) -> Graveyard {
+    pub(super) fn new(frames_in_flight: u64, budget: Duration) -> Graveyard {
         Graveyard {
             pending: Vec::new(),
             frame: 0,
             guard: frames_in_flight + 1,
+            budget,
         }
     }
 
@@ -50,7 +52,7 @@ impl Graveyard {
             return;
         }
         profile!();
-        let deadline = Instant::now() + FRAME_BUDGET;
+        let deadline = Instant::now() + self.budget;
 
         let mut i = 0;
         while i < self.pending.len() {

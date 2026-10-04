@@ -12,6 +12,7 @@ use crate::app::engine::rendering_context::{
 };
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
+use crate::config::EngineConfig;
 use crate::profile;
 use anyhow::Result;
 use renderer::Renderer;
@@ -32,6 +33,7 @@ pub struct Engine {
     input_manager: inputs::InputManager,
     logger: Arc<Logger>,
     timer: Timer,
+    config: Arc<EngineConfig>,
 }
 
 impl Engine {
@@ -39,6 +41,7 @@ impl Engine {
         event_loop: &ActiveEventLoop,
         logger: Arc<Logger>,
         scene: &mut dyn Scene,
+        config: Arc<EngineConfig>,
     ) -> Result<Self> {
         crate::profiling::initialize::begin();
         crate::profile!();
@@ -72,6 +75,7 @@ impl Engine {
                     window.clone(),
                     logger.clone(),
                     scene,
+                    config.clone(),
                 )?;
                 Ok((*id, renderer))
             })
@@ -87,6 +91,7 @@ impl Engine {
             input_manager,
             logger,
             timer: Timer::new(),
+            config,
         })
     }
 
@@ -173,6 +178,7 @@ impl Engine {
                 window.clone(),
                 logger,
                 scene,
+                self.config.clone(),
             )?,
         );
         Ok(window_id)

@@ -4,15 +4,11 @@
 use glam::{Mat3, Vec3};
 
 use crate::app::engine::renderer::world::light::hour_angle;
+use crate::config::StarsParams;
 
 pub struct Stars {
-    /// Luminosité (linéaire) des étoiles les plus brillantes.
-    pub brightness: f32,
-    /// Fraction des cases du ciel qui contiennent une étoile (grille : `STAR_CELLS`
-    /// dans sky.slang).
-    pub density: f32,
-    /// Amplitude de la scintillation ∈ [0, 1] (doublée près de l'horizon).
-    pub twinkle: f32,
+    /// Réglages fixes (`environment.ron`).
+    pub params: StarsParams,
     /// 0 le jour → 1 en pleine nuit. Recalculée par `day_night::apply`.
     pub(crate) visibility: f32,
     /// Rotation monde → ciel fixe : annule la rotation diurne pour que les étoiles
@@ -22,12 +18,10 @@ pub struct Stars {
     pub(crate) time_secs: f32,
 }
 
-impl Default for Stars {
-    fn default() -> Self {
+impl Stars {
+    pub fn new(params: StarsParams) -> Stars {
         Stars {
-            brightness: 1.0,
-            density: 0.03,
-            twinkle: 0.25,
+            params,
             visibility: 0.0,
             world_to_sky: Mat3::IDENTITY,
             time_secs: 0.0,

@@ -10,6 +10,7 @@ use winit::application::ApplicationHandler;
 
 use crate::Scene;
 use crate::app::engine::Engine;
+use crate::config::EngineConfig;
 
 pub struct App {
     engine: Option<Engine>,
@@ -18,15 +19,18 @@ pub struct App {
     // `&mut dyn Scene` aux méthodes du moteur au besoin.
     scene: Box<dyn Scene>,
     logger: Arc<Logger>,
+    /// Lue une fois dans `run`, réutilisée à chaque recréation de l'`Engine`.
+    config: Arc<EngineConfig>,
     pub pending_error: Option<Error>,
 }
 
 impl App {
-    pub fn new(logger: Arc<Logger>, scene: Box<dyn Scene>) -> Self {
+    pub fn new(logger: Arc<Logger>, scene: Box<dyn Scene>, config: Arc<EngineConfig>) -> Self {
         Self {
             engine: None,
             scene,
             logger,
+            config,
             pending_error: None,
         }
     }
@@ -34,7 +38,12 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        match Engine::new(event_loop, self.logger.clone(), self.scene.as_mut()) {
+        match Engine::new(
+            event_loop,
+            self.logger.clone(),
+            self.scene.as_mut(),
+            self.config.clone(),
+        ) {
             Ok(engine) => {
                 self.engine = Some(engine);
                 crate::profiling::initialize::flush(&self.logger);

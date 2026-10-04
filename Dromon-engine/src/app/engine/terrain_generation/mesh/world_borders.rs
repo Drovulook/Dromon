@@ -1,9 +1,7 @@
 use glam::{IVec2, Vec3};
 use rustc_hash::FxHashMap;
 
-const GENERATE_WORLD_WALLS: bool = true;
-const GENERATE_WORLD_BOTTOM: bool = true;
-
+use crate::config::MeshDebug;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
@@ -19,12 +17,14 @@ use crate::app::engine::{
 ///
 /// `border_faces` suit l'ordre de [`Face::ALL`] : une face est au bord ssi le monde
 /// s'arrête de ce côté. C'est un test de **voisinage**, pas de boîte englobante — le
-/// monde est un disque.
+/// monde est un disque. `debug` peut désactiver le fond et les parois.
+#[allow(clippy::too_many_arguments)]
 pub fn add_mesh_borders(
     field: &DensityField,
     coord: IVec2,
     border_faces: [bool; 4],
     step: i32,
+    debug: MeshDebug,
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     volume_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
@@ -36,7 +36,7 @@ pub fn add_mesh_borders(
     let y1 = y0 + n;
     let f = WORLD_FLOOR as f32;
 
-    if GENERATE_WORLD_BOTTOM {
+    if debug.world_bottom {
         // Fond : un quad plat couvrant le chunk, normale vers le bas. Visible du dessous
         // partout, d'où sa présence sur tous les chunks (pas seulement au bord).
         push_quad(
@@ -54,7 +54,7 @@ pub fn add_mesh_borders(
         );
     }
 
-    if GENERATE_WORLD_WALLS {
+    if debug.world_walls {
         // Paroi verticale le long d'une arête, subdivisée par pas `step` (un quad du fond au
         // relief entre deux colonnes distantes de `step`). Au pas `step`, le haut du mur suit
         // `surface_z` aux mêmes colonnes que les sommets MC de bord → coïncidence exacte

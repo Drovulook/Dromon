@@ -1,5 +1,6 @@
 use crate::app::engine::rendering_context::{RenderingContext, SwapchainSurface};
 use crate::app::logger::Logger;
+use crate::config::PresentMode;
 use crate::profile;
 use anyhow::{Result, anyhow};
 use ash::vk;
@@ -18,6 +19,8 @@ pub struct Swapchain {
     pub msaa_color_image: vk::Image, // HACK: le vrai nombre d'images intermédiaires est in_flight_frames_count
     msaa_color_image_memory: vk::DeviceMemory,
     pub msaa_color_image_view: vk::ImageView,
+    /// Mode demandé par `render.ron`, ou `FIFO` si la surface ne le supporte pas.
+    present_mode: vk::PresentModeKHR,
 
     // depth image
     pub depth_format: vk::Format,
@@ -38,8 +41,10 @@ impl Swapchain {
         context: Arc<RenderingContext>,
         window: Arc<Window>,
         logger: Arc<Logger>,
+        present_mode: PresentMode,
     ) -> Result<Self> {
         let surface = unsafe { context.create_surface(window.clone())? };
+        let present_mode = Self::pick_present_mode(&surface, present_mode, &logger);
         let color_format = vk::Format::B8G8R8A8_SRGB;
         let depth_format = Self::find_supported_format(
             &context,
@@ -83,6 +88,7 @@ impl Swapchain {
             msaa_color_image: Default::default(),
             msaa_color_image_memory: Default::default(),
             msaa_color_image_view: Default::default(),
+            present_mode,
             depth_format,
             depth_image: Default::default(),
             depth_image_memory: Default::default(),
@@ -124,7 +130,7 @@ impl Swapchain {
                     .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
                     .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                    .present_mode(vk::PresentModeKHR::MAILBOX)
+                    .present_mode(self.present_mode)
                     .clipped(true)
                     .old_swapchain(self.handle),
                 None,
@@ -212,6 +218,30 @@ impl Swapchain {
         }
         self.is_dirty = false;
         Ok(())
+    }
+
+    /// Mode de présentation demandé s'il est supporté par la surface, sinon `FIFO` — le
+    /// seul que Vulkan garantit partout.
+    fn pick_present_mode(
+        surface: &SwapchainSurface,
+        wanted: PresentMode,
+        logger: &Logger,
+    ) -> vk::PresentModeKHR {
+        let mode = match wanted {
+            PresentMode::Fifo => vk::PresentModeKHR::FIFO,
+            PresentMode::FifoRelaxed => vk::PresentModeKHR::FIFO_RELAXED,
+            PresentMode::Mailbox => vk::PresentModeKHR::MAILBOX,
+            PresentMode::Immediate => vk::PresentModeKHR::IMMEDIATE,
+        };
+        if surface.present_modes.contains(&mode) {
+            logger.info(&format!("Present mode: {mode:?}"));
+            mode
+        } else {
+            logger.warn(&format!(
+                "Present mode {mode:?} non supporté par la surface, repli sur FIFO"
+            ));
+            vk::PresentModeKHR::FIFO
+        }
     }
 
     fn find_supported_format(

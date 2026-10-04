@@ -39,10 +39,6 @@ use crate::app::engine::{
     },
 };
 
-/// DEBUG : teinte en magenta les sommets des cellules de transition, pour voir où
-/// elles se posent (et vérifier qu'elles longent bien les frontières de LOD).
-pub const DEBUG_TRANSITION_COLOR: bool = false;
-
 /// Repère local d'une face de transition. `origin` = coin `(u=0, v=0)` de la face sur le
 /// **plan frontière** — le plan que le voisin grossier échantillonne aussi ; `u`/`v` =
 /// axes du plan ; `inward` = normale entrant dans le chunk fin.
@@ -278,11 +274,8 @@ fn transition_vertex(
     let p = pa + (pb - pa) * t;
 
     let normal = vertex_normal(field, normal_cache, p_field);
-    let color = if DEBUG_TRANSITION_COLOR {
-        Vec3::new(1.0, 0.0, 1.0)
-    } else {
-        cached_color(surface_colors, p_field, |q| field.surface_color(q, normal))
-    };
+    // Teinte de debug (`debug.ron`) appliquée après coup par `mesh_chunk`.
+    let color = cached_color(surface_colors, p_field, |q| field.surface_color(q, normal));
     let idx = vertices.len() as u32;
     vertices.push(TerrainVertex {
         pos: p,
