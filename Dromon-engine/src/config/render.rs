@@ -1,6 +1,7 @@
 //! `render.ron` : qualité et réglages du rendu.
 
 use anyhow::{Result, ensure};
+use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
 use super::ConfigFile;
@@ -27,6 +28,10 @@ impl ConfigFile for RenderConfig {
             0.0 < c.min_fov_deg && c.min_fov_deg <= c.fov_deg && c.fov_deg <= c.max_fov_deg
                 && c.max_fov_deg < 180.0,
             "camera : il faut 0 < min_fov_deg ≤ fov_deg ≤ max_fov_deg < 180"
+        );
+        ensure!(
+            c.start_pitch_deg.abs() <= MAX_PITCH_DEG,
+            "camera.start_pitch_deg doit être dans [-{MAX_PITCH_DEG}, {MAX_PITCH_DEG}]"
         );
 
         let s = &self.shadow;
@@ -64,6 +69,10 @@ impl ConfigFile for RenderConfig {
         Ok(())
     }
 }
+
+/// Inclinaison maximale de la caméra (≈ `MAX_PITCH` de `camera.rs`, 1.55 rad) : à la
+/// verticale exacte, l'axe « droite » de la caméra n'est plus défini.
+const MAX_PITCH_DEG: f32 = 88.0;
 
 /// Nombre maximal de rayons de LOD : le pas du LOD `k` vaut `1 << k` voxels et ne peut
 /// dépasser la taille d'un chunk (64 = `1 << 6`).
@@ -156,10 +165,16 @@ pub enum PresentMode {
     Immediate,
 }
 
-/// Caméra libre : projection et contrôles.
+/// Caméra libre : pose de départ, projection et contrôles.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CameraParams {
+    /// Position de départ (monde, Z-up).
+    pub start_position: Vec3,
+    /// Cap de départ, en degrés : 0 = +X (est), 90 = +Y (nord).
+    pub start_yaw_deg: f32,
+    /// Inclinaison de départ, en degrés : 0 = horizontale, négatif = vers le bas.
+    pub start_pitch_deg: f32,
     /// Champ de vision vertical au démarrage, en degrés.
     pub fov_deg: f32,
     /// Bornes du zoom (molette), en degrés.
@@ -184,6 +199,9 @@ pub struct CameraParams {
 impl Default for CameraParams {
     fn default() -> Self {
         CameraParams {
+            start_position: Vec3::new(0.0, 0.0, 1130.0),
+            start_yaw_deg: 0.0,
+            start_pitch_deg: -45.0,
             fov_deg: 45.0,
             min_fov_deg: 20.0,
             max_fov_deg: 110.0,

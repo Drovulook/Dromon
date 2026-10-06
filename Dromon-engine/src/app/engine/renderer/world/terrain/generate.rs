@@ -32,9 +32,6 @@ impl World {
     /// Crée le terrain de la scène. Appelée par la scène dans `setup`. Rend la main
     /// aussitôt : les chunks sont maillés en fond et apparaissent au fil des frames.
     pub fn generate_terrain(&mut self, config: &WorldGenConfig) -> Result<()> {
-        // Départ au-dessus des plus hauts sommets possibles.
-        self.camera.position.z = config.world.max_height as f32 * 1.1;
-
         // Terrain survolé : grande boîte d'ombre qui suit la caméra (`render.ron`).
         self.light.shadow = self.config.render.shadow.terrain.clone();
 

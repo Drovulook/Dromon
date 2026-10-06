@@ -77,7 +77,7 @@
     atmosphere: (
         ground_bounce: 0.25,         // part de l'ambiant renvoyée par le sol
         sky_gradient_exponent: 0.75, // < 1 = dégradé resserré près de l'horizon
-        fog_density: 0.0005,         // σ₀ de Beer-Lambert
+        fog_density: 0.005,         // σ₀ de Beer-Lambert
         fog_scale_height: 1200.0,    // H ≈ 3 × étendue verticale du terrain
         fog_anisotropy: 0.9,         // g de Henyey-Greenstein, dans [0, 1[
         halo_strength: 0.003,        // halo solaire (ciel et brouillard)

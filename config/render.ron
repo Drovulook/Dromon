@@ -7,6 +7,11 @@
     present_mode: Mailbox,
 
     camera: (
+        // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
+        // (world_gen.ron) : on démarre alors au-dessus des plus hauts sommets.
+        start_position: (0.0, 0.0, 1130.0),
+        start_yaw_deg: 0.0,     // 0 = vers +X (est), 90 = vers +Y (nord)
+        start_pitch_deg: -45.0, // 0 = horizontale, négatif = vers le bas
         fov_deg: 45.0,      // champ de vision vertical au démarrage
         min_fov_deg: 20.0,  // bornes du zoom (molette)
         max_fov_deg: 110.0,

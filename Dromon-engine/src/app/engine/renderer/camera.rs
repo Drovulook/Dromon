@@ -26,21 +26,18 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Caméra à sa pose de départ (`render.ron`).
     pub fn new(params: &CameraParams) -> Camera {
-        let mut camera = Camera {
+        Camera {
             params: params.clone(),
-            // Remontée au-dessus du plafond du monde par `generate_terrain`.
-            position: Vec3::new(0.0, 0.0, 1100.0),
-            yaw: 0.0,
-            pitch: 0.0,
+            position: params.start_position,
+            yaw: params.start_yaw_deg.to_radians(),
+            pitch: params.start_pitch_deg.to_radians(),
             fov_y: params.fov_deg.to_radians(),
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
-        };
-        // au démarrage, on regarde l'horizon vers +X : cible à la même altitude → pitch 0
-        camera.look_at(camera.position + Vec3::X - Vec3::Z);
-        camera
+        }
     }
 
     /// Vecteur « avant » (direction du regard), reconstruit depuis yaw/pitch.
@@ -54,6 +51,7 @@ impl Camera {
     }
 
     /// Oriente la caméra vers un point (déduit yaw/pitch de la direction).
+    #[allow(dead_code)] // plus utilisée depuis la pose de départ en config, gardée pour plus tard
     fn look_at(&mut self, target: Vec3) {
         let dir = (target - self.position).normalize();
         self.yaw = dir.y.atan2(dir.x);
