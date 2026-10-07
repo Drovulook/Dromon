@@ -1,0 +1,72 @@
+// Carte macro du monde, précalculée au démarrage (cf. `WorldMacroConfig`).
+// Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
+// Lue aussi par le détail (`world_detail.ron`), jamais l'inverse.
+(
+    seed: 20,
+
+    world: (
+        // Disque de 600 chunks de rayon (38 400 voxels, ~1,1 M chunks).
+        radius_chunks: 600,
+        // Plafond du monde, en voxels.
+        max_height: 1024,
+        // Niveau de la mer, en voxels. Budget vertical : abysses ~30, sommets
+        // ≈ sea_level + profil côtier + mountains.amplitude (+ relief de détail).
+        sea_level: 200.0,
+    ),
+
+    // Côté d'une cellule de la carte macro, en voxels. 32 → grille 2400 × 2400 pour
+    // ce rayon. Ne porte que les grandes formes : le détail fin est en `world_detail`.
+    cell_size: 32,
+
+    // Continents : seul le signe du bruit compte (> 0 terre). La distance à la côte
+    // est ensuite mesurée sur la grille.
+    continents: (
+        frequency: 0.00005, // longueur d'onde ~20 000 voxels ≈ taille d'un continent
+        octaves: 5,
+        lacunarity: 2.1,    // non entière, sinon les octaves s'alignent
+        gain: 0.6,          // plus grand = côtes plus découpées
+        land_bias: -0.05,     // > 0 plus de terre, < 0 plus de mer
+        
+        border_start: 0.85,  // fraction du rayon où l'océan de bord commence
+        border_strength: 1.2, // > 1 + land_bias → océan garanti au bord
+        // Ondulation du début de l'océan de bord (fraction du rayon) : il commence
+        // entre border_start − border_noise et border_start. 0.0 = cercle.
+        border_noise: 0.3,
+        border_noise_frequency: 0.0001, // ~24 caps et baies sur le pourtour (2πR·f)
+        
+        // Mer non reliée à l'océan : comblée si plus petite qu'un disque de ce rayon
+        // (voxels). 0.0 = toutes gardées ; très grand = aucune.
+        inland_sea_min_radius: 30000.0,
+        // Île « petite » si plus petite qu'un disque de ce rayon (voxels) ; seule une
+        // fraction small_island_keep est gardée (tirage fixé par la graine).
+        island_min_radius: 1500.0,
+        small_island_keep: 0.3,
+    ),
+
+    // Altitude de base selon la distance à la côte d (voxels, > 0 terre) : points
+    // (d, altitude relative à sea_level) reliés par des segments, constant au-delà.
+    coast: (
+        points: [
+            (-12000.0, -170.0), // plaine abyssale
+            (-4000.0, -140.0),  // pied du talus continental
+            (-1500.0, -30.0),   // rebord du plateau continental
+            (0.0, 0.0),         // côte
+            (3000.0, 30.0),     // plaine côtière, puis plat
+        ],
+    ),
+
+    // Chaînes de montagnes : où et à quelle hauteur. La forme du relief est côté
+    // détail (mélange plaine / montagne par le masque w).
+    mountains: (
+        frequency: 0.00003,       // axes = crêtes d'un bruit ridged (λ ~33 000)
+        axis_threshold: 0.9,      // plus haut = chaînes plus fines et plus rares
+        warp_frequency: 0.00006,  // plie les chaînes
+        warp_amplitude: 3000.0,   // 0.0 = chaînes non pliées
+        min_coast_distance: 1500.0, // pas d'axe plus près de la côte
+        // w : 1 sur l'axe → 0 à cette distance. Pente ajoutée ≈ 1,5 · amplitude /
+        // largeur (700 / 4000 → ~15°) ; trop étroit = mur.
+        foothill_width: 4000.0,
+        coast_fade: 1500.0,       // w nul à la côte : le trait de côte ne bouge pas
+        amplitude: 700.0,         // hauteur des chaînes au-dessus du profil côtier
+    ),
+)

@@ -23,7 +23,9 @@ pub use render::{
     CameraParams, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
     TerrainRenderParams,
 };
-pub use world_gen::{HeightParams, WorldGenConfig, WorldShape};
+pub use world_gen::{
+    CoastProfile, ContinentParams, HeightParams, MountainParams, WorldDetailConfig, WorldGenConfig, WorldMacroConfig, WorldShape,
+};
 
 use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
@@ -55,7 +57,7 @@ impl EngineConfig {
 
 /// Une struct sérialisée dans son propre fichier RON de [`CONFIG_DIR`].
 pub trait ConfigFile: Serialize + DeserializeOwned {
-    /// Nom du fichier dans [`CONFIG_DIR`] (ex. `"world_gen.ron"`).
+    /// Nom du fichier dans [`CONFIG_DIR`] (ex. `"render.ron"`).
     const FILE_NAME: &'static str;
 
     /// Rejette les valeurs qui casseraient le moteur (pas les réglages discutables).

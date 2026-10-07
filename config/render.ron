@@ -8,7 +8,7 @@
 
     camera: (
         // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
-        // (world_gen.ron) : on démarre alors au-dessus des plus hauts sommets.
+        // (world_macro.ron) : on démarre alors au-dessus des plus hauts sommets.
         start_position: (0.0, 0.0, 1130.0),
         start_yaw_deg: 0.0,     // 0 = vers +X (est), 90 = vers +Y (nord)
         start_pitch_deg: -45.0, // 0 = horizontale, négatif = vers le bas

@@ -78,9 +78,9 @@ pub struct TerrainSource {
 impl TerrainSource {
     pub fn new(config: &WorldGenConfig) -> TerrainSource {
         TerrainSource {
-            height: HeightField::new(config.seed, config.relief),
-            world: WorldDisc::new(config.world.radius_chunks),
-            max_height: config.world.max_height,
+            height: HeightField::new(config.macro_.seed, config.detail.relief),
+            world: WorldDisc::new(config.macro_.world.radius_chunks),
+            max_height: config.macro_.world.max_height,
         }
     }
 

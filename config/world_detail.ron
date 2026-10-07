@@ -1,15 +1,7 @@
-// Configuration de génération du monde, lue au démarrage (cf. `WorldGenConfig`).
+// Détail du monde, calculé à la demande (cf. `WorldDetailConfig`). Graine et étendue
+// sont dans `world_macro.ron`. Le modifier n'invalide pas la carte macro.
 // Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
 (
-    seed: 20,
-
-    world: (
-        // Disque de 400 chunks de rayon (25 600 voxels, ~500 000 chunks).
-        radius_chunks: 400,
-        // Plafond du monde, en voxels.
-        max_height: 1024,
-    ),
-
     relief: (
         base_height: 50.0,
         // base + amplitude > max_height : seules les crêtes les plus vives s'en
