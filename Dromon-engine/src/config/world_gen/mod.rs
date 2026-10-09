@@ -15,7 +15,7 @@ mod macro_config;
 mod relief;
 
 pub use climate::ClimateParams;
-pub use continents::ContinentParams;
+pub use continents::{BaseNoise, ContinentParams, OctaveNoise};
 pub use detail::{HeightParams, WorldDetailConfig};
 pub use macro_config::{WorldMacroConfig, WorldShape};
 pub use relief::{CoastProfile, MountainParams};

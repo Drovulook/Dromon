@@ -5,6 +5,7 @@ use crate::config::ContinentParams;
 
 // Décalages (espace bruit) : décorrélé du relief, qui partage la même graine.
 const CONT_OFF: f64 = 1931.7;
+const BASE_OFF: f64 = 1517.3;
 const OCT_STEP: f64 = 97.31;
 const BORDER_OFF: f64 = 2711.3;
 /// Amplitude de la 2ᵉ octave de l'ondulation du bord (la 1ʳᵉ vaut 1).
@@ -28,18 +29,27 @@ impl ContinentField {
         }
     }
 
+    /// `base + detail + land_bias − bord`.
     pub fn value(&self, x: f64, y: f64) -> f64 {
         let p = &self.params;
-        let (mut freq, mut amp) = (p.frequency, 1.0);
+        let f = p.base.frequency;
+        let base = p.base.amplitude * self.noise.get([x * f + BASE_OFF, y * f + BASE_OFF]);
+        base + self.detail(x, y) + p.land_bias - p.border_strength * self.border(x, y)
+    }
+
+    /// Somme d'octaves de découpe des côtes, dans ~`[-amplitude, amplitude]`.
+    fn detail(&self, x: f64, y: f64) -> f64 {
+        let d = &self.params.detail;
+        let (mut freq, mut weight) = (d.frequency, 1.0);
         let (mut sum, mut norm) = (0.0, 0.0);
-        for o in 0..p.octaves {
+        for o in 0..d.octaves {
             let off = CONT_OFF + o as f64 * OCT_STEP;
-            sum += amp * self.noise.get([x * freq + off, y * freq + off]);
-            norm += amp;
-            freq *= p.lacunarity;
-            amp *= p.gain;
+            sum += weight * self.noise.get([x * freq + off, y * freq + off]);
+            norm += weight;
+            freq *= d.lacunarity;
+            weight *= d.gain;
         }
-        sum / norm + p.land_bias - p.border_strength * self.border(x, y)
+        if norm > 0.0 { d.amplitude * sum / norm } else { 0.0 }
     }
 
     /// Océan de bord `∈ [0, 1]` : cache aussi la limite du monde. Le rayon est bruité

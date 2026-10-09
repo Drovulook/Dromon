@@ -3,6 +3,7 @@
 //! la côte, ombre pluviométrique, lacs) qu'un bruit point par point ne sait pas
 //! faire. Cf. `Architecture/Generation-Monde.md` dans le vault.
 
+mod cache;
 mod climate;
 mod continents;
 mod distance;
@@ -14,6 +15,7 @@ mod ocean;
 mod relief;
 mod small_regions;
 
+pub use cache::MACRO_MAP_CACHE;
 pub use grid::{GridShape, MacroGrid};
 
 use std::path::{Path, PathBuf};
@@ -27,6 +29,8 @@ use continents::ContinentField;
 
 /// Toutes les grilles de la carte macro, sur une même [`GridShape`].
 pub struct MacroMap {
+    /// Config qui a produit la carte (cf. `cache::cache_key`).
+    cache_key: String,
     shape: GridShape,
     /// Rayon du monde, en voxels.
     radius: f64,
@@ -162,6 +166,7 @@ impl MacroMap {
         );
 
         MacroMap {
+            cache_key: cache::cache_key(m),
             shape,
             radius,
             sea_level: m.world.sea_level as f32,

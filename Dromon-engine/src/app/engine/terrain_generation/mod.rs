@@ -7,7 +7,7 @@ mod streaming;
 mod utils;
 
 pub use chunk::{CHUNK_SIZE, ChunkStore, TerrainSnapshot, TerrainSource};
-pub use generation::macro_map::{GridShape, MacroGrid, MacroMap};
+pub use generation::macro_map::{GridShape, MACRO_MAP_CACHE, MacroGrid, MacroMap};
 pub use lod::grid::LodGrid;
 pub use lod::{LodFocus, chunk_distance};
 pub use streaming::ChunkStreamer;

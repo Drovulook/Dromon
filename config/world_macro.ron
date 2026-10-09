@@ -2,7 +2,7 @@
 // Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
 // Lue aussi par le détail (`world_detail.ron`), jamais l'inverse.
 (
-    seed: 20,
+    seed: 20000,
 
     world: (
         // Disque de 600 chunks de rayon (38 400 voxels, ~1,1 M chunks).
@@ -18,17 +18,30 @@
     // ce rayon. Ne porte que les grandes formes : le détail fin est en `world_detail`.
     cell_size: 32,
 
-    // Continents : seul le signe du bruit compte (> 0 terre). La distance à la côte
-    // est ensuite mesurée sur la grille.
+    // Continents : c = base + detail + land_bias − bord ; seul le signe compte
+    // (> 0 terre). La distance à la côte est ensuite mesurée sur la grille.
     continents: (
-        frequency: 0.00005, // longueur d'onde ~20 000 voxels ≈ taille d'un continent
-        octaves: 5,
-        lacunarity: 2.1,    // non entière, sinon les octaves s'alignent
-        gain: 0.6,          // plus grand = côtes plus découpées
-        land_bias: -0.05,     // > 0 plus de terre, < 0 plus de mer
-        
-        border_start: 0.85,  // fraction du rayon où l'océan de bord commence
-        border_strength: 1.2, // > 1 + land_bias → océan garanti au bord
+        // Forme : un seul bruit, longueur d'onde (1/f ~20 000 voxels) ≈ taille d'un
+        // continent. Valeur dans ~[-amplitude, amplitude].
+        base: (
+            frequency: 0.00004,
+            amplitude: 0.6,
+        ),
+        // Découpe des côtes : somme d'octaves indépendante de la base. Le détail
+        // déplace la côte d'environ amplitude / pente de la base : faible devant la
+        // base → continents massifs ; fort → bras, presqu'îles, archipels.
+        detail: (
+            frequency: 0.000105, // première octave (λ ~9 500 voxels)
+            octaves: 4,
+            lacunarity: 2.1,     // non entière, sinon les octaves s'alignent
+            gain: 0.6,           // plus grand = plus de petits détails
+            amplitude: 0.42,
+        ),
+        land_bias: 0.03,     // > 0 plus de terre, < 0 plus de mer
+
+        border_start: 0.9,  // fraction du rayon où l'océan de bord commence
+        // > base.amplitude + detail.amplitude + land_bias → océan garanti au bord
+        border_strength: 1.2,
         // Ondulation du début de l'océan de bord (fraction du rayon) : il commence
         // entre border_start − border_noise et border_start. 0.0 = cercle.
         border_noise: 0.3,
@@ -36,11 +49,11 @@
         
         // Mer non reliée à l'océan : comblée si plus petite qu'un disque de ce rayon
         // (voxels). 0.0 = toutes gardées ; très grand = aucune.
-        inland_sea_min_radius: 30000.0,
+        inland_sea_min_radius: 3000.0,
         // Île « petite » si plus petite qu'un disque de ce rayon (voxels) ; seule une
         // fraction small_island_keep est gardée (tirage fixé par la graine).
-        island_min_radius: 1500.0,
-        small_island_keep: 0.3,
+        island_min_radius: 1000.0,
+        small_island_keep: 0.6,
     ),
 
     // Altitude de base selon la distance à la côte d (voxels, > 0 terre) : points
@@ -59,14 +72,16 @@
     // détail (mélange plaine / montagne par le masque w).
     mountains: (
         frequency: 0.00003,       // axes = crêtes d'un bruit ridged (λ ~33 000)
-        axis_threshold: 0.85,      // plus haut = chaînes plus fines et plus rares
+        axis_threshold: 0.94,      // plus haut = chaînes plus fines et plus rares
         warp_frequency: 0.00005,  // plie les chaînes
         warp_amplitude: 3000.0,   // 0.0 = chaînes non pliées
-        min_coast_distance: 1500.0, // pas d'axe plus près de la côte
+        min_coast_distance: 1000.0, // pas d'axe plus près de la côte
         // w : 1 sur l'axe → 0 à cette distance. Pente ajoutée ≈ 1,5 · amplitude /
-        // largeur (700 / 4000 → ~15°) ; trop étroit = mur.
-        foothill_width: 4000.0,
-        coast_fade: 1500.0,       // w nul à la côte : le trait de côte ne bouge pas
+        // largeur (700 / 3500 → ~17°) ; trop étroit = mur.
+        foothill_width: 3500.0,
+        // w nul à la côte, plein à cette distance : les chaînes s'effilent vers la
+        // mer au lieu de finir en falaise, et le trait de côte ne bouge pas.
+        coast_fade: 3500.0,
         amplitude: 700.0,         // hauteur des chaînes au-dessus du profil côtier
     ),
 
@@ -115,7 +130,7 @@
         // avec le vent et pleut sur terre. Carte finale : 0 = désert, 1 = côte humide.
         evaporation: 0.2,       // recharge sur mer, fraction de l'écart à saturation
         // Pluie de base sur terre, par cellule parcourue : la vapeur est divisée par
-        // e tous les ~cell_size / rain_base voxels (256 / 0.02 → 12 800).
+        // e tous les ~cell_size / rain_base voxels (256 / 0.008 → 32 000).
         rain_base: 0.008,
         rain_orographic: 0.1,   // fraction de vapeur tombée par 100 voxels de montée
         moisture_diffusion: 0.15, // humidité côtière même sans vent (bande calme)

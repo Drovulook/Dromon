@@ -16,7 +16,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 // sans rien savoir de l'arborescence `app::engine::renderer::…`.
 pub use app::engine::renderer::render_resources::{RenderObject, Transform};
 pub use app::engine::renderer::world::World;
-pub use app::engine::terrain_generation::{GridShape, MacroGrid, MacroMap};
+pub use app::engine::terrain_generation::{GridShape, MACRO_MAP_CACHE, MacroGrid, MacroMap};
 pub use app::engine::timer::Timer;
 pub use scene::Scene;
 

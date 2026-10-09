@@ -3,23 +3,24 @@
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
-/// Forme des continents : fBm basse fréquence dont seul le **signe** compte
-/// (> 0 terre, < 0 mer), moins un terme qui force l'océan au bord du monde.
+/// Forme des continents : `c = base + detail + land_bias − bord`, dont seul le
+/// **signe** compte (> 0 terre, < 0 mer). Le bruit de base dessine des masses
+/// compactes ; la somme d'octaves découpe les côtes. Le détail déplace la côte
+/// d'environ `detail.amplitude / pente de base` : plus il est faible devant la base,
+/// plus les continents restent massifs (moins de bras et de presqu'îles).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ContinentParams {
-    /// Fréquence de la première octave. Longueur d'onde `1/f` ≈ taille d'un continent.
-    pub frequency: f64,
-    pub octaves: usize,
-    /// Non entière, sinon les octaves s'alignent.
-    pub lacunarity: f64,
-    /// Dans `]0, 1[` : plus grand = côtes plus découpées.
-    pub gain: f64,
-    /// Ajouté au bruit (~`[-1, 1]`) : > 0 plus de terre, < 0 plus de mer.
+    /// Forme des continents : un seul bruit, de longueur d'onde ≈ taille d'un continent.
+    pub base: BaseNoise,
+    /// Découpe des côtes : somme d'octaves, indépendante de la base.
+    pub detail: OctaveNoise,
+    /// Ajouté à `base + detail` : > 0 plus de terre, < 0 plus de mer.
     pub land_bias: f64,
     /// Fraction du rayon où l'océan de bord commence à être imposé, dans `[0, 1[`.
     pub border_start: f64,
-    /// Retranché au bruit au bord du monde. > 1 + `land_bias` → océan garanti.
+    /// Retranché au bruit au bord du monde.
+    /// `> base.amplitude + detail.amplitude + land_bias` → océan garanti.
     pub border_strength: f64,
     /// Ondulation du début de l'océan de bord, en fraction du rayon : il commence
     /// entre `border_start − border_noise` et `border_start`. `0.0` = cercle.
@@ -37,13 +38,58 @@ pub struct ContinentParams {
     pub small_island_keep: f64,
 }
 
+/// Un bruit simple : valeur dans ~`[-amplitude, amplitude]`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BaseNoise {
+    /// Longueur d'onde `1/f`, en voxels.
+    pub frequency: f64,
+    pub amplitude: f64,
+}
+
+impl Default for BaseNoise {
+    fn default() -> Self {
+        BaseNoise {
+            frequency: 0.00004,
+            amplitude: 0.6,
+        }
+    }
+}
+
+/// Somme d'octaves (fBm), normalisée par la somme des poids puis multipliée par
+/// `amplitude` : valeur dans ~`[-amplitude, amplitude]`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OctaveNoise {
+    /// Fréquence de la première octave.
+    pub frequency: f64,
+    /// `0` = désactivé.
+    pub octaves: usize,
+    /// Multiplicateur de fréquence entre octaves, non entier (sinon elles s'alignent).
+    pub lacunarity: f64,
+    /// Multiplicateur de poids entre octaves, dans `]0, 1[` : plus grand = plus de
+    /// petits détails.
+    pub gain: f64,
+    pub amplitude: f64,
+}
+
+impl Default for OctaveNoise {
+    fn default() -> Self {
+        OctaveNoise {
+            frequency: 0.0001,
+            octaves: 4,
+            lacunarity: 2.1,
+            gain: 0.6,
+            amplitude: 0.3,
+        }
+    }
+}
+
 impl Default for ContinentParams {
     fn default() -> Self {
         ContinentParams {
-            frequency: 0.00006,
-            octaves: 4,
-            lacunarity: 2.1,
-            gain: 0.5,
+            base: BaseNoise::default(),
+            detail: OctaveNoise::default(),
             land_bias: 0.0,
             border_start: 0.7,
             border_strength: 1.5,
@@ -58,15 +104,19 @@ impl Default for ContinentParams {
 
 impl ContinentParams {
     pub(super) fn validate(&self) -> Result<()> {
-        ensure!(self.octaves >= 1, "continents.octaves doit être ≥ 1");
         ensure!(
-            self.gain > 0.0 && self.gain < 1.0,
-            "continents.gain doit être dans ]0, 1["
+            self.base.amplitude >= 0.0 && self.detail.amplitude >= 0.0,
+            "continents.base.amplitude et detail.amplitude doivent être ≥ 0"
+        );
+        let d = &self.detail;
+        ensure!(
+            d.gain > 0.0 && d.gain < 1.0,
+            "continents.detail.gain doit être dans ]0, 1["
         );
         ensure!(
-            self.lacunarity.fract() != 0.0,
-            "continents.lacunarity doit être non entière (ici {})",
-            self.lacunarity
+            d.octaves <= 1 || d.lacunarity.fract() != 0.0,
+            "continents.detail.lacunarity doit être non entière (ici {})",
+            d.lacunarity
         );
         ensure!(
             (0.0..1.0).contains(&self.border_start),

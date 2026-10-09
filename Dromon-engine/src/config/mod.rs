@@ -24,7 +24,8 @@ pub use render::{
     TerrainRenderParams,
 };
 pub use world_gen::{
-    ClimateParams, CoastProfile, ContinentParams, HeightParams, MountainParams, WorldDetailConfig, WorldGenConfig, WorldMacroConfig, WorldShape,
+    BaseNoise, ClimateParams, CoastProfile, ContinentParams, HeightParams, MountainParams,
+    OctaveNoise, WorldDetailConfig, WorldGenConfig, WorldMacroConfig, WorldShape,
 };
 
 use anyhow::{Context, Result};
