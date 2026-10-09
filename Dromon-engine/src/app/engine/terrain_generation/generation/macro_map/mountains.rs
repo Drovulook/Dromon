@@ -40,15 +40,10 @@ pub fn mountain_mask(
     // plus ou moins vite selon la pente locale du bruit (mur ici, pente de 7° là-bas).
     // La distance donne `foothill_width` partout, donc une pente de flanc maîtrisée.
     let cell = shape.cell_size;
-    let w = distance_to(&axis, shape.n)
-        .into_iter()
-        .zip(coast_distance.values())
-        .map(|(dist, &d)| {
-            let foothill = 1.0 - smoothstep(0.0, params.foothill_width, dist as f64 * cell);
-            (foothill * smoothstep(0.0, params.coast_fade, d as f64)) as f32
-        })
-        .collect();
-    MacroGrid::from_vec(shape, w)
+    MacroGrid::from_vec(shape, distance_to(&axis, shape.n)).zip_map(coast_distance, |dist, d| {
+        let foothill = 1.0 - smoothstep(0.0, params.foothill_width, dist as f64 * cell);
+        (foothill * smoothstep(0.0, params.coast_fade, d as f64)) as f32
+    })
 }
 
 /// `1 − |n|` du bruit d'axes, évalué en `p + warp(p)` (chaînes pliées).

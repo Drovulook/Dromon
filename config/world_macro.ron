@@ -59,8 +59,8 @@
     // détail (mélange plaine / montagne par le masque w).
     mountains: (
         frequency: 0.00003,       // axes = crêtes d'un bruit ridged (λ ~33 000)
-        axis_threshold: 0.9,      // plus haut = chaînes plus fines et plus rares
-        warp_frequency: 0.00006,  // plie les chaînes
+        axis_threshold: 0.85,      // plus haut = chaînes plus fines et plus rares
+        warp_frequency: 0.00005,  // plie les chaînes
         warp_amplitude: 3000.0,   // 0.0 = chaînes non pliées
         min_coast_distance: 1500.0, // pas d'axe plus près de la côte
         // w : 1 sur l'axe → 0 à cette distance. Pente ajoutée ≈ 1,5 · amplitude /
@@ -68,5 +68,56 @@
         foothill_width: 4000.0,
         coast_fade: 1500.0,       // w nul à la côte : le trait de côte ne bouge pas
         amplitude: 700.0,         // hauteur des chaînes au-dessus du profil côtier
+    ),
+
+    // Climat, sur une grille plus grossière (il varie à l'échelle du km).
+    climate: (
+        cell_size: 256,           // multiple de cell_size ; 256 → grille 300 × 300
+        // Température au niveau de la mer aux bords sud et nord (°C) : gradient
+        // imposé, la vraie latitude ne varierait pas sur un si petit monde.
+        south_temperature: 28.0,
+        north_temperature: 2.0,
+        // °C perdus par voxel au-dessus de la mer. Réglé pour le jeu : 0.03 × 700
+        // → −21 °C sur les crêtes (le réel, 0.0065, ne ferait jamais neiger).
+        lapse_rate: 0.03,
+        noise_amplitude: 2.0,     // variations locales (°C)
+        noise_frequency: 0.00005,
+
+        // Vent dominant selon la latitude (0 = bord sud, 1 = bord nord) :
+        // (latitude, cap d'où il VIENT, vitesse). Cap : 0 nord, 90 est, 180 sud,
+        // 270 ouest. Les vecteurs sont interpolés : entre deux régimes opposés, ils
+        // s'annulent en une bande calme et sèche (latitudes subtropicales).
+        wind_bands: [
+            (0.0, 60.0, 1.0),   // alizés de nord-est (sud du monde, chaud)
+            (0.35, 60.0, 0.9),
+            (0.40, 60.0, 0.2),
+            (0.50, 240.0, 0.2),
+            (0.55, 240.0, 0.9), // vents de sud-ouest (nord du monde, tempéré)
+            (1.0, 240.0, 1.0),
+        ],
+        wind_deviation_deg: 25.0,    // rotation max par le bruit
+        wind_speed_variation: 0.3,   // ±30 % de vitesse
+        // Basse fréquence (λ = 1/f ~20 000 voxels) : un vent qui tourne vite strie
+        // l'humidité.
+        wind_noise_frequency: 0.00005,
+
+        // Courants marins : le vent, dévié pour longer les côtes. L'eau garde la
+        // température de son point de départ sur current_reach voxels de trajet
+        // (0.0 = pas de courants, SST = équilibre de la latitude).
+        current_reach: 36000.0,
+        current_coast_width: 3000.0, // les courants longent la côte en deçà
+        // Là où le vent pousse l'eau vers le large, de l'eau froide des profondeurs
+        // remonte (°C retirés à vent nominal, contre la côte) → côte fraîche et sèche.
+        // 0.0 = désactivée.
+        upwelling_strength: 3.0,
+
+        // Humidité : la vapeur (1 = air saturé à 20 °C) se charge sur la mer, voyage
+        // avec le vent et pleut sur terre. Carte finale : 0 = désert, 1 = côte humide.
+        evaporation: 0.2,       // recharge sur mer, fraction de l'écart à saturation
+        // Pluie de base sur terre, par cellule parcourue : la vapeur est divisée par
+        // e tous les ~cell_size / rain_base voxels (256 / 0.02 → 12 800).
+        rain_base: 0.008,
+        rain_orographic: 0.1,   // fraction de vapeur tombée par 100 voxels de montée
+        moisture_diffusion: 0.15, // humidité côtière même sans vent (bande calme)
     ),
 )
