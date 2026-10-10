@@ -13,7 +13,9 @@
 use super::super::super::utils::smoothstep;
 use super::MaterialQuery;
 use super::mix::MaterialMix;
-use super::{MATERIAL_DIRT, MATERIAL_GRASS, MATERIAL_ROCK, MATERIAL_SAND, MATERIAL_SNOW};
+use super::{
+    MATERIAL_DIRT, MATERIAL_GRASS, MATERIAL_MUD, MATERIAL_ROCK, MATERIAL_SAND, MATERIAL_SNOW,
+};
 
 // ─── Strates ─────────────────────────────────────────────────────────────────
 /// Profondeur (en voxels sous la surface) de la couche de surface; au-dessous,
@@ -24,12 +26,21 @@ const DIRT_DEPTH: f64 = 4.0;
 
 // ─── Frontières d'altitude de la couverture de surface ───────────────────────
 /// Altitude de la frontière herbe → neige : au-dessus, neige.
-const SNOW_BORDER: f64 = 540.0;
-/// Altitude de la frontière sable → herbe : en-dessous, sable.
-const SAND_BORDER: f64 = 10.0;
-/// Largeur (en voxels d'altitude) de la bande de transition centrée sur chaque
-/// frontière. Doit rester inférieure à l'écart entre deux frontières.
+const SNOW_BORDER: f64 = 740.0;
+/// Largeur (en voxels d'altitude) de la bande de transition herbe → neige.
 const BLEND_WIDTH: f64 = 40.0;
+
+// ─── Littoral et fonds marins ────────────────────────────────────────────────
+/// Largeur des plages (distance à la côte, voxels) : sable en deçà, herbe au-delà.
+/// Le sable couvre aussi tout le fond marin (d < 0) jusqu'à la vase.
+const BEACH_WIDTH: f64 = 40.0;
+/// Largeur de la transition sable → herbe (voxels de distance à la côte).
+const BEACH_BLEND: f64 = 20.0;
+/// Profondeur sous la mer de la frontière sable → vase : le plateau continental
+/// (≥ −30) reste sableux, le talus et les abysses sont vaseux.
+const MUD_DEPTH: f64 = 40.0;
+/// Largeur de la transition sable → vase (voxels de profondeur).
+const MUD_BLEND: f64 = 30.0;
 
 // ─── Plaques de terre ────────────────────────────────────────────────────────
 /// Altitude des premières plaques de terre (rares, petites).
@@ -61,11 +72,13 @@ const LEDGE_NONE: f64 = 0.906;
 const SNOW_ROCK_SLOPE_FULL: f64 = 0.500; // cos 60°
 const SNOW_ROCK_SLOPE_NONE: f64 = 0.707; // cos 45°
 
-/// Couche de base : cascade par profondeur; couverture selon l'altitude en
+/// Couche de base : cascade par profondeur; couverture (altitude puis littoral) en
 /// surface, puis terre, puis roche.
 pub(super) fn base_layer(q: &MaterialQuery) -> MaterialMix {
     if q.depth < SURFACE_DEPTH {
-        altitude_cover(q.mat_alt)
+        let mut mix = altitude_cover(q.mat_alt);
+        shore(q, &mut mix);
+        mix
     } else if q.depth < DIRT_DEPTH {
         MaterialMix::solid(MATERIAL_DIRT)
     } else {
@@ -73,20 +86,32 @@ pub(super) fn base_layer(q: &MaterialQuery) -> MaterialMix {
     }
 }
 
-/// Couverture de surface selon l'altitude : sable en bas, herbe au milieu, neige
-/// en haut, chaque étage recouvrant le précédent à travers sa bande de transition.
+/// Couverture de surface selon l'altitude : herbe, recouverte de neige en haut à
+/// travers la bande de transition.
 fn altitude_cover(mat_alt: f64) -> MaterialMix {
     let half = BLEND_WIDTH * 0.5;
-    let mut mix = MaterialMix::solid(MATERIAL_SAND);
-    mix.overlay(
-        MATERIAL_GRASS,
-        smoothstep(SAND_BORDER - half, SAND_BORDER + half, mat_alt),
-    );
+    let mut mix = MaterialMix::solid(MATERIAL_GRASS);
     mix.overlay(
         MATERIAL_SNOW,
         smoothstep(SNOW_BORDER - half, SNOW_BORDER + half, mat_alt),
     );
     mix
+}
+
+/// Littoral : sable sur les plages et le fond marin peu profond, vase au-delà du
+/// plateau continental. Recouvre la couverture d'altitude (l'herbe ne pousse pas
+/// sous l'eau).
+fn shore(q: &MaterialQuery, mix: &mut MaterialMix) {
+    let half = BEACH_BLEND * 0.5;
+    mix.overlay(
+        MATERIAL_SAND,
+        1.0 - smoothstep(BEACH_WIDTH - half, BEACH_WIDTH + half, q.shore_d),
+    );
+    let half = MUD_BLEND * 0.5;
+    mix.overlay(
+        MATERIAL_MUD,
+        smoothstep(MUD_DEPTH - half, MUD_DEPTH + half, q.sea_depth),
+    );
 }
 
 /// Plaques de terre dans l'herbe, d'autant plus étendues que l'altitude est élevée.

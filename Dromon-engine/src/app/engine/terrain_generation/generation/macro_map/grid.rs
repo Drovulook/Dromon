@@ -47,6 +47,17 @@ impl GridShape {
     }
 }
 
+/// Spline de Catmull-Rom entre `p[1]` (t = 0) et `p[2]` (t = 1) : cubique dont la pente
+/// en chaque point vaut celle de la corde entre ses deux voisins, partagée par les
+/// segments qui s'y rejoignent → pente continue. Calcul en `f64` : `d` atteint ~10⁴.
+fn catmull_rom(p: [f64; 4], t: f64) -> f64 {
+    let [p0, p1, p2, p3] = p;
+    0.5 * (2.0 * p1
+        + (p2 - p0) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
+        + (3.0 * (p1 - p2) + p3 - p0) * t * t * t)
+}
+
 /// Un champ scalaire 2D sur la carte macro (relief, température…), rangé ligne par
 /// ligne : `data[j·n + i]`.
 pub struct MacroGrid {
@@ -144,6 +155,24 @@ impl MacroGrid {
         let bottom = self.get(i0, j0) * (1.0 - tx) + self.get(i1, j0) * tx;
         let top = self.get(i0, j1) * (1.0 - tx) + self.get(i1, j1) * tx;
         bottom * (1.0 - ty) + top * ty
+    }
+
+    /// Valeur interpolée (bicubique, Catmull-Rom) au point monde `(wx, wy)`, sur les
+    /// 4 × 4 cellules voisines. Contrairement à [`sample`](Self::sample), la **pente**
+    /// est continue d'une cellule à l'autre : à préférer pour ce qui devient de la
+    /// géométrie (sinon plis visibles à l'éclairage). ⚠ Peut dépasser légèrement
+    /// l'intervalle des valeurs voisines.
+    pub fn sample_bicubic(&self, wx: f64, wy: f64) -> f32 {
+        let max = (self.shape.n - 1) as f64;
+        let u = ((wx - self.shape.origin) / self.shape.cell_size - 0.5).clamp(0.0, max);
+        let v = ((wy - self.shape.origin) / self.shape.cell_size - 0.5).clamp(0.0, max);
+        let (i0, j0) = (u.floor() as isize, v.floor() as isize);
+        let (tx, ty) = (u - i0 as f64, v - j0 as f64);
+        let at = |i: isize, j: isize| self.get_clamped(i, j) as f64;
+        let row = |j: isize| {
+            catmull_rom([at(i0 - 1, j), at(i0, j), at(i0 + 1, j), at(i0 + 2, j)], tx)
+        };
+        catmull_rom([row(j0 - 1), row(j0), row(j0 + 1), row(j0 + 2)], ty) as f32
     }
 
     /// Valeur (bilinéaire) au centre de la cellule `(i, j)` d'une **autre** grille

@@ -24,8 +24,10 @@ pub const MATERIAL_DIRT: u16 = 2;
 pub const MATERIAL_GRASS: u16 = 3;
 pub const MATERIAL_SNOW: u16 = 4;
 pub const MATERIAL_SAND: u16 = 5;
+/// Vase des fonds marins, au-delà du plateau continental.
+pub const MATERIAL_MUD: u16 = 6;
 /// Nombre d'IDs de matériau (air compris) : taille de [`mix::MaterialMix`].
-pub const MATERIAL_COUNT: usize = 6;
+pub const MATERIAL_COUNT: usize = 7;
 
 /// Couleur de base (albédo) d'un matériau, par ID.
 pub fn material_color(material: u16) -> Vec3 {
@@ -35,6 +37,7 @@ pub fn material_color(material: u16) -> Vec3 {
         MATERIAL_GRASS => Vec3::new(0.27, 0.42, 0.18),
         MATERIAL_SNOW => Vec3::new(0.95, 0.96, 0.98),
         MATERIAL_SAND => Vec3::new(0.80, 0.73, 0.52),
+        MATERIAL_MUD => Vec3::new(0.26, 0.25, 0.22),
         _ => Vec3::ZERO, // air / inconnu
     }
 }
@@ -44,6 +47,12 @@ pub fn material_color(material: u16) -> Vec3 {
 pub const SURFACE_JITTER_AMP: f64 = 60.0;
 /// Amplitude du jitter d'altitude pour les parois de bordure et le fond.
 pub const VOLUME_JITTER_AMP: f64 = 40.0;
+/// Amplitude du jitter de la largeur des plages (voxels de distance à la côte).
+/// Bien plus faible que celui d'altitude : une plage ne fait que quelques dizaines
+/// de voxels de large.
+pub const BEACH_JITTER_AMP: f64 = 25.0;
+/// Amplitude du jitter de profondeur des fonds marins (frontière sable → vase).
+pub const SEABED_JITTER_AMP: f64 = 15.0;
 
 /// Rayon (en voxels) du voisinage sur lequel on mesure la pente macro : les reliefs
 /// plus étroits que `2 × rayon` n'y comptent pas.
@@ -60,6 +69,12 @@ pub struct MaterialQuery {
     pub depth: f64,
     /// Altitude testée contre les frontières d'altitude, jitter inclus.
     pub mat_alt: f64,
+    /// Distance à la côte (voxels, > 0 terre), jitter des plages inclus. Définit les
+    /// plages : la plaine côtière est trop plate pour un seuil d'altitude (1 voxel
+    /// d'altitude ≈ 100 voxels de large).
+    pub shore_d: f64,
+    /// Profondeur sous le niveau de la mer (voxels, < 0 hors de l'eau), jitter inclus.
+    pub sea_depth: f64,
     /// Normale de la surface exposée ; `None` pour les parois et le fond.
     pub normal: Option<Vec3>,
     /// Cosinus de la pente macro (moyenne sur [`MACRO_SLOPE_RADIUS`]) ; `None` hors

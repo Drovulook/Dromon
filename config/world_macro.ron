@@ -8,7 +8,7 @@
         // Disque de 600 chunks de rayon (38 400 voxels, ~1,1 M chunks).
         radius_chunks: 600,
         // Plafond du monde, en voxels.
-        max_height: 1024,
+        max_height: 1600,
         // Niveau de la mer, en voxels. Budget vertical : abysses ~30, sommets
         // ≈ sea_level + profil côtier + mountains.amplitude (+ relief de détail).
         sea_level: 200.0,
@@ -82,7 +82,7 @@
         // w nul à la côte, plein à cette distance : les chaînes s'effilent vers la
         // mer au lieu de finir en falaise, et le trait de côte ne bouge pas.
         coast_fade: 3500.0,
-        amplitude: 700.0,         // hauteur des chaînes au-dessus du profil côtier
+        amplitude: 900.0,         // hauteur des chaînes au-dessus du profil côtier
     ),
 
     // Climat, sur une grille plus grossière (il varie à l'échelle du km).

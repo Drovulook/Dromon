@@ -124,18 +124,14 @@ impl MacroMap {
     }
 
     /// Relit le cache s'il correspond à `config`, sinon calcule la carte et l'écrit.
-    /// Un cache illisible ou impossible à écrire n'est pas fatal : on recalcule.
-    pub fn load_or_build(config: &WorldGenConfig, path: &Path) -> MacroMap {
-        match MacroMap::load(config, path) {
-            Ok(Some(map)) => return map,
-            Ok(None) => {}
-            Err(e) => eprintln!("Cache de carte macro ignoré : {e:#}"),
+    /// Un cache corrompu est une erreur : le supprimer pour forcer le recalcul.
+    pub fn load_or_build(config: &WorldGenConfig, path: &Path) -> Result<MacroMap> {
+        if let Some(map) = MacroMap::load(config, path)? {
+            return Ok(map);
         }
         let map = MacroMap::build(config);
-        if let Err(e) = map.save(path) {
-            eprintln!("Cache de carte macro non écrit : {e:#}");
-        }
-        map
+        map.save(path)?;
+        Ok(map)
     }
 }
 

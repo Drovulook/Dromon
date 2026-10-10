@@ -8,11 +8,11 @@
 use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, Voxel};
 use crate::profile;
 
-use super::height_field::HeightField;
 use super::material::{
-    MACRO_SLOPE_RADIUS, MaterialQuery, SURFACE_JITTER_AMP, VOLUME_JITTER_AMP, evaluate,
-    material_color,
+    BEACH_JITTER_AMP, MACRO_SLOPE_RADIUS, MaterialQuery, SEABED_JITTER_AMP, SURFACE_JITTER_AMP,
+    VOLUME_JITTER_AMP, evaluate, material_color,
 };
+use super::relief::Relief;
 use glam::{IVec2, IVec3, Vec3};
 use rustc_hash::FxHashMap;
 use std::cell::Cell;
@@ -41,8 +41,8 @@ const MACRO_APRON: i32 = MACRO_SLOPE_RADIUS as i32 + 1;
 /// sur `2^k` par axe (plus le voisinage des sommets pour les normales). Tout calculer
 /// d'avance faisait payer à un chunk LOD 3 le relief d'un LOD 0 (7,3 ms mesurées).
 pub struct DensityField<'a> {
-    /// Générateur du relief (fBm 2D). Sert aussi au choix des matériaux (couleur).
-    height: &'a HeightField,
+    /// Altitude des colonnes (carte macro + fBm). Sert aussi au choix des matériaux.
+    height: &'a Relief,
     /// Édits couvrant la région (chunk + apron), en coordonnées monde. Fusionnés une
     /// fois à la construction par [`TerrainSnapshot::density_field`] : ne contient que
     /// ce que cette région peut échantillonner, donc vide dans l'immense majorité des
@@ -73,7 +73,7 @@ impl<'a> DensityField<'a> {
     /// rayon des normales) ; `step` est son pas d'échantillonnage (`1 << lod`) ;
     /// `max_height` le plafond du monde.
     pub fn new(
-        height: &'a HeightField,
+        height: &'a Relief,
         edits: FxHashMap<IVec3, f32>,
         coord: IVec2,
         apron: i32,
@@ -245,11 +245,15 @@ impl<'a> DensityField<'a> {
     /// [`relief_interp`]: DensityField::relief_interp
     pub fn surface_color(&self, p: Vec3, normal: Vec3) -> Vec3 {
         let (wx, wy) = (p.x as f64, p.y as f64);
-        let jitter = self.height.material_jitter(wx, wy, SURFACE_JITTER_AMP);
+        // Jitter unitaire, mis à l'échelle par frontière (il est linéaire en `amp`).
+        let jitter = self.height.material_jitter(wx, wy, 1.0);
+        let alt = p.z as f64;
         blend(evaluate(&MaterialQuery {
             pos: p,
             depth: 0.0,
-            mat_alt: p.z as f64 + jitter,
+            mat_alt: alt + jitter * SURFACE_JITTER_AMP,
+            shore_d: self.height.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
+            sea_depth: self.height.sea_level() - alt + jitter * SEABED_JITTER_AMP,
             normal: Some(normal),
             macro_up: Some(self.macro_up(wx, wy)),
             patch_noise: Some(self.height.dirt_patch_noise(wx, wy)),
@@ -264,12 +268,15 @@ impl<'a> DensityField<'a> {
     /// exactement sur la grille pré-échantillonnée : la profondeur y est exacte quel que
     /// soit le LOD. Pour un sommet d'iso-surface, prendre [`DensityField::surface_color`].
     pub fn volume_color(&self, p: Vec3) -> Vec3 {
-        let surface = self.relief_interp(p.x as f64, p.y as f64) as f64;
-        let jitter = self.height.material_jitter(p.x as f64, p.y as f64, VOLUME_JITTER_AMP);
+        let (wx, wy) = (p.x as f64, p.y as f64);
+        let surface = self.relief_interp(wx, wy) as f64;
+        let jitter = self.height.material_jitter(wx, wy, 1.0);
         blend(evaluate(&MaterialQuery {
             pos: p,
             depth: surface - p.z as f64,
-            mat_alt: surface + jitter,
+            mat_alt: surface + jitter * VOLUME_JITTER_AMP,
+            shore_d: self.height.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
+            sea_depth: self.height.sea_level() - surface + jitter * SEABED_JITTER_AMP,
             normal: None,
             macro_up: None,
             patch_noise: None,

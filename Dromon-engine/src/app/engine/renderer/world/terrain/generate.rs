@@ -1,5 +1,6 @@
 use anyhow::Result;
 use glam::{IVec2, Vec3};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,8 +19,8 @@ use crate::{
             },
             rendering_context::RenderingContext,
             terrain_generation::{
-                ChunkStore, ChunkStreamer, LodFocus, LodGrid, MeshCache, TerrainSnapshot,
-                TerrainSource, chunk_distance,
+                ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE, MacroMap,
+                MeshCache, TerrainSnapshot, TerrainSource, chunk_distance,
             },
         },
         logger::Logger,
@@ -43,7 +44,7 @@ impl World {
             self.context.clone(),
             self.logger.clone(),
             self.frames_in_flight,
-        ));
+        )?);
         Ok(())
     }
 }
@@ -59,10 +60,12 @@ impl Terrain {
         context: Arc<RenderingContext>,
         logger: Arc<Logger>,
         frames_in_flight: u64,
-    ) -> Terrain {
+    ) -> Result<Terrain> {
         profile!();
 
-        let source = Arc::new(TerrainSource::new(config));
+        // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
+        let macro_map = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
+        let source = Arc::new(TerrainSource::new(config, macro_map));
 
         // Altitude moyenne du relief : plan de référence de la composante verticale du
         //    LOD. Mesurée une seule fois — le relief ne bouge pas.
@@ -97,7 +100,7 @@ impl Terrain {
             ms(params.initial_load_budget_ms),
         );
 
-        Terrain {
+        Ok(Terrain {
             source,
             store,
             chunks: InstalledChunks::new(),
@@ -113,7 +116,7 @@ impl Terrain {
             debug: debug.clone(),
             context,
             logger,
-        }
+        })
     }
 }
 

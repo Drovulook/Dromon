@@ -249,6 +249,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 mod tests {
     use crate::config::{MeshDebug, WorldGenConfig};
     use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ChunkStore, TerrainSource};
+    use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
     use crate::app::engine::terrain_generation::lod::Face;
     use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
     use std::sync::Arc;
@@ -272,8 +273,10 @@ mod tests {
     /// `WORLD_FLOOR`.
     fn stitched_pair() -> (Vec<TerrainVertex>, Vec<TerrainVertex>) {
         let (fine, coarse) = (IVec2::new(0, 0), IVec2::new(1, 0));
-        // Monde par défaut : rayon 4 chunks.
-        let source = Arc::new(TerrainSource::new(&WorldGenConfig::default()));
+        // Monde par défaut : rayon 4 chunks. `build`, pas `load_or_build` : ne pas
+        // écraser le cache du vrai monde.
+        let config = WorldGenConfig::default();
+        let source = Arc::new(TerrainSource::new(&config, MacroMap::build(&config)));
         let terrain =
             TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
         let lods = lod_grid(&[(fine, 0), (coarse, 1)]);

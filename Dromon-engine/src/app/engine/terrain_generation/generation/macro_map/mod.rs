@@ -17,6 +17,7 @@ mod small_regions;
 
 pub use cache::MACRO_MAP_CACHE;
 pub use grid::{GridShape, MacroGrid};
+pub(crate) use relief::coast_profile;
 
 use std::path::{Path, PathBuf};
 

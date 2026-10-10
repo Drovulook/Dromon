@@ -5,12 +5,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigFile;
 
-/// `world_detail.ron` : paramètres du détail calculé à la demande.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// `world_detail.ron` : paramètres du détail calculé à la demande. Hauteur d'une
+/// colonne : `sea_level + profil(d) + w(2 − w) · mountain + (1 − w) · fondu(d) · hills`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldDetailConfig {
-    /// Réglages du fBm érodé (cf. [`HeightParams`]).
-    pub relief: HeightParams,
+    /// Relief des chaînes, pondéré par le masque macro `w`.
+    pub mountain: HeightParams,
+    /// Collines des plaines, pondérées par `1 − w`. Doivent rester ≥ 0 (cf.
+    /// `hills_coast_fade`) : `base_height ≥ amplitude`.
+    pub hills: HeightParams,
+    /// Les collines s'effacent à la côte et atteignent leur plein à cette distance
+    /// (voxels) : sinon leurs creux passeraient sous la mer près des côtes basses.
+    pub hills_coast_fade: f64,
+}
+
+impl Default for WorldDetailConfig {
+    fn default() -> Self {
+        WorldDetailConfig {
+            mountain: HeightParams::default(),
+            hills: HeightParams::default(),
+            hills_coast_fade: 500.0,
+        }
+    }
 }
 
 impl ConfigFile for WorldDetailConfig {
@@ -18,27 +35,19 @@ impl ConfigFile for WorldDetailConfig {
 
     // HACK: il faudrait une macro qui envoie un message au CLI avant de planter
     fn validate(&self) -> Result<()> {
-        let r = &self.relief;
-        ensure!(r.octaves >= 1, "relief.octaves doit être ≥ 1");
-        ensure!(
-            r.gain > 0.0 && r.gain < 1.0,
-            "relief.gain doit être dans ]0, 1["
-        );
-        // Lacunarité entière : les réseaux des octaves s'alignent (motifs répétés).
-        ensure!(
-            r.lacunarity.fract() != 0.0,
-            "relief.lacunarity doit être non entière (ici {})",
-            r.lacunarity
-        );
+        self.mountain.validate("mountain")?;
+        self.hills.validate("hills")?;
+        ensure!(self.hills_coast_fade > 0.0, "hills_coast_fade doit être > 0");
         Ok(())
     }
 }
 
-/// Paramètres du champ d'altitude (`HeightField`) : contrôle du fBm et de l'érosion.
+/// Paramètres d'un champ d'altitude (`HeightField`) : contrôle du fBm et de l'érosion.
+/// Hauteur **relative** au relief macro : `base_height + amplitude · fBm`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HeightParams {
-    /// Altitude moyenne du terrain, en voxels (le bruit oscille autour).
+    /// Décalage du relief, en voxels (le bruit oscille autour).
     pub base_height: f64,
     /// Amplitude verticale totale du relief, en voxels.
     pub amplitude: f64,
@@ -111,5 +120,22 @@ impl Default for HeightParams {
             warp_frequency: 0.02,
             warp_amplitude: 0.0,
         }
+    }
+}
+
+impl HeightParams {
+    fn validate(&self, name: &str) -> Result<()> {
+        ensure!(self.octaves >= 1, "{name}.octaves doit être ≥ 1");
+        ensure!(
+            self.gain > 0.0 && self.gain < 1.0,
+            "{name}.gain doit être dans ]0, 1["
+        );
+        // Lacunarité entière : les réseaux des octaves s'alignent (motifs répétés).
+        ensure!(
+            self.lacunarity.fract() != 0.0,
+            "{name}.lacunarity doit être non entière (ici {})",
+            self.lacunarity
+        );
+        Ok(())
     }
 }
