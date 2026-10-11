@@ -67,7 +67,8 @@ pub struct MaterialQuery {
     pub pos: Vec3,
     /// Profondeur sous le relief (0 sur l'iso-surface).
     pub depth: f64,
-    /// Altitude testée contre les frontières d'altitude, jitter inclus.
+    /// Altitude **au-dessus du niveau de la mer** testée contre les frontières
+    /// d'altitude, jitter inclus : changer `sea_level` ne déplace pas la neige.
     pub mat_alt: f64,
     /// Distance à la côte (voxels, > 0 terre), jitter des plages inclus. Définit les
     /// plages : la plaine côtière est trop plate pour un seuil d'altitude (1 voxel

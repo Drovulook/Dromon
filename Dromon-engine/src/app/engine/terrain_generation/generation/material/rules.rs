@@ -25,8 +25,9 @@ const SURFACE_DEPTH: f64 = 1.0;
 const DIRT_DEPTH: f64 = 4.0;
 
 // ─── Frontières d'altitude de la couverture de surface ───────────────────────
+// Altitudes relatives au niveau de la mer (cf. `MaterialQuery::mat_alt`).
 /// Altitude de la frontière herbe → neige : au-dessus, neige.
-const SNOW_BORDER: f64 = 740.0;
+const SNOW_BORDER: f64 = 540.0;
 /// Largeur (en voxels d'altitude) de la bande de transition herbe → neige.
 const BLEND_WIDTH: f64 = 40.0;
 
@@ -38,15 +39,15 @@ const BEACH_WIDTH: f64 = 40.0;
 const BEACH_BLEND: f64 = 20.0;
 /// Profondeur sous la mer de la frontière sable → vase : le plateau continental
 /// (≥ −30) reste sableux, le talus et les abysses sont vaseux.
-const MUD_DEPTH: f64 = 40.0;
+const MUD_DEPTH: f64 = 120.0;
 /// Largeur de la transition sable → vase (voxels de profondeur).
 const MUD_BLEND: f64 = 30.0;
 
 // ─── Plaques de terre ────────────────────────────────────────────────────────
 /// Altitude des premières plaques de terre (rares, petites).
-const PATCH_START: f64 = 350.0;
+const PATCH_START: f64 = 250.0;
 /// Altitude où la terre a remplacé toute l'herbe, juste sous la neige.
-const PATCH_FULL: f64 = 600.0;
+const PATCH_FULL: f64 = 500.0;
 /// Demi-largeur (en unités de bruit) du bord adouci d'une plaque.
 const PATCH_EDGE: f64 = 0.12;
 /// Seuil du bruit à `PATCH_START` : au-dessus du bruit presque partout → aucune

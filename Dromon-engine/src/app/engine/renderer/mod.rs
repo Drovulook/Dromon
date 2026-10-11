@@ -15,7 +15,9 @@ pub(crate) mod world;
 
 use crate::app::engine::inputs::InputState;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
-use crate::app::engine::renderer::render_systems::{SkyRenderSystem, TerrainRenderSystem};
+use crate::app::engine::renderer::render_systems::{
+    SkyRenderSystem, TerrainRenderSystem, WaterRenderSystem,
+};
 use crate::app::engine::renderer::shadow_map::ShadowMap;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::renderer::world::World;
@@ -48,6 +50,7 @@ pub struct Renderer {
     object_render_system: ObjectRenderSystem,
     terrain_render_sytem: TerrainRenderSystem,
     sky_render_system: SkyRenderSystem,
+    water_render_system: WaterRenderSystem,
     shadow_map: ShadowMap,
     swapchain: swapchain::Swapchain,
     context: Arc<RenderingContext>,
@@ -182,6 +185,14 @@ impl Renderer {
                 swapchain.msaa_samples,
             )?;
 
+            let water_render_system = WaterRenderSystem::new(
+                context.clone(),
+                descriptor_handler.clone(),
+                swapchain.color_format,
+                swapchain.depth_format,
+                swapchain.msaa_samples,
+            )?;
+
             Renderer::initialize(context.clone(), &world)?;
 
             // Profiler GPU : nb de nanosecondes par tick + support des timestamps sur
@@ -211,6 +222,7 @@ impl Renderer {
                 object_render_system,
                 terrain_render_sytem,
                 sky_render_system,
+                water_render_system,
                 shadow_map,
                 swapchain,
                 context,

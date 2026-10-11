@@ -14,4 +14,8 @@ slangc dev_res/shaders/terrain.slang -entry terrainShadowVertMain -stage vertex 
 slangc dev_res/shaders/sky.slang -entry skyVertMain -stage vertex -o res/shaders/sky_vert.spv
 slangc dev_res/shaders/sky.slang -entry skyFragMain -stage fragment -o res/shaders/sky_frag.spv
 
+# Surface de la mer (grille CDLOD)
+slangc dev_res/shaders/water.slang -entry waterVertMain -stage vertex -o res/shaders/water_vert.spv
+slangc dev_res/shaders/water.slang -entry waterFragMain -stage fragment -o res/shaders/water_frag.spv
+
 echo "Shaders compilés."

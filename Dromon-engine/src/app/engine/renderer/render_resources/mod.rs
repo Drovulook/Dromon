@@ -4,6 +4,7 @@ mod terrain_mesh;
 mod texture;
 mod texture_handler;
 mod transform;
+mod water_mesh;
 
 use crate::app::{
     engine::{
@@ -24,6 +25,7 @@ use std::{collections::HashMap, sync::Arc};
 pub use terrain_mesh::{MeshData, TerrainMesh, TerrainVertex};
 use texture::Texture;
 pub use transform::Transform;
+pub use water_mesh::{WATER_GRID_RESOLUTION, WaterMesh, WaterVertex};
 
 pub struct RenderResourceManager {
     logger: Arc<Logger>,

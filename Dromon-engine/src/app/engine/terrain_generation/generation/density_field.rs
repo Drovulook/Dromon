@@ -247,13 +247,14 @@ impl<'a> DensityField<'a> {
         let (wx, wy) = (p.x as f64, p.y as f64);
         // Jitter unitaire, mis à l'échelle par frontière (il est linéaire en `amp`).
         let jitter = self.height.material_jitter(wx, wy, 1.0);
-        let alt = p.z as f64;
+        // Altitude au-dessus de la mer : référence de toutes les frontières.
+        let alt = p.z as f64 - self.height.sea_level();
         blend(evaluate(&MaterialQuery {
             pos: p,
             depth: 0.0,
             mat_alt: alt + jitter * SURFACE_JITTER_AMP,
             shore_d: self.height.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
-            sea_depth: self.height.sea_level() - alt + jitter * SEABED_JITTER_AMP,
+            sea_depth: -alt + jitter * SEABED_JITTER_AMP,
             normal: Some(normal),
             macro_up: Some(self.macro_up(wx, wy)),
             patch_noise: Some(self.height.dirt_patch_noise(wx, wy)),
@@ -271,12 +272,13 @@ impl<'a> DensityField<'a> {
         let (wx, wy) = (p.x as f64, p.y as f64);
         let surface = self.relief_interp(wx, wy) as f64;
         let jitter = self.height.material_jitter(wx, wy, 1.0);
+        let alt = surface - self.height.sea_level();
         blend(evaluate(&MaterialQuery {
             pos: p,
             depth: surface - p.z as f64,
-            mat_alt: surface + jitter * VOLUME_JITTER_AMP,
+            mat_alt: alt + jitter * VOLUME_JITTER_AMP,
             shore_d: self.height.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
-            sea_depth: self.height.sea_level() - surface + jitter * SEABED_JITTER_AMP,
+            sea_depth: -alt + jitter * SEABED_JITTER_AMP,
             normal: None,
             macro_up: None,
             patch_noise: None,

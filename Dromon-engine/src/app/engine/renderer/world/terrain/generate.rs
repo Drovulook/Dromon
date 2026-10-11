@@ -15,11 +15,12 @@ use crate::{
                         Terrain, culling::VisibleSet, graveyard::Graveyard, mesh_job::MeshJob,
                         meshes::InstalledChunks,
                     },
+                    water::Water,
                 },
             },
             rendering_context::RenderingContext,
             terrain_generation::{
-                ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE, MacroMap,
+                CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE, MacroMap,
                 MeshCache, TerrainSnapshot, TerrainSource, chunk_distance,
             },
         },
@@ -44,6 +45,14 @@ impl World {
             self.context.clone(),
             self.logger.clone(),
             self.frames_in_flight,
+        )?);
+
+        let world = &config.macro_.world;
+        let world_radius = (world.radius_chunks as usize * CHUNK_SIZE) as f32;
+        self.water = Some(Water::new(
+            self.context.clone(),
+            world.sea_level as f32,
+            world_radius,
         )?);
         Ok(())
     }

@@ -64,7 +64,7 @@ impl Default for WorldShape {
         WorldShape {
             radius_chunks: 4,
             max_height: 1024,
-            sea_level: 200.0,
+            sea_level: 400.0,
         }
     }
 }

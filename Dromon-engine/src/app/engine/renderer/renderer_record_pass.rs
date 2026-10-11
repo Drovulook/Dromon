@@ -81,6 +81,8 @@ impl Renderer {
         );
     }
 
+    //
+
     pub(super) fn record_render_pass(&self, frame: &Frame, image_index: u32) {
         profile!();
         self.context.transition_image_layout(
@@ -162,6 +164,15 @@ impl Renderer {
 
             self.sky_render_system
                 .record_render_sky(frame.command_buffer, self.frame_index);
+
+            // Transparente : en dernier, une fois le fond (terrain + ciel) dessiné.
+            if let Some(water) = self.world.water.as_ref() {
+                self.water_render_system.record_render_water(
+                    frame.command_buffer,
+                    self.frame_index,
+                    water,
+                );
+            }
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 

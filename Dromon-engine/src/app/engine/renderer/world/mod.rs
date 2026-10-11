@@ -4,6 +4,7 @@ pub(crate) mod game_clock;
 pub(crate) mod light;
 pub(crate) mod stars;
 pub(crate) mod terrain;
+pub(crate) mod water;
 
 use anyhow::Result;
 use ash::vk;
@@ -14,6 +15,7 @@ use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::{DirectionalLight, sun_direction};
 use crate::app::engine::renderer::world::stars::{Stars, world_to_sky};
 use crate::app::engine::renderer::world::terrain::Terrain;
+use crate::app::engine::renderer::world::water::Water;
 use crate::app::{
     engine::{
         renderer::{
@@ -43,6 +45,8 @@ pub struct World {
     /// Le terrain vivant. `None` tant que la scène n'a pas appelé
     /// [`World::generate_terrain`] — une scène n'est pas obligée d'en avoir un.
     pub(crate) terrain: Option<Terrain>,
+    /// La mer, créée avec le terrain (même `sea_level`).
+    pub(crate) water: Option<Water>,
     /// Contexte GPU, conservé pour pouvoir allouer les buffers du terrain au
     /// moment du `setup` (la génération est pilotée par la scène) comme en cours de jeu.
     context: Arc<RenderingContext>,
@@ -81,6 +85,7 @@ impl World {
             atmosphere: Atmosphere::new(env.atmosphere),
             stars: Stars::new(env.stars),
             terrain: None,
+            water: None,
             context,
             frames_in_flight: frames_in_flight as u64,
             game_clock: GameClock::new(&env.clock),
@@ -108,6 +113,9 @@ impl World {
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
         profile!();
         // Pas de terrain ici : ses meshes arrivent au fil des frames (`update_terrain`).
+        if let Some(water) = self.water.as_ref() {
+            water.record_upload(command_buffer);
+        }
         self.rrm.initialize(command_buffer)
     }
 

@@ -8,10 +8,10 @@
         // Disque de 600 chunks de rayon (38 400 voxels, ~1,1 M chunks).
         radius_chunks: 600,
         // Plafond du monde, en voxels.
-        max_height: 1600,
-        // Niveau de la mer, en voxels. Budget vertical : abysses ~30, sommets
-        // ≈ sea_level + profil côtier + mountains.amplitude (+ relief de détail).
-        sea_level: 200.0,
+        max_height: 1800,
+        // Niveau de la mer, en voxels. Budget vertical : abysses ~30 (plancher du
+        // monde à 0), sommets ≈ sea_level + 30 + mountain.amplitude · 0,8 (~1 390).
+        sea_level: 400.0,
     ),
 
     // Côté d'une cellule de la carte macro, en voxels. 32 → grille 2400 × 2400 pour
@@ -60,9 +60,9 @@
     // (d, altitude relative à sea_level) reliés par des segments, constant au-delà.
     coast: (
         points: [
-            (-12000.0, -170.0), // plaine abyssale
-            (-4000.0, -140.0),  // pied du talus continental
-            (-1500.0, -30.0),   // rebord du plateau continental
+            (-12000.0, -370.0), // plaine abyssale (z = 30 pour sea_level 400)
+            (-3000.0, -300.0),  // pied du talus continental (pente ~5,5°)
+            (-700.0, -80.0),    // rebord du plateau continental (pente ~6,5°)
             (0.0, 0.0),         // côte
             (3000.0, 30.0),     // plaine côtière, puis plat
         ],

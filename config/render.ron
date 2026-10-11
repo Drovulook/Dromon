@@ -10,14 +10,14 @@
         // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
         // (world_macro.ron) : on démarre alors au-dessus des plus hauts sommets.
         // Ouest de la chaîne centrale (axe de (8400, 1500) à (12000, -1900)), tourné vers elle.
-        start_position: (7000.0, 2500.0, 1130.0),
+        start_position: (7000.0, 2500.0, 1650.0),
         start_yaw_deg: -40.0,   // 0 = vers +X (est), 90 = vers +Y (nord)
         start_pitch_deg: -20.0, // 0 = horizontale, négatif = vers le bas
         fov_deg: 45.0,      // champ de vision vertical au démarrage
         min_fov_deg: 20.0,  // bornes du zoom (molette)
         max_fov_deg: 110.0,
         near: 0.1,
-        far: 8000.0,        // distance d'affichage : inutile au-delà de la portée de chargement
+        far: 10000.0,        // distance d'affichage : inutile au-delà de la portée de chargement
         move_speed: 400.0,  // unités monde par seconde
         rotation_sensitivity: 0.002, // radians par pixel de souris
         zoom_speed: 0.05,   // radians de FOV par cran de molette
