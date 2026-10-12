@@ -14,14 +14,14 @@ mod environment;
 mod render;
 mod world_gen;
 
-pub use debug::{DebugConfig, MeshDebug};
+pub use debug::{DebugConfig, MeshDebug, WaterDebug};
 pub use environment::{
     AtmosphereParams, ClockParams, DayNightParams, EnvironmentConfig, SkyKeyframe, StarsParams,
     SunDisk,
 };
 pub use render::{
     CameraParams, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
-    TerrainRenderParams,
+    TerrainRenderParams, WaterRenderParams,
 };
 pub use world_gen::{
     BaseNoise, ClimateParams, CoastProfile, ContinentParams, HeightParams, MountainParams,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     app::engine::{
         renderer::{
-            descriptors::DescriptorHandler, render_resources::TerrainVertex,
+            descriptors::DescriptorHandler, pipelines, render_resources::TerrainVertex,
             world::terrain::meshes::InstalledChunks,
         },
         rendering_context::RenderingContext,
@@ -36,8 +36,8 @@ impl TerrainRenderSystem {
         shadow_map_format: vk::Format,
     ) -> Result<Self> {
         unsafe {
-            let vertex_shader = context.load_shader_module("terrain_vert.spv")?;
-            let fragment_shader = context.load_shader_module("terrain_frag.spv")?;
+            let vertex_shader = pipelines::load_shader_module(&context.device,"terrain_vert.spv")?;
+            let fragment_shader = pipelines::load_shader_module(&context.device,"terrain_frag.spv")?;
             // 2 matrices poussées par objet. La 1re est la matrice
             // « model » ; la 2de est la matrice normale (inverse-transposée de
             // model, calculée côté CPU car Slang n'a pas inverse()).
@@ -60,7 +60,8 @@ impl TerrainRenderSystem {
                 None,
             )?;
 
-            let pipeline = context.create_graphics_pipeline(
+            let pipeline = pipelines::create_graphics_pipeline(
+                &context.device,
                 vertex_shader,
                 fragment_shader,
                 pipeline_layout,
@@ -78,8 +79,9 @@ impl TerrainRenderSystem {
 
             // Pipeline d'ombre du terrain : réutilise shadow_vert.spv (ne lit que la
             // position, donc compatible avec TerrainVertex) + le pipeline_layout.
-            let shadow_vertex_shader = context.load_shader_module("terrain_shadow_vert.spv")?;
-            let shadow_pipeline = context.create_shadow_pipeline(
+            let shadow_vertex_shader = pipelines::load_shader_module(&context.device,"terrain_shadow_vert.spv")?;
+            let shadow_pipeline = pipelines::create_shadow_pipeline(
+                &context.device,
                 shadow_vertex_shader,
                 pipeline_layout,
                 &[TerrainVertex::get_binding_description()],

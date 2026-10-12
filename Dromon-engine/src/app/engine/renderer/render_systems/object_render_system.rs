@@ -1,4 +1,5 @@
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
+use crate::app::engine::renderer::pipelines;
 use crate::app::engine::renderer::render_resources::{ObjectVertex, RenderObject};
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::profile;
@@ -30,8 +31,8 @@ impl ObjectRenderSystem {
         shadow_map_format: vk::Format,
     ) -> Result<Self> {
         unsafe {
-            let vertex_shader = context.load_shader_module("object_vert.spv")?;
-            let fragment_shader = context.load_shader_module("object_frag.spv")?;
+            let vertex_shader = pipelines::load_shader_module(&context.device,"object_vert.spv")?;
+            let fragment_shader = pipelines::load_shader_module(&context.device,"object_frag.spv")?;
             // 2 matrices poussées par objet. La 1re est la matrice
             // « model » ; la 2de est la matrice normale (inverse-transposée de
             // model, calculée côté CPU car Slang n'a pas inverse()).
@@ -55,7 +56,8 @@ impl ObjectRenderSystem {
                 None,
             )?;
 
-            let pipeline = context.create_graphics_pipeline(
+            let pipeline = pipelines::create_graphics_pipeline(
+                &context.device,
                 vertex_shader,
                 fragment_shader,
                 pipeline_layout,
@@ -74,8 +76,9 @@ impl ObjectRenderSystem {
             // Pipeline de la passe d'ombre : un seul stage (shadow_vert.spv), qui ne
             // lit que la position. Réutilise `pipeline_layout` (set 0 + push constants
             // suffisent) et le format de profondeur de la shadow map.
-            let shadow_vertex_shader = context.load_shader_module("object_shadow_vert.spv")?;
-            let shadow_pipeline = context.create_shadow_pipeline(
+            let shadow_vertex_shader = pipelines::load_shader_module(&context.device,"object_shadow_vert.spv")?;
+            let shadow_pipeline = pipelines::create_shadow_pipeline(
+                &context.device,
                 shadow_vertex_shader,
                 pipeline_layout,
                 &[ObjectVertex::get_binding_description()],

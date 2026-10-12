@@ -13,6 +13,7 @@ pub struct RenderConfig {
     pub camera: CameraParams,
     pub shadow: ShadowSettings,
     pub terrain: TerrainRenderParams,
+    pub water: WaterRenderParams,
 }
 
 impl ConfigFile for RenderConfig {
@@ -66,6 +67,19 @@ impl ConfigFile for RenderConfig {
             "terrain.lod.hysteresis doit être dans [0, 1["
         );
         ensure!(lod.height_weight >= 0.0, "terrain.lod.height_weight doit être ≥ 0");
+
+        let w = &self.water;
+        ensure!(w.leaf_size > 0.0, "water.leaf_size doit être > 0");
+        ensure!(
+            (0.0..1.0).contains(&w.morph_start_ratio),
+            "water.morph_start_ratio doit être dans [0, 1["
+        );
+        // Implique aussi range_factor > 2√2 (voisins à au plus un niveau d'écart).
+        ensure!(
+            w.range_factor * w.morph_start_ratio >= MIN_WATER_MORPH_MARGIN,
+            "water : il faut range_factor · morph_start_ratio ≥ 2√2 ≈ \
+             {MIN_WATER_MORPH_MARGIN:.2} (sinon fissures entre niveaux)"
+        );
         Ok(())
     }
 }
@@ -112,6 +126,35 @@ impl Default for TerrainRenderParams {
             frame_budget_ms: 1.0,
             initial_load_budget_ms: 1.0,
             mesh_cache_mb: 2000,
+        }
+    }
+}
+
+/// Borne de `range_factor · morph_start_ratio` : le bord commun d'un nœud fin et de son
+/// voisin grossier est à au plus `portée + diagonale du parent du fin` (`2√2 · taille`),
+/// et le grossier ne doit pas encore y avoir commencé sa transition.
+const MIN_WATER_MORPH_MARGIN: f32 = 2.0 * std::f32::consts::SQRT_2;
+
+/// Surface de la mer : quadtree CDLOD (cf. `Architecture/Rendu-Eau.md`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaterRenderParams {
+    /// Côté des nœuds les plus fins (niveau 0), en unités monde.
+    pub leaf_size: f32,
+    /// Portée d'un niveau ÷ côté de ses nœuds : un nœud est découpé si la caméra est à
+    /// moins de `range_factor · côté des enfants`.
+    pub range_factor: f32,
+    /// Début du geomorphing dans la zone d'un niveau `[portée/2, portée]` : 0 = dès le
+    /// début, 0,75 = sur le dernier quart. `range_factor · ratio` doit atteindre 2√2.
+    pub morph_start_ratio: f32,
+}
+
+impl Default for WaterRenderParams {
+    fn default() -> Self {
+        WaterRenderParams {
+            leaf_size: 64.0,
+            range_factor: 4.0,
+            morph_start_ratio: 0.75,
         }
     }
 }

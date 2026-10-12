@@ -6,7 +6,7 @@
     latitude_deg: 40.0,
 
     clock: (
-        day_length_secs: 30.0, // durée d'un jour de jeu en secondes réelles
+        day_length_secs: 30000.0, // durée d'un jour de jeu en secondes réelles
         time_scale: 1.0,       // 0 = pause, 60 = accéléré
         start_hour: 9.0,       // heure de départ, dans [0, 24[
     ),

@@ -128,6 +128,9 @@ impl World {
         if let Some(terrain) = self.terrain.as_mut() {
             terrain.update_visibility(&self.camera, &self.light);
         }
+        if let Some(water) = self.water.as_mut() {
+            water.update(&self.camera);
+        }
     }
 
     /// Fait suivre le terrain aux mouvements de caméra (LOD et streaming). Sans terrain,

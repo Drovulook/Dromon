@@ -13,6 +13,7 @@ pub struct DebugConfig {
     /// Occupation et fragmentation de l'allocateur GPU, à chaque lot installé.
     pub log_gpu_usage: bool,
     pub mesh: MeshDebug,
+    pub water: WaterDebug,
 }
 
 impl Default for DebugConfig {
@@ -21,6 +22,7 @@ impl Default for DebugConfig {
             log_batch_stats: true,
             log_gpu_usage: true,
             mesh: MeshDebug::default(),
+            water: WaterDebug::default(),
         }
     }
 }
@@ -50,4 +52,19 @@ impl Default for MeshDebug {
             transition_color: false,
         }
     }
+}
+
+/// Aides visuelles de la mer (quadtree CDLOD, geomorphing).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaterDebug {
+    /// Une couleur par niveau de nœud.
+    pub lod_color: bool,
+    /// Assombrit les sommets en cours de geomorphing (noir à `k = 1`).
+    pub morph_color: bool,
+    /// Amplitude de vagues sinusoïdales de test (0 = plat). Font apparaître les
+    /// fissures entre niveaux si le geomorphing est faux.
+    pub test_wave_amplitude: f32,
+    /// Longueur d'onde de ces vagues.
+    pub test_wave_length: f32,
 }

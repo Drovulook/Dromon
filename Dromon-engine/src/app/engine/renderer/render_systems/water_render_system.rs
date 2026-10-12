@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::app::engine::{
     renderer::{
         descriptors::DescriptorHandler,
+        pipelines,
         render_resources::{WATER_GRID_RESOLUTION, WaterVertex},
         world::water::{Water, WaterPushConstants},
     },
@@ -29,11 +30,12 @@ impl WaterRenderSystem {
         msaa_samples: vk::SampleCountFlags,
     ) -> Result<Self> {
         unsafe {
-            let vertex_shader = context.load_shader_module("water_vert.spv")?;
-            let fragment_shader = context.load_shader_module("water_frag.spv")?;
+            let vertex_shader = pipelines::load_shader_module(&context.device,"water_vert.spv")?;
+            let fragment_shader = pipelines::load_shader_module(&context.device,"water_frag.spv")?;
 
+            // Le fragment shader lit aussi les push constants (niveau, mode debug).
             let push_constant_ranges = [vk::PushConstantRange::default()
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                 .offset(0)
                 .size(std::mem::size_of::<WaterPushConstants>() as u32)];
 
@@ -45,7 +47,8 @@ impl WaterRenderSystem {
                 None,
             )?;
 
-            let pipeline = context.create_water_pipeline(
+            let pipeline = pipelines::create_water_pipeline(
+                &context.device,
                 vertex_shader,
                 fragment_shader,
                 pipeline_layout,
@@ -94,16 +97,24 @@ impl WaterRenderSystem {
 
             water.mesh.bind(command_buffer);
 
+            let debug_flags = water.debug_flags();
             for node in &water.nodes {
                 let push = WaterPushConstants {
                     origin: node.origin,
                     cell_size: node.size / WATER_GRID_RESOLUTION as f32,
                     sea_level: water.sea_level,
+                    morph_start: node.morph_start,
+                    morph_end: node.morph_end,
+                    level: node.level,
+                    debug_flags,
+                    test_wave_amplitude: water.debug.test_wave_amplitude,
+                    test_wave_length: water.debug.test_wave_length,
+                    max_distance: water.max_distance,
                 };
                 self.context.device.cmd_push_constants(
                     command_buffer,
                     self.pipeline_layout,
-                    vk::ShaderStageFlags::VERTEX,
+                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                     0,
                     bytemuck::bytes_of(&push),
                 );

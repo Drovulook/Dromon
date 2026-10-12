@@ -10,4 +10,13 @@
         world_bottom: true,       // face du dessous des chunks
         transition_color: false,  // cellules de transition Transvoxel en magenta
     ),
+
+    water: (
+        lod_color: true,     // une couleur par niveau de nœud CDLOD
+        morph_color: true,   // assombrit les sommets en cours de geomorphing (noir à k = 1)
+        // Vagues sinusoïdales de test (amplitude 0 = mer plate) : des fissures entre
+        // niveaux trahiraient un geomorphing faux.
+        test_wave_amplitude: 10.0,
+        test_wave_length: 150.0,
+    ),
 )

@@ -9,7 +9,6 @@
  * - La compatibility_surface est temporaire : détruite après filtrage des devices
  */
 mod commands;
-mod pipeline_creation;
 mod resources;
 
 use super::debug_messenger::DebugMessenger;

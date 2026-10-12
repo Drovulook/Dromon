@@ -27,7 +27,8 @@ impl Scene for ModelSandbox {
                     .context("texture \"texture1\" introuvable")?,
                 Transform {
                     translation: glam::Vec3::new(0.0, 1.0, 0.0),
-                    ..Default::default()
+                    rotation: glam::Vec3::new(0.0, 1.0, 0.0),
+                    scale: glam::Vec3::new(50.0, 50.0, 50.0),
                 },
             ),
             RenderObject::new(
@@ -43,6 +44,10 @@ impl Scene for ModelSandbox {
         ];
 
         world.render_objects = render_objects;
+
+        world.camera.position = glam::Vec3::new(-6.0, -6.0, 4.0);
+        world.camera.look_at(glam::Vec3::ZERO);
+
         Ok(())
     }
 

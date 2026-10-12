@@ -107,6 +107,12 @@ impl TerrainSource {
         self.relief.height(wx as f64, wy as f64) as f32
     }
 
+    /// Distance signée à la côte macro (voxels, > 0 sur terre) à la colonne `(wx, wy)`.
+    /// Euclidienne, à moins d'une cellule de la carte macro près.
+    pub fn coast_distance(&self, wx: f32, wy: f32) -> f32 {
+        self.relief.coast_distance(wx as f64, wy as f64) as f32
+    }
+
     /// Altitude **moyenne** du relief sur tout le monde, mesurée au centre des chunks.
     ///
     /// C'est le plan de référence par rapport auquel on juge « être haut » (cf.

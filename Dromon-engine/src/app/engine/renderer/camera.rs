@@ -52,7 +52,7 @@ impl Camera {
 
     /// Oriente la caméra vers un point (déduit yaw/pitch de la direction).
     #[allow(dead_code)] // plus utilisée depuis la pose de départ en config, gardée pour plus tard
-    fn look_at(&mut self, target: Vec3) {
+    pub fn look_at(&mut self, target: Vec3) {
         let dir = (target - self.position).normalize();
         self.yaw = dir.y.atan2(dir.x);
         self.pitch = dir.z.asin();
@@ -124,8 +124,7 @@ impl Camera {
         let front = self.front();
         self.view = Mat4::look_at_rh(self.position, self.position + front, Vec3::Z);
 
-        let mut proj =
-            Mat4::perspective_rh(self.fov_y, aspect, self.params.near, self.params.far);
+        let mut proj = Mat4::perspective_rh(self.fov_y, aspect, self.params.near, self.params.far);
         proj.y_axis.y *= -1.0; // Vulkan a l'axe Y de l'écran vers le bas
         self.proj = proj;
     }

@@ -9,10 +9,12 @@
     camera: (
         // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
         // (world_macro.ron) : on démarre alors au-dessus des plus hauts sommets.
-        // Ouest de la chaîne centrale (axe de (8400, 1500) à (12000, -1900)), tourné vers elle.
-        start_position: (7000.0, 2500.0, 1650.0),
-        start_yaw_deg: -40.0,   // 0 = vers +X (est), 90 = vers +Y (nord)
-        start_pitch_deg: -20.0, // 0 = horizontale, négatif = vers le bas
+        // Au large de la côte (13650, -5040), 150 au-dessus de la mer, tourné vers la
+        // plage et le sommet (~1300) au bout de la chaîne centrale, en (12400, -2310).
+        // Ancienne pose (survol de la chaîne) : (7000, 2500, 1650), yaw -40, pitch -20.
+        start_position: (13900.0, -5590.0, 550.0),
+        start_yaw_deg: 115.0,  // 0 = vers +X (est), 90 = vers +Y (nord)
+        start_pitch_deg: -5.0, // 0 = horizontale, négatif = vers le bas
         fov_deg: 45.0,      // champ de vision vertical au démarrage
         min_fov_deg: 20.0,  // bornes du zoom (molette)
         max_fov_deg: 110.0,
@@ -38,6 +40,15 @@
         frame_budget_ms: 1.0,        // construction / destruction de buffers par frame
         initial_load_budget_ms: 1.0, // idem pendant le chargement initial
         mesh_cache_mb: 2000,         // cache des géométries (allers-retours de caméra)
+    ),
+
+    // Mer : quadtree CDLOD (cf. vault, Architecture/Rendu-Eau.md).
+    water: (
+        leaf_size: 64.0,   // côté des nœuds les plus fins (grille 32 × 32 → cellules de 2)
+        range_factor: 4.0, // portée d'un niveau ÷ côté de ses nœuds
+        // Début du geomorphing dans la zone [portée/2, portée] d'un niveau (0 = dès le
+        // début). range_factor · morph_start_ratio doit atteindre 2√2 ≈ 2,83.
+        morph_start_ratio: 0.75,
     ),
 
     shadow: (

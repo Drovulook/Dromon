@@ -3,7 +3,8 @@ use ash::vk;
 use std::sync::Arc;
 
 use crate::app::engine::{
-    renderer::descriptors::DescriptorHandler, rendering_context::RenderingContext,
+    renderer::{descriptors::DescriptorHandler, pipelines},
+    rendering_context::RenderingContext,
 };
 
 pub(crate) struct SkyRenderSystem {
@@ -22,8 +23,8 @@ impl SkyRenderSystem {
         msaa_samples: vk::SampleCountFlags,
     ) -> Result<Self> {
         unsafe {
-            let vertex_shader = context.load_shader_module("sky_vert.spv")?;
-            let fragment_shader = context.load_shader_module("sky_frag.spv")?;
+            let vertex_shader = pipelines::load_shader_module(&context.device,"sky_vert.spv")?;
+            let fragment_shader = pipelines::load_shader_module(&context.device,"sky_frag.spv")?;
 
             let pipeline_layout = context.device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default().set_layouts(&[
@@ -33,7 +34,8 @@ impl SkyRenderSystem {
                 None,
             )?;
 
-            let pipeline = context.create_sky_pipeline(
+            let pipeline = pipelines::create_sky_pipeline(
+                &context.device,
                 vertex_shader,
                 fragment_shader,
                 pipeline_layout,

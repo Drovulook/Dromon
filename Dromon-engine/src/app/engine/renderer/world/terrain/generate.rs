@@ -37,7 +37,7 @@ impl World {
         // Terrain survolé : grande boîte d'ombre qui suit la caméra (`render.ron`).
         self.light.shadow = self.config.render.shadow.terrain.clone();
 
-        self.terrain = Some(Terrain::new(
+        let terrain = Terrain::new(
             config,
             &self.config.render.terrain,
             &self.config.debug,
@@ -45,15 +45,24 @@ impl World {
             self.context.clone(),
             self.logger.clone(),
             self.frames_in_flight,
-        )?);
+        )?;
 
         let world = &config.macro_.world;
         let world_radius = (world.radius_chunks as usize * CHUNK_SIZE) as f32;
+        // L'eau s'arrête là où le terrain n'est plus chargé : au-delà, elle couvrirait
+        // les terres absentes.
+        let water_distance =
+            (self.config.render.terrain.load_radius_chunks as usize * CHUNK_SIZE) as f32;
         self.water = Some(Water::new(
             self.context.clone(),
+            terrain.source.clone(),
             world.sea_level as f32,
             world_radius,
+            water_distance,
+            &self.config.render.water,
+            self.config.debug.water,
         )?);
+        self.terrain = Some(terrain);
         Ok(())
     }
 }
