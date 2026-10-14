@@ -144,7 +144,10 @@ impl ObjectRenderSystem {
                     vk::PipelineBindPoint::GRAPHICS,
                     self.pipeline_layout,
                     1, // first_set = 1
-                    &[render_object.texture.descriptor_set],
+                    &[render_object
+                        .texture
+                        .descriptor_set
+                        .expect("texture d'objet créée par `create_object_texture`")],
                     &[],
                 );
                 // Matrice model (placement de l'objet dans le monde).

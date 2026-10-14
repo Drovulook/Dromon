@@ -153,12 +153,16 @@ impl Renderer {
                 &self.world.render_objects,
             );
 
-            if let Some(terrain) = self.world.terrain.as_ref() {
+            // Les cartes du monde sont créées avec le terrain (`generate_terrain`).
+            if let (Some(terrain), Some(world_maps)) =
+                (self.world.terrain.as_ref(), self.world.world_maps.as_ref())
+            {
                 self.terrain_render_sytem.record_render_terrain(
                     frame.command_buffer,
                     self.frame_index,
                     &terrain.chunks,
                     &terrain.visible.camera,
+                    world_maps,
                 );
             }
 
@@ -166,11 +170,14 @@ impl Renderer {
                 .record_render_sky(frame.command_buffer, self.frame_index);
 
             // Transparente : en dernier, une fois le fond (terrain + ciel) dessiné.
-            if let Some(water) = self.world.water.as_ref() {
+            if let (Some(water), Some(world_maps)) =
+                (self.world.water.as_ref(), self.world.world_maps.as_ref())
+            {
                 self.water_render_system.record_render_water(
                     frame.command_buffer,
                     self.frame_index,
                     water,
+                    world_maps,
                 );
             }
 

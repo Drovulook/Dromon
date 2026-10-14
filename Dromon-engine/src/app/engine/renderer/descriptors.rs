@@ -3,12 +3,19 @@ use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
+/// Nombre de cartes du monde (bindings du set 3). ⚠ Synchronisé avec `WorldMaps` et
+/// `lib/world_maps.slang`.
+pub const WORLD_MAP_COUNT: u32 = 1;
+
 pub struct DescriptorHandler {
     context: Arc<RenderingContext>,
     pub descriptor_pool: vk::DescriptorPool,
     pub world_descriptor_set_layout: vk::DescriptorSetLayout,
     pub texture_descriptor_set_layout: vk::DescriptorSetLayout,
     pub shadow_descriptor_set_layout: vk::DescriptorSetLayout,
+    /// Set 3 : les cartes du monde (`WorldMaps`), lues par les vertex et fragment
+    /// shaders. Un binding par carte.
+    pub world_maps_descriptor_set_layout: vk::DescriptorSetLayout,
     pub world_descriptor_sets: Vec<vk::DescriptorSet>,
     // Set 2 : la shadow map. Une seule ressource (image unique) partagée par
     // toutes les frames, donc un seul descriptor set, rebindé chaque frame.
@@ -29,6 +36,8 @@ impl DescriptorHandler {
             texture_descriptor_set_layout,
             shadow_descriptor_set_layout,
         ) = DescriptorHandler::create_descriptor_set_layouts(&context)?;
+        let world_maps_descriptor_set_layout =
+            DescriptorHandler::create_world_maps_descriptor_set_layout(&context)?;
         let world_descriptor_sets = DescriptorHandler::create_world_descriptor_sets(
             &context,
             descriptor_pool,
@@ -49,9 +58,38 @@ impl DescriptorHandler {
             world_descriptor_set_layout,
             texture_descriptor_set_layout,
             shadow_descriptor_set_layout,
+            world_maps_descriptor_set_layout,
             world_descriptor_sets,
             shadow_descriptor_set,
         })
+    }
+
+    fn create_descriptor_pool(
+        context: &RenderingContext,
+        frame_count: u32,
+    ) -> Result<vk::DescriptorPool> {
+        const MAX_TEXTURES: u32 = 64;
+        let pool_sizes = [
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(frame_count),
+            // + la shadow map + les cartes du monde, aussi des combined image samplers.
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(MAX_TEXTURES + 1 + WORLD_MAP_COUNT),
+        ];
+
+        unsafe {
+            Ok(context.device.create_descriptor_pool(
+                &vk::DescriptorPoolCreateInfo::default()
+                    // .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                    .pool_sizes(&pool_sizes)
+                    // frame_count sets UBO + un set par texture + 1 set shadow map
+                    // + 1 set cartes du monde
+                    .max_sets(frame_count + MAX_TEXTURES + 2),
+                None,
+            )?)
+        }
     }
 
     pub fn create_descriptor_set_layouts(
@@ -109,28 +147,22 @@ impl DescriptorHandler {
         ))
     }
 
-    fn create_descriptor_pool(
+    fn create_world_maps_descriptor_set_layout(
         context: &RenderingContext,
-        frame_count: u32,
-    ) -> Result<vk::DescriptorPool> {
-        const MAX_TEXTURES: u32 = 64;
-        let pool_sizes = [
-            vk::DescriptorPoolSize::default()
-                .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(frame_count),
-            // +1 : la shadow map est aussi un combined image sampler.
-            vk::DescriptorPoolSize::default()
-                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(MAX_TEXTURES + 1),
-        ];
-
+    ) -> Result<vk::DescriptorSetLayout> {
+        let bindings: Vec<vk::DescriptorSetLayoutBinding> = (0..WORLD_MAP_COUNT)
+            .map(|binding| {
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(binding)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    // VERTEX : amortissement des vagues ; FRAGMENT : couleur, écume.
+                    .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+            })
+            .collect();
         unsafe {
-            Ok(context.device.create_descriptor_pool(
-                &vk::DescriptorPoolCreateInfo::default()
-                    // .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-                    .pool_sizes(&pool_sizes)
-                    // frame_count sets UBO + un set par texture + 1 set shadow map
-                    .max_sets(frame_count + MAX_TEXTURES + 1),
+            Ok(context.device.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
                 None,
             )?)
         }
@@ -245,6 +277,48 @@ impl DescriptorHandler {
 
         Ok(descriptor_set)
     }
+
+    /// Alloue et écrit le set des cartes du monde (set 3) : `views[i]` va au binding
+    /// `i`, toutes avec le même `sampler`.
+    pub fn create_world_maps_descriptor_set(
+        &self,
+        views: &[vk::ImageView],
+        sampler: vk::Sampler,
+    ) -> Result<vk::DescriptorSet> {
+        debug_assert_eq!(views.len(), WORLD_MAP_COUNT as usize);
+        let descriptor_set = unsafe {
+            self.context.device.allocate_descriptor_sets(
+                &vk::DescriptorSetAllocateInfo::default()
+                    .descriptor_pool(self.descriptor_pool)
+                    .set_layouts(&[self.world_maps_descriptor_set_layout]),
+            )?
+        }[0];
+
+        let image_infos: Vec<[vk::DescriptorImageInfo; 1]> = views
+            .iter()
+            .map(|&view| {
+                [vk::DescriptorImageInfo::default()
+                    .sampler(sampler)
+                    .image_view(view)
+                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
+            })
+            .collect();
+        let writes: Vec<vk::WriteDescriptorSet> = image_infos
+            .iter()
+            .enumerate()
+            .map(|(binding, info)| {
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor_set)
+                    .dst_binding(binding as u32)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(info)
+            })
+            .collect();
+
+        unsafe { self.context.device.update_descriptor_sets(&writes, &[]) };
+        Ok(descriptor_set)
+    }
 }
 
 impl Drop for DescriptorHandler {
@@ -262,6 +336,9 @@ impl Drop for DescriptorHandler {
             self.context
                 .device
                 .destroy_descriptor_set_layout(self.shadow_descriptor_set_layout, None);
+            self.context
+                .device
+                .destroy_descriptor_set_layout(self.world_maps_descriptor_set_layout, None);
         }
     }
 }

@@ -4,10 +4,14 @@ use std::ffi::CStr;
 
 /// Pipeline de l'eau : surface semi-transparente dessinée EN DERNIER (après le
 /// ciel). Différences avec la pipeline principale :
-/// - blending alpha : `couleur = src · α + dst · (1 − α)`.
+/// - blending **premultiplied alpha** : `couleur = src + dst · (1 − α)`, le shader
+///   renvoyant `src = F · reflet` et `α = F` (Fresnel). La sortie d'un attachment
+///   UNORM est bornée à 1 AVANT le blending : ici le reflet du soleil (≫ 1) est
+///   multiplié par `F` avant la borne, et non après comme en alpha classique.
 /// - profondeur testée mais **pas écrite** : l'eau est cachée par le terrain
 ///   émergé, sans masquer ce qui serait dessiné après elle.
 /// - pas de culling : surface visible aussi par en dessous.
+/// - depth bounds test : pas d'eau là où rien n'a été dessiné derrière (ciel).
 pub(crate) fn create_water_pipeline(
     device: &ash::Device,
     vertex_shader: vk::ShaderModule,
@@ -69,8 +73,14 @@ pub(crate) fn create_water_pipeline(
                         &vk::PipelineDepthStencilStateCreateInfo::default()
                             .depth_test_enable(true)
                             .depth_write_enable(false)
-                            .depth_compare_op(vk::CompareOp::LESS)
-                            .depth_bounds_test_enable(false)
+                            // Reversed-Z : le plus proche a la plus GRANDE profondeur.
+                            .depth_compare_op(vk::CompareOp::GREATER)
+                            // Rejette le fragment si la profondeur DÉJÀ stockée sort de
+                            // [min, 1] : 0 = clear ou ciel, rien derrière l'eau (au-delà
+                            // du terrain chargé). Le plus lointain réel vaut near/far > 0.
+                            .depth_bounds_test_enable(true)
+                            .min_depth_bounds(f32::MIN_POSITIVE)
+                            .max_depth_bounds(1.0)
                             .stencil_test_enable(false),
                     )
                     .color_blend_state(
@@ -79,7 +89,7 @@ pub(crate) fn create_water_pipeline(
                             .attachments(&[vk::PipelineColorBlendAttachmentState::default()
                                 .color_write_mask(vk::ColorComponentFlags::RGBA)
                                 .blend_enable(true)
-                                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                                .src_color_blend_factor(vk::BlendFactor::ONE)
                                 .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
                                 .color_blend_op(vk::BlendOp::ADD)
                                 .src_alpha_blend_factor(vk::BlendFactor::ONE)

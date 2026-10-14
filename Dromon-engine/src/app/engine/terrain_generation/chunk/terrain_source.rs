@@ -107,6 +107,11 @@ impl TerrainSource {
         self.relief.height(wx as f64, wy as f64) as f32
     }
 
+    /// La carte macro (pour les cartes du monde envoyées au GPU).
+    pub fn macro_map(&self) -> &MacroMap {
+        self.relief.macro_map()
+    }
+
     /// Distance signée à la côte macro (voxels, > 0 sur terre) à la colonne `(wx, wy)`.
     /// Euclidienne, à moins d'une cellule de la carte macro près.
     pub fn coast_distance(&self, wx: f32, wy: f32) -> f32 {

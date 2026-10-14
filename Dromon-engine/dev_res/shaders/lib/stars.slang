@@ -64,7 +64,7 @@ float3 stars(float3 V) {
   // Scintillation, doublée à l'horizon (plus d'air turbulent traversé).
   float horizon = 1.0 - saturate(V.z);
   float amp = ubo.stars.w * (1.0 + horizon);
-  float twinkle = 1.0 + amp * sin(ubo.stars.y * (4.0 + 8.0 * h2.y) + h2.z * 6.2832);
+  float twinkle = 1.0 + amp * sin(ubo.time.x *(4.0 + 8.0 * h2.y) + h2.z * 6.2832);
 
   // Teinte : du bleu-blanc (étoiles chaudes) à l'orangé pâle (étoiles froides).
   float3 tint = lerp(float3(0.75, 0.85, 1.0), float3(1.0, 0.85, 0.70), h2.x);

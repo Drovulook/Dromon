@@ -36,7 +36,8 @@ impl RenderingContext {
                             .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
                             .clear_value(vk::ClearValue {
                                 depth_stencil: vk::ClearDepthStencilValue {
-                                    depth: 1.0,
+                                    // Reversed-Z : 0 = plan far (cf. `Camera`).
+                                    depth: 0.0,
                                     stencil: 0,
                                 },
                             })

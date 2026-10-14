@@ -5,11 +5,7 @@ use crate::app::engine::renderer::frustum_culling::Frustum;
 use crate::app::engine::terrain_generation::TerrainSource;
 use crate::config::WaterRenderParams;
 
-use super::WaterNode;
-
-/// Marge (voxels) du rejet des nœuds sur terre : erreur de la distance à la côte
-/// (< 1 cellule macro de 32) plus le bruit de détail qui déplace le trait de côte.
-const LAND_MARGIN: f32 = 64.0;
+use super::{LAND_MARGIN, WaterNode};
 
 /// **Quadtree CDLOD de la mer**, figé à la création : seule la sélection des nœuds
 /// (`select`) change d'une frame à l'autre.
@@ -39,7 +35,7 @@ pub(super) struct Viewer<'a> {
 }
 
 /// La surface à découper : plan `sea_level`, dont les vagues s'écartent d'au plus
-/// `height_margin` (pour le frustum culling seulement).
+/// `height_margin`, verticalement comme horizontalement (frustum culling seulement).
 pub(super) struct Surface {
     pub sea_level: f32,
     pub height_margin: f32,
@@ -114,10 +110,11 @@ impl Quadtree {
             origin.extend(surface.sea_level),
             (origin + size).extend(surface.sea_level),
         );
+        // Gerstner déplace aussi les sommets à l'horizontale, d'au plus la même marge.
         let margin = surface.height_margin;
         let visible = viewer.frustum.intersects_aabb(
-            origin.extend(surface.sea_level - margin),
-            (origin + size).extend(surface.sea_level + margin),
+            (origin - margin).extend(surface.sea_level - margin),
+            (origin + size + margin).extend(surface.sea_level + margin),
         );
         if distance > viewer.far || !visible {
             return;
@@ -129,7 +126,6 @@ impl Quadtree {
             out.push(WaterNode {
                 origin,
                 size,
-                level,
                 // Transition sur la fin de la zone [range/2, range] du niveau.
                 morph_start: range * (1.0 + self.morph_start_ratio) / 2.0,
                 morph_end: range,

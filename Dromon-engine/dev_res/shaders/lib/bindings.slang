@@ -3,6 +3,9 @@
 // (uniform_buffer.rs) : même ordre de champs.
 #pragma once
 
+// Nombre de vagues de la houle. ⚠ Synchronisé avec `WAVE_COUNT` (world/water/waves.rs).
+static const int WAVE_COUNT = 4;
+
 // set 0, binding 0 : données « caméra », mises à jour une fois par frame.
 struct UniformBuffer {
     float4x4 view;
@@ -18,7 +21,14 @@ struct UniformBuffer {
     float4 skyZenith;       // rgb = couleur du zénith, w = exposant du dégradé horizon → zénith
     float4 ambient;         // rgb = lumière ambiante du ciel, w = part renvoyée par le sol
     float4x4 skyRotation;   // rotation monde → ciel fixe (partie 3x3)
-    float4 stars;           // x = luminosité × visibilité, y = temps réel (s), z = densité, w = scintillation
+    float4 stars;           // x = luminosité × visibilité, y inutilisé, z = densité, w = scintillation
+    float4 worldMaps;       // passage monde → UV des cartes du monde : uv = (xy − x) · y
+    float4 water;           // x = sea_level, y = portée horizontale, z = marge terre, w = 1 si mer
+    float4 waterAbsorption; // xyz = k par canal (par unité), w = 1 si caméra sous la mer
+    float4 waterDeepColor;  // xyz = couleur de l'eau profonde, w = variance des pentes (reflet)
+    float4 time;            // x = temps réel (s)
+    float4 waves[2 * WAVE_COUNT]; // houle : 2 par vague, (direction, k, A) puis (ω, phase, –, –)
+    float4 waveParams;      // x = coast_fade
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

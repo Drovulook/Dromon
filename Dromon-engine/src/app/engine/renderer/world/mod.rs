@@ -21,7 +21,7 @@ use crate::app::{
         renderer::{
             camera::Camera,
             descriptors::DescriptorHandler,
-            render_resources::{RenderObject, RenderResourceManager},
+            render_resources::{RenderObject, RenderResourceManager, WorldMaps},
         },
         rendering_context::RenderingContext,
         timer::Timer,
@@ -47,6 +47,10 @@ pub struct World {
     pub(crate) terrain: Option<Terrain>,
     /// La mer, créée avec le terrain (même `sea_level`).
     pub(crate) water: Option<Water>,
+    /// Cartes du monde pour les shaders (set 3), créées avec le terrain.
+    pub(crate) world_maps: Option<WorldMaps>,
+    /// Pour créer le set des cartes du monde au moment du `setup`.
+    descriptor_handler: Arc<DescriptorHandler>,
     /// Contexte GPU, conservé pour pouvoir allouer les buffers du terrain au
     /// moment du `setup` (la génération est pilotée par la scène) comme en cours de jeu.
     context: Arc<RenderingContext>,
@@ -54,6 +58,9 @@ pub struct World {
     /// la destruction différée de ses meshes.
     frames_in_flight: u64,
     game_clock: GameClock,
+    /// Temps réel écoulé (s), pour les animations (scintillation, vagues) : elles ne
+    /// suivent pas l'accélération du temps de jeu.
+    pub(crate) real_time_secs: f32,
     /// Latitude (radians) : fixe la hauteur du soleil à midi (`90° - latitude`).
     pub latitude: f32,
     /// Configs moteur lues au démarrage (`render.ron`, `environment.ron`).
@@ -73,7 +80,11 @@ impl World {
         frames_in_flight: usize,
         config: Arc<EngineConfig>,
     ) -> Result<World> {
-        let rrm = RenderResourceManager::new(context.clone(), logger.clone(), descriptor_handler)?;
+        let rrm = RenderResourceManager::new(
+            context.clone(),
+            logger.clone(),
+            descriptor_handler.clone(),
+        )?;
         let env = &config.environment;
 
         let mut world = World {
@@ -86,9 +97,12 @@ impl World {
             stars: Stars::new(env.stars),
             terrain: None,
             water: None,
+            world_maps: None,
+            descriptor_handler,
             context,
             frames_in_flight: frames_in_flight as u64,
             game_clock: GameClock::new(&env.clock),
+            real_time_secs: 0.0,
             latitude: env.latitude_deg.to_radians(),
             config,
         };
@@ -116,6 +130,9 @@ impl World {
         if let Some(water) = self.water.as_ref() {
             water.record_upload(command_buffer);
         }
+        if let Some(world_maps) = self.world_maps.as_ref() {
+            world_maps.record_upload(&self.rrm.texture_handler, command_buffer)?;
+        }
         self.rrm.initialize(command_buffer)
     }
 
@@ -123,7 +140,7 @@ impl World {
         profile!();
         self.game_clock.advance(timer.delta_secs() as f64);
         self.sync_sky();
-        self.stars.time_secs = timer.elapsed_secs();
+        self.real_time_secs = timer.elapsed_secs();
         self.camera.update(input_state, timer, aspect);
         if let Some(terrain) = self.terrain.as_mut() {
             terrain.update_visibility(&self.camera, &self.light);

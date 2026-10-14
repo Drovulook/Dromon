@@ -74,7 +74,8 @@ pub(crate) fn create_graphics_pipeline(
                         &vk::PipelineDepthStencilStateCreateInfo::default()
                             .depth_test_enable(true)
                             .depth_write_enable(true)
-                            .depth_compare_op(vk::CompareOp::LESS)
+                            // Reversed-Z : le plus proche a la plus GRANDE profondeur.
+                            .depth_compare_op(vk::CompareOp::GREATER)
                             .depth_bounds_test_enable(false)
                             .stencil_test_enable(false),
                     )

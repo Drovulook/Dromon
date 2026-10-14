@@ -16,7 +16,7 @@ use std::sync::Arc;
 pub struct TextureHandler {
     pub context: Arc<RenderingContext>,
     pub logger: Arc<Logger>,
-    pub texture_sampler: vk::Sampler,
+    pub object_texture_sampler: vk::Sampler,
     descriptor_handler: Arc<DescriptorHandler>,
 }
 
@@ -26,16 +26,16 @@ impl TextureHandler {
         logger: Arc<Logger>,
         descriptor_handler: Arc<DescriptorHandler>,
     ) -> Result<TextureHandler> {
-        let texture_sampler = Self::create_texture_sampler(&context)?;
+        let object_texture_sampler = Self::create_object_texture_sampler(&context)?;
         Ok(TextureHandler {
             context,
             logger,
-            texture_sampler,
+            object_texture_sampler,
             descriptor_handler,
         })
     }
 
-    fn create_texture_sampler(context: &RenderingContext) -> Result<vk::Sampler> {
+    fn create_object_texture_sampler(context: &RenderingContext) -> Result<vk::Sampler> {
         let properties = context.physical_device.properties;
         let sampler_info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
@@ -58,7 +58,9 @@ impl TextureHandler {
         Ok(sampler)
     }
 
-    pub fn create_texture(&self, path: &str) -> Result<Texture> {
+    /// Texture d'objet : image couleur lue depuis un fichier, en sRGB, avec mipmaps et
+    /// son propre descriptor set (set 1).
+    pub fn create_object_texture(&self, path: &str) -> Result<Texture> {
         let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let img = ImageReader::open(full_path)?.decode()?.to_rgba8();
@@ -73,24 +75,61 @@ impl TextureHandler {
         ));
 
         let mip_levels = ((image_width.max(image_height) as f32).log2().floor() as u32) + 1;
+        let mut texture = self.create_texture_from_bytes(
+            image_width,
+            image_height,
+            vk::Format::R8G8B8A8_SRGB,
+            mip_levels,
+            pixels,
+        )?;
 
-        let image_size = pixels.len() as vk::DeviceSize;
+        // create one descriptor set (with one descriptor) per texture
+        texture.descriptor_set = Some(self.descriptor_handler.create_texture_descriptor_set(
+            &texture.texture_image_view,
+            &self.object_texture_sampler,
+        )?);
+        Ok(texture)
+    }
 
-        // staging bugger
+    /// Texture de **données** (carte du monde) : `bytes` contient les texels rangés
+    /// ligne par ligne au `format` donné (flottant ou UNORM, jamais sRGB : la
+    /// correction gamma fausserait les valeurs). Sans mipmaps ni descriptor set : les
+    /// cartes sont lues avec `SampleLevel(…, 0)` et regroupées dans un set commun.
+    pub fn create_map_texture(
+        &self,
+        width: u32,
+        height: u32,
+        format: vk::Format,
+        bytes: &[u8],
+    ) -> Result<Texture> {
+        self.create_texture_from_bytes(width, height, format, 1, bytes)
+    }
+
+    /// Staging rempli + image device-local et sa vue ; la copie de l'un vers l'autre
+    /// reste à enregistrer (`initialize`).
+    fn create_texture_from_bytes(
+        &self,
+        width: u32,
+        height: u32,
+        format: vk::Format,
+        mip_levels: u32,
+        bytes: &[u8],
+    ) -> Result<Texture> {
+        // staging buffer
         let staging_buffer = Buffer::new(
             self.context.clone(),
-            image_size,
+            bytes.len() as vk::DeviceSize,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        staging_buffer.upload(pixels)?;
+        staging_buffer.upload(bytes)?;
 
         let (texture_image, texture_image_memory) = self.context.create_image(
-            image_width,
-            image_height,
+            width,
+            height,
             mip_levels,
             vk::SampleCountFlags::TYPE_1,
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST
                 | vk::ImageUsageFlags::TRANSFER_SRC // for generating mipmaps
@@ -100,26 +139,22 @@ impl TextureHandler {
 
         let texture_image_view = self.context.create_image_view(
             &texture_image,
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             vk::ImageAspectFlags::COLOR,
             mip_levels,
         )?;
 
-        // create one descriptor set (with one descriptor) per texture
-        let descriptor_set = self
-            .descriptor_handler
-            .create_texture_descriptor_set(&texture_image_view, &self.texture_sampler)?;
-
         Ok(Texture::new(
             self.context.clone(),
-            image_width,
-            image_height,
+            width,
+            height,
             mip_levels,
+            format,
             staging_buffer,
             texture_image,
             texture_image_memory,
             texture_image_view,
-            descriptor_set,
+            None,
         ))
     }
 
@@ -169,10 +204,12 @@ impl TextureHandler {
                 &[region],
             );
 
+            // Avec mip_levels = 1, ne fait que la transition finale vers
+            // SHADER_READ_ONLY_OPTIMAL.
             self.context.generate_mipmaps(
                 *command_buffer,
                 &texture.texture_image,
-                vk::Format::R8G8B8A8_SRGB,
+                texture.format,
                 texture.image_width,
                 texture.image_height,
                 texture.mip_levels,
@@ -187,7 +224,7 @@ impl Drop for TextureHandler {
         unsafe {
             self.context
                 .device
-                .destroy_sampler(self.texture_sampler, None);
+                .destroy_sampler(self.object_texture_sampler, None);
         }
     }
 }

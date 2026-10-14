@@ -320,6 +320,13 @@ impl Renderer {
                 &self.world.light,
                 &self.world.atmosphere,
                 &self.world.stars,
+                // Sans cartes (scène sans terrain), aucun shader ne les lit.
+                self.world
+                    .world_maps
+                    .as_ref()
+                    .map_or(glam::Vec4::ZERO, |maps| maps.uv_transform),
+                self.world.water.as_ref(),
+                self.world.real_time_secs,
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent

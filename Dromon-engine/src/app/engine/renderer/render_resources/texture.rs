@@ -9,11 +9,14 @@ pub struct Texture {
     pub image_width: u32,
     pub image_height: u32,
     pub mip_levels: u32,
+    pub format: vk::Format,
     pub staging_buffer: Buffer,
     pub texture_image: vk::Image,
     pub texture_image_memory: vk::DeviceMemory,
     pub texture_image_view: vk::ImageView,
-    pub descriptor_set: vk::DescriptorSet,
+    /// Set propre à la texture : `Some` pour les textures d'objets (un set par
+    /// matériau), `None` pour les cartes, regroupées dans un set commun.
+    pub descriptor_set: Option<vk::DescriptorSet>,
 }
 
 impl Texture {
@@ -22,17 +25,19 @@ impl Texture {
         image_width: u32,
         image_height: u32,
         mip_levels: u32,
+        format: vk::Format,
         staging_buffer: Buffer,
         texture_image: vk::Image,
         texture_image_memory: vk::DeviceMemory,
         texture_image_view: vk::ImageView,
-        descriptor_set: vk::DescriptorSet,
+        descriptor_set: Option<vk::DescriptorSet>,
     ) -> Texture {
         Texture {
             context,
             image_width,
             image_height,
             mip_levels,
+            format,
             staging_buffer,
             texture_image,
             texture_image_memory,

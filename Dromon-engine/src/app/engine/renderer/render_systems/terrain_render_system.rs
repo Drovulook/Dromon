@@ -6,7 +6,9 @@ use std::sync::Arc;
 use crate::{
     app::engine::{
         renderer::{
-            descriptors::DescriptorHandler, pipelines, render_resources::TerrainVertex,
+            descriptors::DescriptorHandler,
+            pipelines,
+            render_resources::{TerrainVertex, WorldMaps},
             world::terrain::meshes::InstalledChunks,
         },
         rendering_context::RenderingContext,
@@ -55,6 +57,8 @@ impl TerrainRenderSystem {
                         descriptor_handler.texture_descriptor_set_layout,
                         // set 2 : shadow map (unique, partagée par toutes les frames).
                         descriptor_handler.shadow_descriptor_set_layout,
+                        // set 3 : cartes du monde (masque de la mer).
+                        descriptor_handler.world_maps_descriptor_set_layout,
                     ])
                     .push_constant_ranges(&push_constant_ranges),
                 None,
@@ -109,6 +113,7 @@ impl TerrainRenderSystem {
         frame_index: usize,
         chunks: &InstalledChunks,
         visible_chunks: &[IVec2],
+        world_maps: &WorldMaps,
     ) {
         if chunks.is_empty() {
             return;
@@ -140,6 +145,16 @@ impl TerrainRenderSystem {
                 self.pipeline_layout,
                 2,
                 &[self.descriptor_handler.shadow_descriptor_set],
+                &[],
+            );
+
+            // set 3 : cartes du monde
+            self.context.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                3,
+                &[world_maps.descriptor_set],
                 &[],
             );
 

@@ -2,6 +2,7 @@ use super::buffer::Buffer;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::stars::Stars;
+use crate::app::engine::renderer::world::water::{LAND_MARGIN, WAVE_COUNT, Water};
 use crate::app::engine::{renderer::camera::Camera, rendering_context::RenderingContext};
 use crate::profile;
 use anyhow::Result;
@@ -32,7 +33,15 @@ struct UniformBufferObject {
     // Rotation monde → ciel fixe (3x3 dans une Mat4 : un mat3 std140 a des colonnes
     // paddées à 16 octets, que glam::Mat3 n'a pas).
     sky_rotation: Mat4,
-    stars: Vec4, // x = luminosité × visibilité, y = temps réel (s), z = densité, w = scintillation
+    stars: Vec4, // x = luminosité × visibilité, y inutilisé, z = densité, w = scintillation
+    world_maps: Vec4, // passage monde → UV des cartes du monde : uv = (xy − x) · y
+    water: Vec4, // x = sea_level, y = portée horizontale, z = marge terre, w = 1 si mer
+    water_absorption: Vec4, // xyz = k par canal, w = 1 si caméra sous la mer
+    water_deep_color: Vec4, // xyz = couleur de l'eau profonde, w = variance des pentes (reflet)
+    time: Vec4, // x = temps réel (s), yzw inutilisés
+    // Houle : 2 vec4 par vague, (direction, k, A) puis (ω, phase, –, –).
+    waves: [Vec4; 2 * WAVE_COUNT],
+    wave_params: Vec4, // x = coast_fade, yzw inutilisés
 }
 
 pub struct UniformBuffer {
@@ -68,9 +77,28 @@ impl UniformBuffer {
         sun: &DirectionalLight,
         atmosphere: &Atmosphere,
         stars: &Stars,
+        world_maps_uv: Vec4,
+        water: Option<&Water>,
+        real_time_secs: f32,
     ) {
         profile!();
         let atmo = &atmosphere.params;
+        // Sans mer, w = 0 : les shaders ne testent rien d'autre.
+        let (water_params, water_absorption, water_deep_color) = match water {
+            Some(w) => (
+                Vec4::new(w.sea_level, w.max_distance, LAND_MARGIN, 1.0),
+                w.params
+                    .absorption
+                    .extend(if w.camera_under_sea { 1.0 } else { 0.0 }),
+                w.params.deep_color.extend(w.params.glint_slope_variance),
+            ),
+            None => (Vec4::ZERO, Vec4::ZERO, Vec4::ZERO),
+        };
+        // Sans mer, amplitudes nulles.
+        let (waves, wave_params) = water.map_or(
+            ([Vec4::ZERO; 2 * WAVE_COUNT], Vec4::ZERO),
+            |w| w.waves.gpu_data(),
+        );
         let ubo = UniformBufferObject {
             view: camera.view,
             proj: camera.proj,
@@ -97,10 +125,17 @@ impl UniformBuffer {
             sky_rotation: Mat4::from_mat3(stars.world_to_sky),
             stars: Vec4::new(
                 stars.params.brightness * stars.visibility,
-                stars.time_secs,
+                0.0,
                 stars.params.density,
                 stars.params.twinkle,
             ),
+            world_maps: world_maps_uv,
+            water: water_params,
+            water_absorption,
+            water_deep_color,
+            time: Vec4::new(real_time_secs, 0.0, 0.0, 0.0),
+            waves,
+            wave_params,
         };
 
         unsafe {

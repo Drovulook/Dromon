@@ -124,7 +124,10 @@ impl Camera {
         let front = self.front();
         self.view = Mat4::look_at_rh(self.position, self.position + front, Vec3::Z);
 
-        let mut proj = Mat4::perspective_rh(self.fov_y, aspect, self.params.near, self.params.far);
+        // Reversed-Z : near et far échangés → profondeur 1 au plan near, 0 au plan far.
+        // Avec un depth buffer flottant, la précision devient ~relative à la distance
+        // (sinon ∝ d²/near : z-fighting eau/plage au loin). Tests en GREATER, clear à 0.
+        let mut proj = Mat4::perspective_rh(self.fov_y, aspect, self.params.far, self.params.near);
         proj.y_axis.y *= -1.0; // Vulkan a l'axe Y de l'écran vers le bas
         self.proj = proj;
     }

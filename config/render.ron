@@ -28,7 +28,7 @@
     ),
 
     terrain: (
-        load_radius_chunks: 80,     // portée de chargement autour de la caméra (~20 000 chunks)
+        load_radius_chunks: 100,     // portée de chargement autour de la caméra (~20 000 chunks)
         unload_margin_chunks: 2.0,  // un chunk ne sort qu'au-delà de portée + marge
         lod: (
             // Distances (unités monde) de passage au niveau suivant. Leur nombre fixe le
@@ -45,7 +45,7 @@
     // Mer : quadtree CDLOD (cf. vault, Architecture/Rendu-Eau.md).
     water: (
         leaf_size: 64.0,   // côté des nœuds les plus fins (grille 32 × 32 → cellules de 2)
-        range_factor: 4.0, // portée d'un niveau ÷ côté de ses nœuds
+        range_factor: 8.0, // portée d'un niveau ÷ côté de ses nœuds
         // Début du geomorphing dans la zone [portée/2, portée] d'un niveau (0 = dès le
         // début). range_factor · morph_start_ratio doit atteindre 2√2 ≈ 2,83.
         morph_start_ratio: 0.75,

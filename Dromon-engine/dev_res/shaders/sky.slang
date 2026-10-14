@@ -3,6 +3,7 @@
 // rien n'a été dessiné.
 #include "lib/atmosphere.slang"
 #include "lib/stars.slang"
+#include "lib/water.slang"
 
 struct SkyVSOutput {
   float4 pos : SV_Position;
@@ -17,8 +18,8 @@ SkyVSOutput skyVertMain(uint vertexId : SV_VertexID) {
   float2 ndc = float2(vertexId == 1 ? 3.0 : -1.0, vertexId == 2 ? 3.0 : -1.0);
 
   SkyVSOutput output;
-  // z = w = 1 → profondeur 1.0, celle du clear.
-  output.pos = float4(ndc, 1.0, 1.0);
+  // z = 0 → profondeur 0.0 : plan far en reversed-Z, valeur du clear.
+  output.pos = float4(ndc, 0.0, 1.0);
 
   // NDC → espace vue : la projection ne fait que multiplier x et y par
   // proj[0][0] et proj[1][1] (le flip Y Vulkan est dans le signe de ce dernier).
@@ -30,18 +31,14 @@ SkyVSOutput skyVertMain(uint vertexId : SV_VertexID) {
 
 [shader("fragment")]
 float4 skyFragMain(SkyVSOutput vertIn) : SV_Target {
+  // Sous l'eau, l'infini est de l'eau : ni ciel, ni étoiles, ni soleil.
+  if (cameraUnderSea())
+    return float4(deepWaterColor(), 1.0);
+
   float3 V = normalize(vertIn.worldRay);
   float3 L = normalize(-ubo.lightDirection.xyz);
   float3 sunCol = ubo.lightColor.rgb * ubo.lightColor.w;
 
-  float3 color = airColor(V, L, sunCol) + stars(V);
-
-  // Disque solaire : V est dans le disque si l'angle (V, L) < rayon, i.e.
-  // cos(angle) = dot(V, L) > cos(rayon).
-  // Réglages : SunDisk côté Rust (light.rs).
-  float radius = ubo.sunDisk.x;
-  float disk = smoothstep(cos(radius), cos(radius * ubo.sunDisk.y), dot(V, L));
-  color += disk * sunCol * ubo.sunDisk.z;
-
+  float3 color = airColor(V, L, sunCol) + stars(V) + sunDisk(V, L, sunCol);
   return float4(color, 1.0);
 }

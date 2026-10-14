@@ -243,13 +243,21 @@ impl RenderingContext {
                 })
                 .collect::<Vec<_>>();
 
+            // Depth bounds test : l'eau n'est dessinée que devant de la géométrie (pipelines/water.rs).
+            anyhow::ensure!(
+                physical_device.features.depth_bounds == vk::TRUE,
+                "le GPU ne supporte pas le depth bounds test (requis pour l'eau)"
+            );
+
             let device = instance.create_device(
                 // logical device
                 physical_device.handle,
                 &vk::DeviceCreateInfo::default()
                     .queue_create_infos(&queue_create_infos)
                     .enabled_features(
-                        &vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true),
+                        &vk::PhysicalDeviceFeatures::default()
+                            .sampler_anisotropy(true)
+                            .depth_bounds(true),
                     )
                     .enabled_extension_names(&[ash::khr::swapchain::NAME.as_ptr()])
                     .push_next(

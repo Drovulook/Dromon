@@ -2,13 +2,13 @@ use anyhow::Result;
 use ash::vk;
 use std::ffi::CStr;
 
-/// Pipeline du ciel : un triangle plein écran posé au plan far (z = 1),
+/// Pipeline du ciel : un triangle plein écran posé au plan far (z = 0 en reversed-Z),
 /// dessiné APRÈS la géométrie opaque. Différences avec la pipeline principale :
 /// - aucun vertex input : le vertex shader génère ses 3 sommets via `SV_VertexID`
 ///   (draw de 3 sommets, sans vertex buffer).
 /// - pas de culling : on ne dépend pas du sens de rotation du triangle.
-/// - profondeur en lecture seule, test `LESS_OR_EQUAL` : ne passe que là où le
-///   depth buffer vaut encore la valeur de clear (1.0), i.e. où rien n'est dessiné.
+/// - profondeur en lecture seule, test `GREATER_OR_EQUAL` : ne passe que là où le
+///   depth buffer vaut encore la valeur de clear (0.0), i.e. où rien n'est dessiné.
 pub(crate) fn create_sky_pipeline(
     device: &ash::Device,
     vertex_shader: vk::ShaderModule,
@@ -66,8 +66,8 @@ pub(crate) fn create_sky_pipeline(
                         &vk::PipelineDepthStencilStateCreateInfo::default()
                             .depth_test_enable(true)
                             .depth_write_enable(false)
-                            // `LESS` échouerait partout : 1.0 < 1.0 est faux.
-                            .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+                            // `GREATER` échouerait partout : 0.0 > 0.0 est faux.
+                            .depth_compare_op(vk::CompareOp::GREATER_OR_EQUAL)
                             .depth_bounds_test_enable(false)
                             .stencil_test_enable(false),
                     )

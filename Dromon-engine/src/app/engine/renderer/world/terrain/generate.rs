@@ -9,7 +9,7 @@ use crate::{
     app::{
         engine::{
             renderer::{
-                render_resources::MeshData,
+                render_resources::{MeshData, WorldMaps},
                 world::{
                     terrain::{
                         Terrain, culling::VisibleSet, graveyard::Graveyard, mesh_job::MeshJob,
@@ -60,7 +60,13 @@ impl World {
             world_radius,
             water_distance,
             &self.config.render.water,
-            self.config.debug.water,
+            self.config.environment.water,
+        )?);
+        self.world_maps = Some(WorldMaps::new(
+            self.context.clone(),
+            &self.rrm.texture_handler,
+            &self.descriptor_handler,
+            terrain.source.macro_map(),
         )?);
         self.terrain = Some(terrain);
         Ok(())

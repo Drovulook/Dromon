@@ -57,6 +57,11 @@ impl Relief {
         h
     }
 
+    /// La carte macro sous-jacente.
+    pub fn macro_map(&self) -> &MacroMap {
+        &self.macro_map
+    }
+
     /// Distance signée à la côte (voxels, > 0 terre) à la colonne `(wx, wy)`.
     pub fn coast_distance(&self, wx: f64, wy: f64) -> f64 {
         self.macro_map.coast_distance.sample_bicubic(wx, wy) as f64

@@ -5,6 +5,7 @@ mod texture;
 mod texture_handler;
 mod transform;
 mod water_mesh;
+mod world_maps;
 
 use crate::app::{
     engine::{
@@ -26,6 +27,7 @@ pub use terrain_mesh::{MeshData, TerrainMesh, TerrainVertex};
 use texture::Texture;
 pub use transform::Transform;
 pub use water_mesh::{WATER_GRID_RESOLUTION, WaterMesh, WaterVertex};
+pub use world_maps::WorldMaps;
 
 pub struct RenderResourceManager {
     logger: Arc<Logger>,
@@ -60,7 +62,7 @@ impl RenderResourceManager {
                 .warn(&format!("texture {} already exists", name));
             return Ok(());
         }
-        let texture = self.texture_handler.create_texture(&path)?;
+        let texture = self.texture_handler.create_object_texture(&path)?;
         self.textures.insert(name, Arc::new(texture));
         Ok(())
     }

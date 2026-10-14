@@ -1,5 +1,5 @@
 // Étoiles procédurales : dessinées par sky.slang, pilotées d'ici (visibilité, rotation
-// du ciel, horloge de scintillation).
+// du ciel).
 
 use glam::{Mat3, Vec3};
 
@@ -14,8 +14,6 @@ pub struct Stars {
     /// Rotation monde → ciel fixe : annule la rotation diurne pour que les étoiles
     /// restent attachées au ciel. Recalculée par `World::sync_sky`.
     pub(crate) world_to_sky: Mat3,
-    /// Temps réel (s) : la scintillation ne suit pas l'accélération du temps de jeu.
-    pub(crate) time_secs: f32,
 }
 
 impl Stars {
@@ -24,7 +22,6 @@ impl Stars {
             params,
             visibility: 0.0,
             world_to_sky: Mat3::IDENTITY,
-            time_secs: 0.0,
         }
     }
 }

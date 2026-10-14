@@ -16,6 +16,7 @@ pub struct EnvironmentConfig {
     pub day_night: DayNightParams,
     pub atmosphere: AtmosphereParams,
     pub stars: StarsParams,
+    pub water: WaterParams,
 }
 
 impl Default for EnvironmentConfig {
@@ -27,6 +28,7 @@ impl Default for EnvironmentConfig {
             day_night: DayNightParams::default(),
             atmosphere: AtmosphereParams::default(),
             stars: StarsParams::default(),
+            water: WaterParams::default(),
         }
     }
 }
@@ -78,6 +80,26 @@ impl ConfigFile for EnvironmentConfig {
             "atmosphere.fog_anisotropy doit être dans [0, 1["
         );
         ensure!(a.fog_scale_height > 0.0, "atmosphere.fog_scale_height doit être > 0");
+
+        ensure!(
+            self.water.absorption.min_element() >= 0.0,
+            "water.absorption doit être ≥ 0"
+        );
+        ensure!(
+            self.water.glint_slope_variance > 0.0,
+            "water.glint_slope_variance doit être > 0"
+        );
+        let w = &self.water.waves;
+        ensure!(w.max_wavelength > 0.0, "water.waves.max_wavelength doit être > 0");
+        ensure!(
+            0.0 < w.wavelength_ratio && w.wavelength_ratio < 1.0,
+            "water.waves.wavelength_ratio doit être dans ]0, 1["
+        );
+        ensure!(
+            (0.0..=1.0).contains(&w.steepness),
+            "water.waves.steepness doit être dans [0, 1] (au-delà, crêtes en boucle)"
+        );
+        ensure!(w.coast_fade > 0.0, "water.waves.coast_fade doit être > 0");
         Ok(())
     }
 }
@@ -248,6 +270,66 @@ impl Default for StarsParams {
             brightness: 1.0,
             density: 0.03,
             twinkle: 0.25,
+        }
+    }
+}
+
+/// Aspect de l'eau de mer (cf. `Architecture/Rendu-Eau.md`).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaterParams {
+    /// Coefficients d'absorption (par unité monde, par canal) : la lumière qui traverse
+    /// `d` sous l'eau en garde `exp(−k·d)`.
+    pub absorption: Vec3,
+    /// Couleur de la lumière diffusée par l'eau, vers laquelle le fond s'efface.
+    pub deep_color: Vec3,
+    /// Variance des pentes des rides sous-pixel (Cox-Munk : ≈ 0,003 + 0,005 · vent en
+    /// m/s). Étale le reflet du soleil : faible = tache petite et éblouissante.
+    pub glint_slope_variance: f32,
+    pub waves: WaveParams,
+}
+
+impl Default for WaterParams {
+    fn default() -> Self {
+        WaterParams {
+            absorption: Vec3::new(0.4, 0.07, 0.02),
+            deep_color: Vec3::new(0.02, 0.12, 0.18),
+            glint_slope_variance: 0.02,
+            waves: WaveParams::default(),
+        }
+    }
+}
+
+/// Houle géométrique : somme de vagues de Gerstner, longueurs d'onde en progression
+/// géométrique, directions dispersées autour du vent.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaveParams {
+    /// Direction vers laquelle avancent les vagues, en degrés (0 = +X, 90 = +Y).
+    pub direction_deg: f32,
+    /// Dispersion des directions autour de `direction_deg`, en degrés (±).
+    pub spread_deg: f32,
+    /// Longueur d'onde de la plus grande vague (unités monde).
+    pub max_wavelength: f32,
+    /// Rapport entre deux longueurs d'onde successives, dans ]0, 1[.
+    pub wavelength_ratio: f32,
+    /// Raideur totale `Σ k·A`, dans [0, 1] : 0 = mer plate, 1 = crêtes en pointe (au-delà,
+    /// la surface se replie en boucles).
+    pub steepness: f32,
+    /// Distance (au-delà de `LAND_MARGIN` de la côte) sur laquelle les vagues passent de
+    /// 0 à leur pleine amplitude.
+    pub coast_fade: f32,
+}
+
+impl Default for WaveParams {
+    fn default() -> Self {
+        WaveParams {
+            direction_deg: 30.0,
+            spread_deg: 40.0,
+            max_wavelength: 60.0,
+            wavelength_ratio: 0.75,
+            steepness: 0.5,
+            coast_fade: 200.0,
         }
     }
 }

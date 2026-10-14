@@ -37,6 +37,14 @@ float3 airColor(float3 V, float3 L, float3 sunCol) {
   return skyGradient(V) + fogSunTint(V, L, sunCol, ubo.fogParams.y, ubo.fogParams.z);
 }
 
+// Disque solaire vu dans la direction V : V est dans le disque si l'angle (V, L) <
+// rayon, i.e. cos(angle) = dot(V, L) > cos(rayon). Réglages : `SunDisk` (light.rs).
+float3 sunDisk(float3 V, float3 L, float3 sunCol) {
+  float radius = ubo.sunDisk.x;
+  float disk = smoothstep(cos(radius), cos(radius * ubo.sunDisk.y), dot(V, L));
+  return disk * sunCol * ubo.sunDisk.z;
+}
+
 // Noie `color` (surface située en worldPos) dans le brouillard, selon la quantité
 // d'air traversée. Le halo est dans `airColor`, donc pondéré par `fog` : sans air
 // entre l'œil et le fragment, pas de diffusion, donc pas de halo.

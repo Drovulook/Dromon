@@ -6,7 +6,7 @@ use crate::app::engine::{
     renderer::{
         descriptors::DescriptorHandler,
         pipelines,
-        render_resources::{WATER_GRID_RESOLUTION, WaterVertex},
+        render_resources::{WATER_GRID_RESOLUTION, WaterVertex, WorldMaps},
         world::water::{Water, WaterPushConstants},
     },
     rendering_context::RenderingContext,
@@ -41,8 +41,16 @@ impl WaterRenderSystem {
 
             let pipeline_layout = context.device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
-                    // set 0 : UBO caméra (par frame)
-                    .set_layouts(&[descriptor_handler.world_descriptor_set_layout])
+                    .set_layouts(&[
+                        // set 0 : UBO caméra (par frame)
+                        descriptor_handler.world_descriptor_set_layout,
+                        // sets 1 et 2 inutilisés par l'eau, mais un layout doit
+                        // déclarer tous les sets jusqu'au dernier.
+                        descriptor_handler.texture_descriptor_set_layout,
+                        descriptor_handler.shadow_descriptor_set_layout,
+                        // set 3 : cartes du monde
+                        descriptor_handler.world_maps_descriptor_set_layout,
+                    ])
                     .push_constant_ranges(&push_constant_ranges),
                 None,
             )?;
@@ -77,6 +85,7 @@ impl WaterRenderSystem {
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
         water: &Water,
+        world_maps: &WorldMaps,
     ) {
         unsafe {
             self.context.device.cmd_bind_pipeline(
@@ -95,9 +104,18 @@ impl WaterRenderSystem {
                 &[],
             );
 
+            // set 3 : cartes du monde
+            self.context.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                3,
+                &[world_maps.descriptor_set],
+                &[],
+            );
+
             water.mesh.bind(command_buffer);
 
-            let debug_flags = water.debug_flags();
             for node in &water.nodes {
                 let push = WaterPushConstants {
                     origin: node.origin,
@@ -105,11 +123,6 @@ impl WaterRenderSystem {
                     sea_level: water.sea_level,
                     morph_start: node.morph_start,
                     morph_end: node.morph_end,
-                    level: node.level,
-                    debug_flags,
-                    test_wave_amplitude: water.debug.test_wave_amplitude,
-                    test_wave_length: water.debug.test_wave_length,
-                    max_distance: water.max_distance,
                 };
                 self.context.device.cmd_push_constants(
                     command_buffer,

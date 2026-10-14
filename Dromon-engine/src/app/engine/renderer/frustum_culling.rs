@@ -21,8 +21,11 @@ impl Frustum {
             r3 - r0, // right
             r3 + r1, // bottom
             r3 - r1, // top
-            r2,      // near — Vulkan clippe z ∈ [0, w], pas [−w, w]
-            r3 - r2, // far
+            // Vulkan clippe z ∈ [0, w], pas [−w, w]. z = 0 est le plan near en
+            // projection classique (lumière), le plan far en reversed-Z (caméra) :
+            // les deux plans bornent le volume dans les deux cas.
+            r2,
+            r3 - r2,
         ];
 
         // Normaliser : la distance signée devient une vraie distance en unités

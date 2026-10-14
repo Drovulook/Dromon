@@ -2,6 +2,7 @@
 
 #include "lib/shadow.slang"
 #include "lib/atmosphere.slang"
+#include "lib/water.slang"
 
 // Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1,2).
 struct VSInput {
@@ -66,9 +67,14 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   float3 skyAmbient = ubo.ambient.rgb; // varie avec l'heure (day_night.rs)
   float3 ambient = lerp(skyAmbient * ubo.ambient.w, skyAmbient, skyFactor);
   float3 color = material * (ambient + lightCol * NdotL * shadow);
-  
-  // appliquer le brouillard (à distance)
-  color = applyFog(color, vertIn.worldPos, L, lightCol);
+
+  // Sous la mer : absorbé et noyé dans la couleur de l'eau.
+  color = underwater(color, vertIn.worldPos);
+
+  // Brouillard sur la partie aérienne du regard seulement. Caméra et fragment sous
+  // l'eau : aucun air traversé.
+  if (!(cameraUnderSea() && vertIn.worldPos.z < seaLevel()))
+    color = applyFog(color, airPathEnd(vertIn.worldPos), L, lightCol);
 
   return float4(color, 1.0);
 }
