@@ -3,7 +3,7 @@ use ash::vk;
 use std::sync::Arc;
 
 use crate::app::engine::{
-    renderer::{descriptors::DescriptorHandler, pipelines},
+    renderer::{descriptors::DescriptorHandler, pipelines, render_resources::WorldMaps},
     rendering_context::RenderingContext,
 };
 
@@ -30,6 +30,12 @@ impl SkyRenderSystem {
                 &vk::PipelineLayoutCreateInfo::default().set_layouts(&[
                     // set 0 : UBO caméra (par frame)
                     descriptor_handler.world_descriptor_set_layout,
+                    // sets 1 et 2 inutilisés, mais un layout doit déclarer tous les
+                    // sets jusqu'au dernier.
+                    descriptor_handler.texture_descriptor_set_layout,
+                    descriptor_handler.shadow_descriptor_set_layout,
+                    // set 3 : cartes du monde (masque de la mer, `seaCovers`)
+                    descriptor_handler.world_maps_descriptor_set_layout,
                 ]),
                 None,
             )?;
@@ -57,7 +63,14 @@ impl SkyRenderSystem {
         }
     }
 
-    pub(crate) fn record_render_sky(&self, command_buffer: vk::CommandBuffer, frame_index: usize) {
+    /// `world_maps` absent (pas de terrain) : la mer est désactivée dans l'UBO
+    /// (`water.w = 0`), le shader ne lit donc pas le set 3 — mais il reste non lié.
+    pub(crate) fn record_render_sky(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        frame_index: usize,
+        world_maps: Option<&WorldMaps>,
+    ) {
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command_buffer,
@@ -74,6 +87,18 @@ impl SkyRenderSystem {
                 &[self.descriptor_handler.world_descriptor_sets[frame_index]],
                 &[],
             );
+
+            // set 3 : cartes du monde
+            if let Some(world_maps) = world_maps {
+                self.context.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    3,
+                    &[world_maps.descriptor_set],
+                    &[],
+                );
+            }
 
             // 3 sommets générés par le vertex shader (SV_VertexID), sans vertex buffer.
             self.context.device.cmd_draw(command_buffer, 3, 1, 0, 0);

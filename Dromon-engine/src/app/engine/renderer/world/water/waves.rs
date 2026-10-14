@@ -7,7 +7,7 @@ use std::f32::consts::TAU;
 use crate::config::WaveParams;
 
 /// ⚠ Synchronisé avec `WAVE_COUNT` (lib/bindings.slang).
-pub(crate) const WAVE_COUNT: usize = 4;
+pub(crate) const WAVE_COUNT: usize = 8;
 
 /// Gravité (unités monde / s²), en supposant 1 unité = 1 m.
 const GRAVITY: f32 = 9.81;
@@ -44,7 +44,7 @@ impl Waves {
                 wavenumber: k,
                 // Même raideur k·A pour toutes : Σ k·A = steepness (pas de boucle si ≤ 1).
                 amplitude: params.steepness / (WAVE_COUNT as f32 * k),
-                angular_speed: (GRAVITY * k).sqrt(),
+                angular_speed: params.speed * (GRAVITY * k).sqrt(),
                 phase,
             }
         });
@@ -54,7 +54,8 @@ impl Waves {
         }
     }
 
-    /// Écart vertical maximal à `sea_level` (toutes les crêtes alignées).
+    /// Écart maximal à la surface plane (toutes les crêtes alignées), vertical comme
+    /// horizontal.
     pub fn max_amplitude(&self) -> f32 {
         self.waves.iter().map(|w| w.amplitude).sum()
     }

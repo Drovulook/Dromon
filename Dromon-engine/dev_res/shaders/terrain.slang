@@ -71,6 +71,12 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   // Sous la mer : absorbé et noyé dans la couleur de l'eau.
   color = underwater(color, vertIn.worldPos);
 
+  // Écume du rivage : flotte à la surface, donc ni absorbée ni teintée par l'eau.
+  // Éclairée comme une face horizontale (ombre du fond, proche en eau peu profonde).
+  float foam = shoreFoam(vertIn.worldPos);
+  float3 foamColor = foamAlbedo() * (skyAmbient + lightCol * max(L.z, 0.0) * shadow);
+  color = lerp(color, foamColor, foam);
+
   // Brouillard sur la partie aérienne du regard seulement. Caméra et fragment sous
   // l'eau : aucun air traversé.
   if (!(cameraUnderSea() && vertIn.worldPos.z < seaLevel()))

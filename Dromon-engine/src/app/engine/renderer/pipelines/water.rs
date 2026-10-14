@@ -11,7 +11,8 @@ use std::ffi::CStr;
 /// - profondeur testée mais **pas écrite** : l'eau est cachée par le terrain
 ///   émergé, sans masquer ce qui serait dessiné après elle.
 /// - pas de culling : surface visible aussi par en dessous.
-/// - depth bounds test : pas d'eau là où rien n'a été dessiné derrière (ciel).
+/// - derrière l'eau, toujours un fond : le terrain, ou au-delà du terrain chargé
+///   l'eau profonde peinte par le ciel (sky.slang).
 pub(crate) fn create_water_pipeline(
     device: &ash::Device,
     vertex_shader: vk::ShaderModule,
@@ -75,12 +76,7 @@ pub(crate) fn create_water_pipeline(
                             .depth_write_enable(false)
                             // Reversed-Z : le plus proche a la plus GRANDE profondeur.
                             .depth_compare_op(vk::CompareOp::GREATER)
-                            // Rejette le fragment si la profondeur DÉJÀ stockée sort de
-                            // [min, 1] : 0 = clear ou ciel, rien derrière l'eau (au-delà
-                            // du terrain chargé). Le plus lointain réel vaut near/far > 0.
-                            .depth_bounds_test_enable(true)
-                            .min_depth_bounds(f32::MIN_POSITIVE)
-                            .max_depth_bounds(1.0)
+                            .depth_bounds_test_enable(false)
                             .stencil_test_enable(false),
                     )
                     .color_blend_state(

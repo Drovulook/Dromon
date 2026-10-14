@@ -4,22 +4,10 @@
 // et de quelle teinte.
 #pragma once
 #include "bindings.slang"
+#include "noise.slang"
 
 static const float STAR_CELLS = 256.0;   // cases par côté de face
 static const float STAR_RADIUS_PX = 1.2; // rayon d'une étoile moyenne, en pixels
-
-// Hash entier pcg3d (Jarzynski & Olano, 2020) : 3 sorties décorrélées.
-uint3 pcg3d(uint3 v) {
-  v = v * 1664525u + 1013904223u;
-  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  v ^= v >> 16u;
-  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  return v;
-}
-
-float3 hash33(uint3 p) {
-  return float3(pcg3d(p)) * (1.0 / 4294967295.0);
-}
 
 // Lumière des étoiles dans la direction V (monde, normalisée).
 float3 stars(float3 V) {

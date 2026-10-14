@@ -19,7 +19,7 @@ pub(crate) use waves::{WAVE_COUNT, Waves};
 /// Marge (voxels) au-delà de laquelle un point est « sur terre », sans eau : erreur de
 /// la distance à la côte (< 1 cellule macro de 32) plus le bruit de détail qui déplace
 /// le trait de côte. Rejet des nœuds (quadtree) et masque au pixel (shaders, via l'UBO).
-pub(crate) const LAND_MARGIN: f32 = 64.0;
+pub(crate) const LAND_MARGIN: f32 = 32.0;
 
 /// Un carré d'eau à dessiner : une instance de la grille partagée (`WaterMesh`),
 /// placée et dimensionnée par push constants.

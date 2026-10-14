@@ -166,8 +166,11 @@ impl Renderer {
                 );
             }
 
-            self.sky_render_system
-                .record_render_sky(frame.command_buffer, self.frame_index);
+            self.sky_render_system.record_render_sky(
+                frame.command_buffer,
+                self.frame_index,
+                self.world.world_maps.as_ref(),
+            );
 
             // Transparente : en dernier, une fois le fond (terrain + ciel) dessiné.
             if let (Some(water), Some(world_maps)) =

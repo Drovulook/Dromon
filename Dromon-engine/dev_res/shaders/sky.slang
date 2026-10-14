@@ -1,6 +1,6 @@
 // Ciel : un triangle plein écran au plan far, dessiné après la géométrie opaque.
 // La pipeline (test LESS_OR_EQUAL, sans écriture) ne le laisse passer que là où
-// rien n'a été dessiné.
+// rien n'a été dessiné. Sous la surface de la mer, il peint l'eau profonde.
 #include "lib/atmosphere.slang"
 #include "lib/stars.slang"
 #include "lib/water.slang"
@@ -38,6 +38,16 @@ float4 skyFragMain(SkyVSOutput vertIn) : SV_Target {
   float3 V = normalize(vertIn.worldRay);
   float3 L = normalize(-ubo.lightDirection.xyz);
   float3 sunCol = ubo.lightColor.rgb * ubo.lightColor.w;
+
+  // Regard qui plonge dans la mer sans fond dessiné (au-delà du terrain chargé) : fond
+  // à l'infini, donc limite de `underwater`, brumée jusqu'à la surface comme le terrain.
+  // Sans cela, l'eau (semi-transparente) laisserait voir le ciel à travers elle.
+  float3 camPos = ubo.cameraPosition.xyz;
+  if (V.z < 0.0 && camPos.z > seaLevel()) {
+    float3 surface = camPos + V * ((camPos.z - seaLevel()) / -V.z);
+    if (seaCovers(surface.xy))
+      return float4(applyFog(deepWaterColor(), surface, L, sunCol), 1.0);
+  }
 
   float3 color = airColor(V, L, sunCol) + stars(V) + sunDisk(V, L, sunCol);
   return float4(color, 1.0);

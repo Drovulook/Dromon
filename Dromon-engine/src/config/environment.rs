@@ -99,7 +99,25 @@ impl ConfigFile for EnvironmentConfig {
             (0.0..=1.0).contains(&w.steepness),
             "water.waves.steepness doit être dans [0, 1] (au-delà, crêtes en boucle)"
         );
+        ensure!(w.speed >= 0.0, "water.waves.speed doit être ≥ 0");
         ensure!(w.coast_fade > 0.0, "water.waves.coast_fade doit être > 0");
+        let f = &self.water.foam;
+        for (value, name) in [
+            (f.albedo, "albedo"),
+            (f.calm_zone, "calm_zone"),
+            (f.calm_density, "calm_density"),
+        ] {
+            ensure!((0.0..=1.0).contains(&value), "water.foam.{name} doit être dans [0, 1]");
+        }
+        for (value, name) in [
+            (f.zone_depth, "zone_depth"),
+            (f.patch_size, "patch_size"),
+            (f.bubble_size, "bubble_size"),
+            (f.surge_period, "surge_period"),
+            (f.surge_spread, "surge_spread"),
+        ] {
+            ensure!(value > 0.0, "water.foam.{name} doit être > 0");
+        }
         Ok(())
     }
 }
@@ -287,6 +305,7 @@ pub struct WaterParams {
     /// m/s). Étale le reflet du soleil : faible = tache petite et éblouissante.
     pub glint_slope_variance: f32,
     pub waves: WaveParams,
+    pub foam: FoamParams,
 }
 
 impl Default for WaterParams {
@@ -296,6 +315,51 @@ impl Default for WaterParams {
             deep_color: Vec3::new(0.02, 0.12, 0.18),
             glint_slope_variance: 0.02,
             waves: WaveParams::default(),
+            foam: FoamParams::default(),
+        }
+    }
+}
+
+/// Écume du rivage : bruit (taches + bulles) seuillé par la profondeur du fond, qui
+/// pulse à l'arrivée de chaque vague (`shoreFoam`, lib/water.slang).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FoamParams {
+    /// Albédo de l'écume, dans [0, 1].
+    pub albedo: f32,
+    /// Profondeur du fond (unités) au-delà de laquelle il n'y a plus d'écume.
+    pub zone_depth: f32,
+    /// Taille des taches (unités).
+    pub patch_size: f32,
+    /// Taille des bulles (cellules de Worley, unités).
+    pub bubble_size: f32,
+    /// Agitation des bulles (rad/s).
+    pub bubble_speed: f32,
+    /// Dérive des taches (unités/s).
+    pub drift: f32,
+    /// Secondes entre deux vagues au rivage.
+    pub surge_period: f32,
+    /// Longueur de côte (unités) sur laquelle le cycle des vagues se décale.
+    pub surge_spread: f32,
+    /// Entre deux vagues : fraction de `zone_depth` encore couverte, dans [0, 1].
+    pub calm_zone: f32,
+    /// Entre deux vagues : fraction de la densité d'écume restante, dans [0, 1].
+    pub calm_density: f32,
+}
+
+impl Default for FoamParams {
+    fn default() -> Self {
+        FoamParams {
+            albedo: 0.85,
+            zone_depth: 1.5,
+            patch_size: 8.0,
+            bubble_size: 1.2,
+            bubble_speed: 0.6,
+            drift: 0.15,
+            surge_period: 7.0,
+            surge_spread: 80.0,
+            calm_zone: 0.4,
+            calm_density: 0.55,
         }
     }
 }
@@ -314,8 +378,10 @@ pub struct WaveParams {
     /// Rapport entre deux longueurs d'onde successives, dans ]0, 1[.
     pub wavelength_ratio: f32,
     /// Raideur totale `Σ k·A`, dans [0, 1] : 0 = mer plate, 1 = crêtes en pointe (au-delà,
-    /// la surface se replie en boucles).
+    /// la surface se replie en boucles). Fixe l'amplitude : `A = λ · steepness / (2π·N)`.
     pub steepness: f32,
+    /// Multiplicateur de vitesse : 1 = vitesse physique en eau profonde (`√(g·λ/2π)`).
+    pub speed: f32,
     /// Distance (au-delà de `LAND_MARGIN` de la côte) sur laquelle les vagues passent de
     /// 0 à leur pleine amplitude.
     pub coast_fade: f32,
@@ -329,6 +395,7 @@ impl Default for WaveParams {
             max_wavelength: 60.0,
             wavelength_ratio: 0.75,
             steepness: 0.5,
+            speed: 1.0,
             coast_fade: 200.0,
         }
     }

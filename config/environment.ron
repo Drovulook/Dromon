@@ -6,7 +6,7 @@
     latitude_deg: 40.0,
 
     clock: (
-        day_length_secs: 3000.0, // durée d'un jour de jeu en secondes réelles
+        day_length_secs: 30000.0, // durée d'un jour de jeu en secondes réelles
         time_scale: 1.0,       // 0 = pause, 60 = accéléré
         start_hour: 9.0,       // heure de départ, dans [0, 24[
     ),
@@ -102,10 +102,25 @@
         waves: (
             direction_deg: 30.0,   // vers où avancent les vagues (0 = +X, 90 = +Y)
             spread_deg: 40.0,      // dispersion des directions autour (±)
-            max_wavelength: 60.0,  // plus grande vague (unités)
+            max_wavelength: 120.0,  // plus grande vague (unités)
             wavelength_ratio: 0.75, // λ suivante = λ × ratio
-            steepness: 0.5,        // Σ k·A dans [0, 1] : 1 = crêtes en pointe
-            coast_fade: 100.0,     // amortissement à l'approche de la côte (unités)
+            steepness: 0.4,        // Σ k·A dans [0, 1] : 1 = crêtes en pointe
+            speed: 1.5,            // multiplicateur (1 = vitesse physique en eau profonde)
+            coast_fade: 200.0,     // amortissement à l'approche de la côte (unités)
+        ),
+
+        // Écume du rivage : taches + bulles, seuillées par la profondeur du fond.
+        foam: (
+            albedo: 0.85,
+            zone_depth: 1.5,     // profondeur du fond (unités) où l'écume disparaît
+            patch_size: 8.0,     // taille des taches (unités)
+            bubble_size: 1.2,    // taille des bulles (unités)
+            bubble_speed: 0.6,   // agitation des bulles (rad/s)
+            drift: 0.15,         // dérive des taches (unités/s)
+            surge_period: 7.0,   // secondes entre deux vagues au rivage
+            surge_spread: 80.0,  // longueur de côte sur laquelle les vagues se décalent
+            calm_zone: 0.4,      // entre deux vagues : fraction de zone_depth couverte
+            calm_density: 0.55,  // entre deux vagues : fraction de la densité restante
         ),
     ),
 )

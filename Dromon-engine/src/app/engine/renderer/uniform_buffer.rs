@@ -42,6 +42,9 @@ struct UniformBufferObject {
     // Houle : 2 vec4 par vague, (direction, k, A) puis (ω, phase, –, –).
     waves: [Vec4; 2 * WAVE_COUNT],
     wave_params: Vec4, // x = coast_fade, yzw inutilisés
+    // Écume (`FoamParams`) : (albedo, zone_depth, patch_size, bubble_size),
+    // (bubble_speed, drift, surge_period, surge_spread), (calm_zone, calm_density, –, –).
+    foam: [Vec4; 3],
 }
 
 pub struct UniformBuffer {
@@ -99,6 +102,14 @@ impl UniformBuffer {
             ([Vec4::ZERO; 2 * WAVE_COUNT], Vec4::ZERO),
             |w| w.waves.gpu_data(),
         );
+        let foam = water.map_or([Vec4::ZERO; 3], |w| {
+            let f = &w.params.foam;
+            [
+                Vec4::new(f.albedo, f.zone_depth, f.patch_size, f.bubble_size),
+                Vec4::new(f.bubble_speed, f.drift, f.surge_period, f.surge_spread),
+                Vec4::new(f.calm_zone, f.calm_density, 0.0, 0.0),
+            ]
+        });
         let ubo = UniformBufferObject {
             view: camera.view,
             proj: camera.proj,
@@ -136,6 +147,7 @@ impl UniformBuffer {
             time: Vec4::new(real_time_secs, 0.0, 0.0, 0.0),
             waves,
             wave_params,
+            foam,
         };
 
         unsafe {

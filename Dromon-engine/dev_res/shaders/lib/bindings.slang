@@ -4,7 +4,7 @@
 #pragma once
 
 // Nombre de vagues de la houle. ⚠ Synchronisé avec `WAVE_COUNT` (world/water/waves.rs).
-static const int WAVE_COUNT = 4;
+static const int WAVE_COUNT = 8;
 
 // set 0, binding 0 : données « caméra », mises à jour une fois par frame.
 struct UniformBuffer {
@@ -29,6 +29,9 @@ struct UniformBuffer {
     float4 time;            // x = temps réel (s)
     float4 waves[2 * WAVE_COUNT]; // houle : 2 par vague, (direction, k, A) puis (ω, phase, –, –)
     float4 waveParams;      // x = coast_fade
+    // Écume : (albedo, zone_depth, patch_size, bubble_size),
+    // (bubble_speed, drift, surge_period, surge_spread), (calm_zone, calm_density, –, –)
+    float4 foam[3];
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

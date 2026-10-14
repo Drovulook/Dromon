@@ -57,10 +57,10 @@ WaterVSOutput waterVertMain(WaterVSInput input) {
 
 [shader("fragment")]
 float4 waterFragMain(WaterVSOutput vertIn) : SV_Target {
-  // Taille du pixel sur la surface : variation de `gridXY` d'un pixel au voisin
-  // (dérivées d'écran), selon l'axe le plus étiré. AVANT le discard : les dérivées
-  // sont indéfinies si un voisin du quad 2×2 a été éliminé.
-  float footprint = max(length(ddx(vertIn.gridXY)), length(ddy(vertIn.gridXY)));
+  // Variation de `gridXY` d'un pixel au voisin (dérivées d'écran). AVANT le discard :
+  // les dérivées sont indéfinies si un voisin du quad 2×2 a été éliminé.
+  float2 dx = ddx(vertIn.gridXY);
+  float2 dy = ddy(vertIn.gridXY);
 
   // Pas d'eau au-delà du terrain chargé (elle recouvrirait les terres absentes), ni
   // sur terre. Même masque que l'absorption du fond.
@@ -72,7 +72,7 @@ float4 waterFragMain(WaterVSOutput vertIn) : SV_Target {
   float3 lightCol = ubo.lightColor.rgb * ubo.lightColor.w;
 
   // Normale des vagues au pixel, retournée vers la caméra si elle est sous l'eau.
-  SeaNormal waves = gerstnerNormal(vertIn.gridXY, footprint);
+  SeaNormal waves = gerstnerNormal(vertIn.gridXY, dx, dy);
   bool fromBelow = cameraUnderSea();
   float3 N = waves.normal * (fromBelow ? -1.0 : 1.0);
   float F = fresnel(saturate(dot(N, -V)));
