@@ -9,11 +9,11 @@ use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, Voxel};
 use crate::profile;
 
 use super::material::{
-    BEACH_JITTER_AMP, MACRO_SLOPE_RADIUS, MaterialQuery, SEABED_JITTER_AMP, SURFACE_JITTER_AMP,
-    VOLUME_JITTER_AMP, evaluate, material_color,
+    BEACH_JITTER_AMP, MACRO_SLOPE_RADIUS, MaterialQuery, SEABED_JITTER_AMP, evaluate,
+    material_color,
 };
-use super::relief::Relief;
-use glam::{IVec2, IVec3, Vec3};
+use super::world_sampler::WorldSampler;
+use glam::{DVec2, IVec2, IVec3, Vec3};
 use rustc_hash::FxHashMap;
 use std::cell::Cell;
 
@@ -41,8 +41,8 @@ const MACRO_APRON: i32 = MACRO_SLOPE_RADIUS as i32 + 1;
 /// sur `2^k` par axe (plus le voisinage des sommets pour les normales). Tout calculer
 /// d'avance faisait payer à un chunk LOD 3 le relief d'un LOD 0 (7,3 ms mesurées).
 pub struct DensityField<'a> {
-    /// Altitude des colonnes (carte macro + fBm). Sert aussi au choix des matériaux.
-    height: &'a Relief,
+    /// Altitude des colonnes (carte macro + fBm), côte et climat pour les matériaux.
+    sampler: &'a WorldSampler,
     /// Édits couvrant la région (chunk + apron), en coordonnées monde. Fusionnés une
     /// fois à la construction par [`TerrainSnapshot::density_field`] : ne contient que
     /// ce que cette région peut échantillonner, donc vide dans l'immense majorité des
@@ -73,7 +73,7 @@ impl<'a> DensityField<'a> {
     /// rayon des normales) ; `step` est son pas d'échantillonnage (`1 << lod`) ;
     /// `max_height` le plafond du monde.
     pub fn new(
-        height: &'a Relief,
+        sampler: &'a WorldSampler,
         edits: FxHashMap<IVec3, f32>,
         coord: IVec2,
         apron: i32,
@@ -84,7 +84,7 @@ impl<'a> DensityField<'a> {
         let apron = apron.max(MACRO_APRON);
         let side = CHUNK_SIZE as i32 + 2 * apron + 1;
         let mut field = DensityField {
-            height,
+            sampler,
             edits,
             origin_x: coord.x * CHUNK_SIZE as i32,
             origin_y: coord.y * CHUNK_SIZE as i32,
@@ -124,7 +124,7 @@ impl<'a> DensityField<'a> {
         }
         let wx = (self.origin_x + gx - self.apron) as f64;
         let wy = (self.origin_y + gy - self.apron) as f64;
-        let h = self.height.height(wx, wy) as f32;
+        let h = self.sampler.height(wx, wy) as f32;
         cell.set(h);
         h
     }
@@ -163,7 +163,7 @@ impl<'a> DensityField<'a> {
         h0 + (h1 - h0) * ty
     }
 
-    /// Cosinus de la pente **moyenne** du relief sur un voisinage de rayon
+    /// Gradient `∇h` **moyen** du relief sur un voisinage de rayon
     /// [`MACRO_SLOPE_RADIUS`] autour de `(wx, wy)`, par différences centrées d'écart
     /// `2r`. Une différence de hauteurs sur `[x−r, x+r]` vaut la moyenne de la pente
     /// locale sur ce segment : les bosses plus étroites que `2r` s'annulent, seules les
@@ -175,13 +175,13 @@ impl<'a> DensityField<'a> {
     /// Colonne **arrondie**, pas interpolée : l'interpolation lit 4 colonnes par point,
     /// soit 16 par sommet — ruineux aux LOD grossiers, où les sommets espacés partagent
     /// peu de colonnes. 0,5 voxel d'écart sur une pente mesurée à 12 ne se voit pas.
-    fn macro_up(&self, wx: f64, wy: f64) -> f64 {
+    fn macro_gradient(&self, wx: f64, wy: f64) -> DVec2 {
         let r = MACRO_SLOPE_RADIUS;
         let h = |x: f64, y: f64| self.relief(x.round() as i32, y.round() as i32) as f64;
-        let gx = (h(wx + r, wy) - h(wx - r, wy)) / (2.0 * r);
-        let gy = (h(wx, wy + r) - h(wx, wy - r)) / (2.0 * r);
-        // ‖∇h‖ = tan θ → cos θ = 1 / √(1 + tan² θ), comparable à `normal.z`.
-        1.0 / (1.0 + gx * gx + gy * gy).sqrt()
+        DVec2::new(
+            (h(wx + r, wy) - h(wx - r, wy)) / (2.0 * r),
+            (h(wx, wy + r) - h(wx, wy - r)) / (2.0 * r),
+        )
     }
 
     /// Altitude du **toit** du terrain (sommet de la couche pleine) à la colonne
@@ -199,7 +199,7 @@ impl<'a> DensityField<'a> {
     /// Terrain de base : `relief(x,y) − z`, linéaire en z (surface fractionnaire
     /// retrouvée par interpolation → pas de marches). **Grottes (à venir)** :
     /// soustraire un bruit 3D, p.ex.
-    /// `- cave_strength * self.height.cave_noise(wx, wy, wz)`.
+    /// `- cave_strength * self.sampler.cave_noise(wx, wy, wz)`.
     #[inline]
     pub fn sample(&self, wx: i32, wy: i32, wz: i32) -> f32 {
         // Court-circuit tant qu'aucune édition **dans cette région** : évite de hacher
@@ -246,18 +246,21 @@ impl<'a> DensityField<'a> {
     pub fn surface_color(&self, p: Vec3, normal: Vec3) -> Vec3 {
         let (wx, wy) = (p.x as f64, p.y as f64);
         // Jitter unitaire, mis à l'échelle par frontière (il est linéaire en `amp`).
-        let jitter = self.height.material_jitter(wx, wy, 1.0);
-        // Altitude au-dessus de la mer : référence de toutes les frontières.
-        let alt = p.z as f64 - self.height.sea_level();
+        let jitter = self.sampler.material_jitter(wx, wy, 1.0);
+        // Altitude au-dessus de la mer : référence des frontières littorales.
+        let alt = p.z as f64 - self.sampler.sea_level();
+        let gradient = self.macro_gradient(wx, wy);
         blend(evaluate(&MaterialQuery {
             pos: p,
             depth: 0.0,
-            mat_alt: alt + jitter * SURFACE_JITTER_AMP,
-            shore_d: self.height.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
+            climate: self.sampler.climate(wx, wy, p.z as f64, gradient),
+            jitter,
+            shore_d: self.sampler.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
             sea_depth: -alt + jitter * SEABED_JITTER_AMP,
             normal: Some(normal),
-            macro_up: Some(self.macro_up(wx, wy)),
-            patch_noise: Some(self.height.dirt_patch_noise(wx, wy)),
+            // ‖∇h‖ = tan θ → cos θ = 1 / √(1 + tan² θ), comparable à `normal.z`.
+            macro_up: Some(1.0 / (1.0 + gradient.length_squared()).sqrt()),
+            patch_noise: Some(self.sampler.dirt_patch_noise(wx, wy)),
         }))
     }
 
@@ -271,13 +274,15 @@ impl<'a> DensityField<'a> {
     pub fn volume_color(&self, p: Vec3) -> Vec3 {
         let (wx, wy) = (p.x as f64, p.y as f64);
         let surface = self.relief_interp(wx, wy) as f64;
-        let jitter = self.height.material_jitter(wx, wy, 1.0);
-        let alt = surface - self.height.sea_level();
+        let jitter = self.sampler.material_jitter(wx, wy, 1.0);
+        let alt = surface - self.sampler.sea_level();
         blend(evaluate(&MaterialQuery {
             pos: p,
             depth: surface - p.z as f64,
-            mat_alt: alt + jitter * VOLUME_JITTER_AMP,
-            shore_d: self.height.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
+            // Climat de la surface au-dessus : c'est elle que couvre la neige.
+            climate: self.sampler.climate(wx, wy, surface, self.macro_gradient(wx, wy)),
+            jitter,
+            shore_d: self.sampler.coast_distance(wx, wy) + jitter * BEACH_JITTER_AMP,
             sea_depth: -alt + jitter * SEABED_JITTER_AMP,
             normal: None,
             macro_up: None,

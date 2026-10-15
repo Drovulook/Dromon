@@ -86,6 +86,10 @@ impl ConfigFile for EnvironmentConfig {
             "water.absorption doit être ≥ 0"
         );
         ensure!(
+            self.water.sst_warm > self.water.sst_cold,
+            "water.sst_warm doit être > water.sst_cold"
+        );
+        ensure!(
             self.water.glint_slope_variance > 0.0,
             "water.glint_slope_variance doit être > 0"
         );
@@ -299,8 +303,14 @@ pub struct WaterParams {
     /// Coefficients d'absorption (par unité monde, par canal) : la lumière qui traverse
     /// `d` sous l'eau en garde `exp(−k·d)`.
     pub absorption: Vec3,
-    /// Couleur de la lumière diffusée par l'eau, vers laquelle le fond s'efface.
+    /// Couleur de la lumière diffusée par l'eau, vers laquelle le fond s'efface : eau
+    /// chaude (SST ≥ `sst_warm`), claire et bleue.
     pub deep_color: Vec3,
+    /// Même chose en eau froide (SST ≤ `sst_cold`) : plus verte et sombre (plancton).
+    pub deep_color_cold: Vec3,
+    /// Bornes (°C) du fondu `deep_color_cold` → `deep_color`.
+    pub sst_cold: f32,
+    pub sst_warm: f32,
     /// Variance des pentes des rides sous-pixel (Cox-Munk : ≈ 0,003 + 0,005 · vent en
     /// m/s). Étale le reflet du soleil : faible = tache petite et éblouissante.
     pub glint_slope_variance: f32,
@@ -313,6 +323,9 @@ impl Default for WaterParams {
         WaterParams {
             absorption: Vec3::new(0.4, 0.07, 0.02),
             deep_color: Vec3::new(0.02, 0.12, 0.18),
+            deep_color_cold: Vec3::new(0.02, 0.12, 0.18),
+            sst_cold: 8.0,
+            sst_warm: 24.0,
             glint_slope_variance: 0.02,
             waves: WaveParams::default(),
             foam: FoamParams::default(),

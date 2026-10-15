@@ -33,7 +33,7 @@ SkyVSOutput skyVertMain(uint vertexId : SV_VertexID) {
 float4 skyFragMain(SkyVSOutput vertIn) : SV_Target {
   // Sous l'eau, l'infini est de l'eau : ni ciel, ni étoiles, ni soleil.
   if (cameraUnderSea())
-    return float4(deepWaterColor(), 1.0);
+    return float4(deepWaterColor(ubo.cameraPosition.xy), 1.0);
 
   float3 V = normalize(vertIn.worldRay);
   float3 L = normalize(-ubo.lightDirection.xyz);
@@ -46,7 +46,7 @@ float4 skyFragMain(SkyVSOutput vertIn) : SV_Target {
   if (V.z < 0.0 && camPos.z > seaLevel()) {
     float3 surface = camPos + V * ((camPos.z - seaLevel()) / -V.z);
     if (seaCovers(surface.xy))
-      return float4(applyFog(deepWaterColor(), surface, L, sunCol), 1.0);
+      return float4(applyFog(deepWaterColor(surface.xy), surface, L, sunCol), 1.0);
   }
 
   float3 color = airColor(V, L, sunCol) + stars(V) + sunDisk(V, L, sunCol);

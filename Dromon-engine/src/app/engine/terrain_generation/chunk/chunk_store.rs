@@ -96,7 +96,7 @@ impl TerrainSnapshot {
     /// d'échantillonnage.
     pub fn density_field(&self, coord: IVec2, apron: i32, step: i32) -> DensityField<'_> {
         DensityField::new(
-            self.source.relief(),
+            self.source.sampler(),
             self.region_edits(coord, apron),
             coord,
             apron,

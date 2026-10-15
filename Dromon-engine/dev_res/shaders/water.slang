@@ -80,7 +80,7 @@ float4 waterFragMain(WaterVSOutput vertIn) : SV_Target {
   // Vu d'en dessous (provisoire, sans fenêtre de Snell) : reflet des profondeurs, pas
   // d'air traversé.
   if (fromBelow)
-    return float4(F * deepWaterColor(), F);
+    return float4(F * deepWaterColor(vertIn.worldPos.xy), F);
 
   float3 R = reflect(V, N);
   R.z = max(R.z, 0.0); // une pente forte peut réfléchir vers le bas : horizon au plus bas

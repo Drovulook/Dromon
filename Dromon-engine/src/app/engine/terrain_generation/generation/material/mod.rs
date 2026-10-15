@@ -13,6 +13,7 @@ mod mix;
 mod rules;
 
 use super::super::chunk::Voxel;
+use super::world_sampler::LocalClimate;
 use glam::Vec3;
 
 // ─── Table des matériaux ─────────────────────────────────────────────────────
@@ -42,14 +43,10 @@ pub fn material_color(material: u16) -> Vec3 {
     }
 }
 
-// ─── Jitter des frontières d'altitude ────────────────────────────────────────
-/// Amplitude du jitter d'altitude pour les sommets d'iso-surface.
-pub const SURFACE_JITTER_AMP: f64 = 60.0;
-/// Amplitude du jitter d'altitude pour les parois de bordure et le fond.
-pub const VOLUME_JITTER_AMP: f64 = 40.0;
-/// Amplitude du jitter de la largeur des plages (voxels de distance à la côte).
-/// Bien plus faible que celui d'altitude : une plage ne fait que quelques dizaines
-/// de voxels de large.
+// ─── Jitter des frontières ───────────────────────────────────────────────────
+// Celui de la neige, en °C, vit dans `rules` (borné en distance au sol).
+/// Amplitude du jitter de la largeur des plages (voxels de distance à la côte) : une
+/// plage ne fait que quelques dizaines de voxels de large.
 pub const BEACH_JITTER_AMP: f64 = 25.0;
 /// Amplitude du jitter de profondeur des fonds marins (frontière sable → vase).
 pub const SEABED_JITTER_AMP: f64 = 15.0;
@@ -67,9 +64,11 @@ pub struct MaterialQuery {
     pub pos: Vec3,
     /// Profondeur sous le relief (0 sur l'iso-surface).
     pub depth: f64,
-    /// Altitude **au-dessus du niveau de la mer** testée contre les frontières
-    /// d'altitude, jitter inclus : changer `sea_level` ne déplace pas la neige.
-    pub mat_alt: f64,
+    /// Climat à l'altitude de la surface.
+    pub climate: LocalClimate,
+    /// Bruit unitaire (~[−1,35 ; 1,35]) qui fait onduler les frontières ; chaque règle
+    /// le met à son échelle (cf. `HeightField::material_jitter`).
+    pub jitter: f64,
     /// Distance à la côte (voxels, > 0 terre), jitter des plages inclus. Définit les
     /// plages : la plaine côtière est trop plate pour un seuil d'altitude (1 voxel
     /// d'altitude ≈ 100 voxels de large).

@@ -25,9 +25,13 @@ float3 seaSurfaceLight() {
   return ubo.ambient.rgb + ubo.lightColor.rgb * ubo.lightColor.w * max(L.z, 0.0);
 }
 
-// Eau vue sur un trajet infini : le fond a disparu, reste la lumière diffusée. Limite
-// de `underwater` ; couleur des pixels « à l'infini » quand la caméra est sous l'eau.
-float3 deepWaterColor() { return ubo.waterDeepColor.xyz * seaSurfaceLight(); }
+// Eau vue sur un trajet infini en `xy` : le fond a disparu, reste la lumière diffusée.
+// Limite de `underwater` ; couleur des pixels « à l'infini » quand la caméra est sous
+// l'eau. Teinte selon la SST : eau froide plus verte (plancton), chaude plus bleue.
+float3 deepWaterColor(float2 xy) {
+  float warm = smoothstep(ubo.waterSst.x, ubo.waterSst.y, seaSurfaceTemperature(xy));
+  return lerp(ubo.waterDeepCold.xyz, ubo.waterDeepColor.xyz, warm) * seaSurfaceLight();
+}
 
 // Point où le regard caméra → worldPos traverse le plan de la mer ; `worldPos` s'il
 // ne le traverse pas (fragment au-dessus, ou caméra sous l'eau).
@@ -244,11 +248,12 @@ float3 underwater(float3 color, float3 worldPos) {
   // vers l'œil : la couleur du fond est atténuée sur les deux trajets.
   float3 bottom = color * exp(-k * (depth + viewPath));
   // Lumière diffusée par l'eau le long du regard : remplace ce qui a été absorbé.
-  float3 scatter = deepWaterColor() * (1.0 - exp(-k * viewPath));
+  float3 deep = deepWaterColor(worldPos.xy);
+  float3 scatter = deep * (1.0 - exp(-k * viewPath));
 
   // Au-delà du terrain chargé, le ciel peint un fond infini (sky.slang) : fondu vers
   // lui à l'approche de la limite, sinon une marche de couleur la trahit.
   float edge = smoothstep(FLOOR_FADE_START, 1.0,
                           distance(worldPos.xy, camPos.xy) / ubo.water.y);
-  return lerp(bottom + scatter, deepWaterColor(), edge);
+  return lerp(bottom + scatter, deep, edge);
 }

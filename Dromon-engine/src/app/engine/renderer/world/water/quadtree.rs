@@ -13,14 +13,14 @@ use super::{LAND_MARGIN, WaterNode};
 /// Le niveau 0 est le plus fin (`leaf_size`) ; chaque niveau double la taille des
 /// nœuds et leur portée.
 pub(super) struct Quadtree {
-    /// Coin (x min, y min) de la racine, qui couvre tout le monde.
+    /// Coin (x min, y min) de la racine, qui couvre le monde **plus la portée
+    /// d'affichage** : l'océan continue au-delà du bord du monde, sinon le ciel peint
+    /// seul l'eau profonde (sans vagues ni reflet) derrière des bords en escalier.
     root_origin: Vec2,
     root_level: u32,
     leaf_size: f32,
     range_factor: f32,
     morph_start_ratio: f32,
-    /// Rayon du disque du monde : les nœuds entièrement hors du disque sont ignorés.
-    world_radius: f32,
     /// Distance horizontale d'affichage (portée de chargement du terrain).
     max_distance: f32,
     /// Pour la distance à la côte : les nœuds entièrement sur terre sont ignorés.
@@ -48,8 +48,10 @@ impl Quadtree {
         max_distance: f32,
         source: Arc<TerrainSource>,
     ) -> Quadtree {
-        // Plus petit L tel que leaf · 2^L couvre le diamètre du monde.
-        let root_level = (2.0 * world_radius / params.leaf_size)
+        // Plus petit L tel que leaf · 2^L couvre le monde et ce qu'on en voit depuis son
+        // bord. Hors de la carte macro, `coast_distance` vaut celle du bord : océan.
+        let extent = world_radius + max_distance;
+        let root_level = (2.0 * extent / params.leaf_size)
             .log2()
             .ceil()
             .max(0.0) as u32;
@@ -60,7 +62,6 @@ impl Quadtree {
             leaf_size: params.leaf_size,
             range_factor: params.range_factor,
             morph_start_ratio: params.morph_start_ratio,
-            world_radius,
             max_distance,
             source,
         }
@@ -87,11 +88,8 @@ impl Quadtree {
     ) {
         let size = self.node_size(level);
 
-        // Rejets : hors du monde, trop loin, sur terre, hors du champ de vision. Un
-        // nœud rejeté l'est avec tous ses enfants (ils sont contenus dedans).
-        if distance_to_square(Vec2::ZERO, origin, size) > self.world_radius {
-            return;
-        }
+        // Rejets : trop loin, sur terre, hors du champ de vision. Un nœud rejeté l'est
+        // avec tous ses enfants (ils sont contenus dedans).
         // Horizontale, comme le chargement du terrain et le `discard` du shader.
         if distance_to_square(viewer.position.truncate(), origin, size) > self.max_distance {
             return;

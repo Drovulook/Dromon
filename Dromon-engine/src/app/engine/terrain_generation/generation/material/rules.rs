@@ -24,12 +24,25 @@ const SURFACE_DEPTH: f64 = 1.0;
 /// Profondeur jusqu'à laquelle on place de la terre ; au-delà, de la roche.
 const DIRT_DEPTH: f64 = 4.0;
 
-// ─── Frontières d'altitude de la couverture de surface ───────────────────────
-// Altitudes relatives au niveau de la mer (cf. `MaterialQuery::mat_alt`).
-/// Altitude de la frontière herbe → neige : au-dessus, neige.
-const SNOW_BORDER: f64 = 540.0;
-/// Largeur (en voxels d'altitude) de la bande de transition herbe → neige.
-const BLEND_WIDTH: f64 = 40.0;
+// ─── Limite des neiges ───────────────────────────────────────────────────────
+// En température de l'air (cf. `MaterialQuery::climate`) : la neige descend avec la
+// latitude. Moyenne annuelle : la neige persistante demande T ≲ 0 °C.
+//
+// Jitter et transition sont bornés **en distance au sol** : un écart de T déplace la
+// frontière de `ΔT / |∇T|`. En plaine (|∇T| ≈ 3·10⁻⁴ °C/voxel), 1,5 °C de jitter la
+// déplacerait de ~5 000 voxels → mosaïque de taches. On garde donc
+// `min(amplitude en °C, distance max × |∇T|)` : en montagne le °C l'emporte.
+/// Température de la frontière herbe → neige : en dessous, neige.
+const SNOW_TEMPERATURE: f64 = -1.0;
+/// Largeur (°C) de la bande de transition herbe → neige (~40 voxels d'altitude).
+const SNOW_BLEND: f64 = 1.0;
+/// Largeur max de cette bande, en voxels au sol.
+const SNOW_BLEND_MAX_DISTANCE: f64 = 40.0;
+/// Amplitude (°C) du jitter de la limite (~60 voxels d'altitude).
+const SNOW_JITTER: f64 = 1.5;
+/// Déplacement max de la limite par le jitter, en voxels au sol (~ la longueur
+/// d'onde du bruit, 100 : la ligne ondule sans se fragmenter en îlots).
+const SNOW_JITTER_MAX_DISTANCE: f64 = 80.0;
 
 // ─── Littoral et fonds marins ────────────────────────────────────────────────
 /// Largeur des plages (distance à la côte, voxels) : sable en deçà, herbe au-delà.
@@ -44,10 +57,11 @@ const MUD_DEPTH: f64 = 120.0;
 const MUD_BLEND: f64 = 30.0;
 
 // ─── Plaques de terre ────────────────────────────────────────────────────────
-/// Altitude des premières plaques de terre (rares, petites).
-const PATCH_START: f64 = 250.0;
-/// Altitude où la terre a remplacé toute l'herbe, juste sous la neige.
-const PATCH_FULL: f64 = 500.0;
+// En température, comme la neige : elles annoncent la limite des neiges.
+/// Température des premières plaques de terre (rares, petites).
+const PATCH_START: f64 = SNOW_TEMPERATURE + 7.5;
+/// Température où la terre a remplacé toute l'herbe, juste avant la neige.
+const PATCH_FULL: f64 = SNOW_TEMPERATURE + 1.0;
 /// Demi-largeur (en unités de bruit) du bord adouci d'une plaque.
 const PATCH_EDGE: f64 = 0.12;
 /// Seuil du bruit à `PATCH_START` : au-dessus du bruit presque partout → aucune
@@ -77,7 +91,7 @@ const SNOW_ROCK_SLOPE_NONE: f64 = 0.707; // cos 45°
 /// surface, puis terre, puis roche.
 pub(super) fn base_layer(q: &MaterialQuery) -> MaterialMix {
     if q.depth < SURFACE_DEPTH {
-        let mut mix = altitude_cover(q.mat_alt);
+        let mut mix = snow_cover(q);
         shore(q, &mut mix);
         mix
     } else if q.depth < DIRT_DEPTH {
@@ -87,14 +101,18 @@ pub(super) fn base_layer(q: &MaterialQuery) -> MaterialMix {
     }
 }
 
-/// Couverture de surface selon l'altitude : herbe, recouverte de neige en haut à
-/// travers la bande de transition.
-fn altitude_cover(mat_alt: f64) -> MaterialMix {
-    let half = BLEND_WIDTH * 0.5;
+/// Couverture de surface selon la température : herbe, recouverte de neige quand il
+/// fait froid à travers la bande de transition.
+fn snow_cover(q: &MaterialQuery) -> MaterialMix {
+    let g = q.climate.temperature_gradient;
+    let jitter = q.jitter * SNOW_JITTER.min(SNOW_JITTER_MAX_DISTANCE * g);
+    // Plancher : un smoothstep de largeur nulle diviserait 0 par 0.
+    let half = (SNOW_BLEND.min(SNOW_BLEND_MAX_DISTANCE * g) * 0.5).max(1e-6);
+    let t = q.climate.temperature + jitter;
     let mut mix = MaterialMix::solid(MATERIAL_GRASS);
     mix.overlay(
         MATERIAL_SNOW,
-        smoothstep(SNOW_BORDER - half, SNOW_BORDER + half, mat_alt),
+        1.0 - smoothstep(SNOW_TEMPERATURE - half, SNOW_TEMPERATURE + half, t),
     );
     mix
 }
@@ -115,17 +133,18 @@ fn shore(q: &MaterialQuery, mix: &mut MaterialMix) {
     );
 }
 
-/// Plaques de terre dans l'herbe, d'autant plus étendues que l'altitude est élevée.
+/// Plaques de terre dans l'herbe, d'autant plus étendues qu'il fait froid.
 ///
 /// Le bruit est un relief imaginaire noyé sous un niveau d'eau (le seuil) : les
-/// plaques sont les îles qui émergent. En montant, le seuil baisse — les îles
+/// plaques sont les îles qui émergent. En refroidissant, le seuil baisse — les îles
 /// grossissent, fusionnent, et à `PATCH_FULL` tout a émergé. Ne convertit que la
 /// part d'**herbe** : sable et neige restent intacts.
 pub(super) fn dirt_patches(q: &MaterialQuery, mix: &mut MaterialMix) {
     let Some(noise) = q.patch_noise else {
         return;
     };
-    let a = ((q.mat_alt - PATCH_START) / (PATCH_FULL - PATCH_START)).clamp(0.0, 1.0);
+    let t = q.climate.temperature;
+    let a = ((t - PATCH_START) / (PATCH_FULL - PATCH_START)).clamp(0.0, 1.0);
     let threshold = PATCH_THRESHOLD_START + (PATCH_THRESHOLD_FULL - PATCH_THRESHOLD_START) * a;
     let patch = smoothstep(threshold - PATCH_EDGE, threshold + PATCH_EDGE, noise);
     mix.transfer(MATERIAL_GRASS, MATERIAL_DIRT, patch);

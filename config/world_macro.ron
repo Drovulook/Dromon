@@ -91,10 +91,10 @@
         // Température au niveau de la mer aux bords sud et nord (°C) : gradient
         // imposé, la vraie latitude ne varierait pas sur un si petit monde.
         south_temperature: 28.0,
-        north_temperature: 2.0,
-        // °C perdus par voxel au-dessus de la mer. Réglé pour le jeu : 0.03 × 700
-        // → −21 °C sur les crêtes (le réel, 0.0065, ne ferait jamais neiger).
-        lapse_rate: 0.03,
+        north_temperature: -2.0,
+        // °C perdus par voxel au-dessus de la mer. Réglé pour le jeu : 0.025 × 700
+        // → −17,5 °C sur les crêtes (le réel, 0.0065, ne ferait jamais neiger).
+        lapse_rate: 0.025,
         noise_amplitude: 2.0,     // variations locales (°C)
         noise_frequency: 0.00005,
 

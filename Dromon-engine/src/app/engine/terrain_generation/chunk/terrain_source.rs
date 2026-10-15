@@ -1,5 +1,5 @@
 use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
-use crate::app::engine::terrain_generation::generation::relief::Relief;
+use crate::app::engine::terrain_generation::generation::world_sampler::WorldSampler;
 use crate::config::WorldGenConfig;
 use crate::app::engine::terrain_generation::lod::chunk_distance;
 use glam::{IVec2, Vec2};
@@ -69,8 +69,8 @@ impl WorldDisc {
 ///
 /// [`ChunkData`]: super::chunk_data::ChunkData
 pub struct TerrainSource {
-    /// Altitude des colonnes (carte macro + fBm). Alimente le champ de densité.
-    relief: Relief,
+    /// Altitude, côte, climat (carte macro + fBm). Alimente le champ de densité.
+    sampler: WorldSampler,
     world: WorldDisc,
     /// Plafond du monde, en voxels.
     max_height: u32,
@@ -81,7 +81,7 @@ impl TerrainSource {
     /// [`MacroMap::load_or_build`]).
     pub fn new(config: &WorldGenConfig, macro_map: MacroMap) -> TerrainSource {
         TerrainSource {
-            relief: Relief::new(config, macro_map),
+            sampler: WorldSampler::new(config, macro_map),
             world: WorldDisc::new(config.macro_.world.radius_chunks),
             max_height: config.macro_.world.max_height,
         }
@@ -92,9 +92,9 @@ impl TerrainSource {
         self.max_height
     }
 
-    /// Le relief, pour le [`DensityField`](super::super::generation::DensityField).
-    pub(super) fn relief(&self) -> &Relief {
-        &self.relief
+    /// L'échantillonneur, pour le [`DensityField`](super::super::generation::DensityField).
+    pub(super) fn sampler(&self) -> &WorldSampler {
+        &self.sampler
     }
 
     /// La forme du monde.
@@ -104,18 +104,18 @@ impl TerrainSource {
 
     /// Altitude du relief (en voxels) à la colonne monde `(wx, wy)`.
     pub fn terrain_height(&self, wx: f32, wy: f32) -> f32 {
-        self.relief.height(wx as f64, wy as f64) as f32
+        self.sampler.height(wx as f64, wy as f64) as f32
     }
 
     /// La carte macro (pour les cartes du monde envoyées au GPU).
     pub fn macro_map(&self) -> &MacroMap {
-        self.relief.macro_map()
+        self.sampler.macro_map()
     }
 
     /// Distance signée à la côte macro (voxels, > 0 sur terre) à la colonne `(wx, wy)`.
     /// Euclidienne, à moins d'une cellule de la carte macro près.
     pub fn coast_distance(&self, wx: f32, wy: f32) -> f32 {
-        self.relief.coast_distance(wx as f64, wy as f64) as f32
+        self.sampler.coast_distance(wx as f64, wy as f64) as f32
     }
 
     /// Altitude **moyenne** du relief sur tout le monde, mesurée au centre des chunks.

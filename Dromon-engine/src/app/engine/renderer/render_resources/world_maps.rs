@@ -18,10 +18,15 @@ pub struct WorldMaps {
     context: Arc<RenderingContext>,
     /// Binding 0 : distance signée à la côte (voxels, > 0 terre), `R32_SFLOAT`.
     coast_distance: Texture,
+    /// Binding 1 : climat, sur la grille climatique, `R32G32B32A32_SFLOAT`.
+    /// R = température de l'air (°C), G = précipitations (normalisées), B = SST (°C),
+    /// A = libre (0).
+    climate: Texture,
     /// Clamp (pas de retour de l'autre côté du monde), linéaire, sans anisotropie.
     sampler: vk::Sampler,
     pub descriptor_set: vk::DescriptorSet,
-    /// Passage monde → UV, pour l'UBO : `uv = (xy − x) · y`.
+    /// Passage monde → UV, pour l'UBO : `uv = (xy − x) · y` pour la grille fine
+    /// (`coast_distance`), `uv = (xy − z) · w` pour la grille climatique.
     pub uv_transform: Vec4,
 }
 
@@ -43,18 +48,44 @@ impl WorldMaps {
             bytemuck::cast_slice(map.coast_distance.values()),
         )?;
 
+        // Les trois champs partagent la grille climatique : entrelacés en RGBA.
+        let climate_shape = map.temperature.shape();
+        let texels: Vec<[f32; 4]> = map
+            .temperature
+            .values()
+            .iter()
+            .zip(map.precipitation.values())
+            .zip(map.sst.values())
+            .map(|((&t, &p), &sst)| [t, p, sst, 0.0])
+            .collect();
+        let climate = texture_handler.create_map_texture(
+            climate_shape.n as u32,
+            climate_shape.n as u32,
+            vk::Format::R32G32B32A32_SFLOAT,
+            bytemuck::cast_slice(&texels),
+        )?;
+
         let sampler = Self::create_sampler(&context)?;
-        let descriptor_set = descriptor_handler
-            .create_world_maps_descriptor_set(&[coast_distance.texture_image_view], sampler)?;
+        let descriptor_set = descriptor_handler.create_world_maps_descriptor_set(
+            &[coast_distance.texture_image_view, climate.texture_image_view],
+            sampler,
+        )?;
 
         // Valeurs au centre des cellules, comme les texels : la conversion est exacte
         // sans correction d'un demi-texel.
         let extent = shape.n as f64 * shape.cell_size;
-        let uv_transform = Vec4::new(shape.origin as f32, (1.0 / extent) as f32, 0.0, 0.0);
+        let climate_extent = climate_shape.n as f64 * climate_shape.cell_size;
+        let uv_transform = Vec4::new(
+            shape.origin as f32,
+            (1.0 / extent) as f32,
+            climate_shape.origin as f32,
+            (1.0 / climate_extent) as f32,
+        );
 
         Ok(WorldMaps {
             context,
             coast_distance,
+            climate,
             sampler,
             descriptor_set,
             uv_transform,
@@ -83,7 +114,8 @@ impl WorldMaps {
         texture_handler: &TextureHandler,
         command_buffer: &vk::CommandBuffer,
     ) -> Result<()> {
-        texture_handler.initialize(&self.coast_distance, command_buffer)
+        texture_handler.initialize(&self.coast_distance, command_buffer)?;
+        texture_handler.initialize(&self.climate, command_buffer)
     }
 }
 

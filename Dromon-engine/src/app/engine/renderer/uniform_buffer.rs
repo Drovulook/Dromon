@@ -34,10 +34,12 @@ struct UniformBufferObject {
     // paddées à 16 octets, que glam::Mat3 n'a pas).
     sky_rotation: Mat4,
     stars: Vec4, // x = luminosité × visibilité, y inutilisé, z = densité, w = scintillation
-    world_maps: Vec4, // passage monde → UV des cartes du monde : uv = (xy − x) · y
+    world_maps: Vec4, // monde → UV : grille fine uv = (xy − x) · y, climat uv = (xy − z) · w
     water: Vec4, // x = sea_level, y = portée horizontale, z = marge terre, w = 1 si mer
     water_absorption: Vec4, // xyz = k par canal, w = 1 si caméra sous la mer
-    water_deep_color: Vec4, // xyz = couleur de l'eau profonde, w = variance des pentes (reflet)
+    water_deep_color: Vec4, // xyz = couleur de l'eau profonde chaude, w = variance des pentes (reflet)
+    water_deep_cold: Vec4, // xyz = couleur de l'eau profonde froide, w inutilisé
+    water_sst: Vec4,       // x = sst_cold, y = sst_warm (°C), zw inutilisés
     time: Vec4, // x = temps réel (s), yzw inutilisés
     // Houle : 2 vec4 par vague, (direction, k, A) puis (ω, phase, –, –).
     waves: [Vec4; 2 * WAVE_COUNT],
@@ -97,6 +99,14 @@ impl UniformBuffer {
             ),
             None => (Vec4::ZERO, Vec4::ZERO, Vec4::ZERO),
         };
+        // Sans mer : bornes 0 et 1, jamais lues (w = 0 dans `water`), mais pas de
+        // division par zéro dans le smoothstep.
+        let (water_deep_cold, water_sst) = water.map_or((Vec4::ZERO, Vec4::Y), |w| {
+            (
+                w.params.deep_color_cold.extend(0.0),
+                Vec4::new(w.params.sst_cold, w.params.sst_warm, 0.0, 0.0),
+            )
+        });
         // Sans mer, amplitudes nulles.
         let (waves, wave_params) = water.map_or(
             ([Vec4::ZERO; 2 * WAVE_COUNT], Vec4::ZERO),
@@ -144,6 +154,8 @@ impl UniformBuffer {
             water: water_params,
             water_absorption,
             water_deep_color,
+            water_deep_cold,
+            water_sst,
             time: Vec4::new(real_time_secs, 0.0, 0.0, 0.0),
             waves,
             wave_params,
