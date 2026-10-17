@@ -5,43 +5,24 @@
 //!    perturbée par le jitter, normale) ;
 //! 2. une couche de base pose les strates et la couverture selon l'altitude ;
 //! 3. des étapes successives recouvrent une part du mélange ([`MaterialMix::overlay`]) ;
-//! 4. le résultat n'est quantifié en [`Voxel`] (4 canaux `u8`) qu'à la fin.
+//! 4. le résultat n'est quantifié en [`Voxel`] (3 canaux `u8`) qu'à la fin.
 //!
-//! Détails : [`rules`] (les étapes), [`mix`] (le mélange de travail).
+//! Détails : [`rules`] (les étapes), [`mix`] (le mélange de travail), [`table`] (les
+//! matériaux de `materials.ron`, résolus en IDs).
 
 mod mix;
 mod rules;
+mod table;
+
+pub use table::{MaterialIds, MaterialTable};
 
 use super::super::chunk::Voxel;
 use super::world_sampler::LocalClimate;
 use glam::Vec3;
 
-// ─── Table des matériaux ─────────────────────────────────────────────────────
-// Matériaux de base (placeholders). À terme, remplacés par une vraie table de
-// matériaux (roches, minerais, terre, etc.).
-pub const MATERIAL_AIR: u16 = 0; // ID réservé à l'air (absence de matière).
-pub const MATERIAL_ROCK: u16 = 1;
-pub const MATERIAL_DIRT: u16 = 2;
-pub const MATERIAL_GRASS: u16 = 3;
-pub const MATERIAL_SNOW: u16 = 4;
-pub const MATERIAL_SAND: u16 = 5;
-/// Vase des fonds marins, au-delà du plateau continental.
-pub const MATERIAL_MUD: u16 = 6;
-/// Nombre d'IDs de matériau (air compris) : taille de [`mix::MaterialMix`].
-pub const MATERIAL_COUNT: usize = 7;
-
-/// Couleur de base (albédo) d'un matériau, par ID.
-pub fn material_color(material: u16) -> Vec3 {
-    match material {
-        MATERIAL_ROCK => Vec3::new(0.40, 0.38, 0.35),
-        MATERIAL_DIRT => Vec3::new(0.38, 0.31, 0.22),
-        MATERIAL_GRASS => Vec3::new(0.27, 0.42, 0.18),
-        MATERIAL_SNOW => Vec3::new(0.95, 0.96, 0.98),
-        MATERIAL_SAND => Vec3::new(0.80, 0.73, 0.52),
-        MATERIAL_MUD => Vec3::new(0.26, 0.25, 0.22),
-        _ => Vec3::ZERO, // air / inconnu
-    }
-}
+/// ID réservé à l'air (absence de matière). Les autres viennent de `materials.ron`
+/// (cf. [`MaterialTable`]).
+pub const MATERIAL_AIR: u16 = 0;
 
 // ─── Jitter des frontières ───────────────────────────────────────────────────
 // Celui de la neige, en °C, vit dans `rules` (borné en distance au sol).
@@ -58,7 +39,9 @@ pub const MACRO_SLOPE_RADIUS: f64 = 12.0;
 // ─── Pipeline ────────────────────────────────────────────────────────────────
 /// Entrées des règles de matériau pour un point. Calculé une fois, lu par toutes
 /// les étapes.
-pub struct MaterialQuery {
+pub struct MaterialQuery<'a> {
+    /// IDs des matériaux nommés par les règles.
+    pub ids: &'a MaterialIds,
     /// Position monde du point.
     #[allow(dead_code)] // pas encore lue ; servira aux futures règles
     pub pos: Vec3,

@@ -16,6 +16,8 @@ pub struct DescriptorHandler {
     /// Set 3 : les cartes du monde (`WorldMaps`), lues par les vertex et fragment
     /// shaders. Un binding par carte.
     pub world_maps_descriptor_set_layout: vk::DescriptorSetLayout,
+    /// Set 4 : la table des matériaux (`MaterialBuffer`), un SSBO lu par le terrain.
+    pub materials_descriptor_set_layout: vk::DescriptorSetLayout,
     pub world_descriptor_sets: Vec<vk::DescriptorSet>,
     // Set 2 : la shadow map. Une seule ressource (image unique) partagée par
     // toutes les frames, donc un seul descriptor set, rebindé chaque frame.
@@ -38,6 +40,8 @@ impl DescriptorHandler {
         ) = DescriptorHandler::create_descriptor_set_layouts(&context)?;
         let world_maps_descriptor_set_layout =
             DescriptorHandler::create_world_maps_descriptor_set_layout(&context)?;
+        let materials_descriptor_set_layout =
+            DescriptorHandler::create_materials_descriptor_set_layout(&context)?;
         let world_descriptor_sets = DescriptorHandler::create_world_descriptor_sets(
             &context,
             descriptor_pool,
@@ -59,6 +63,7 @@ impl DescriptorHandler {
             texture_descriptor_set_layout,
             shadow_descriptor_set_layout,
             world_maps_descriptor_set_layout,
+            materials_descriptor_set_layout,
             world_descriptor_sets,
             shadow_descriptor_set,
         })
@@ -77,6 +82,10 @@ impl DescriptorHandler {
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(MAX_TEXTURES + 1 + WORLD_MAP_COUNT),
+            // La table des matériaux.
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1),
         ];
 
         unsafe {
@@ -85,8 +94,8 @@ impl DescriptorHandler {
                     // .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
                     .pool_sizes(&pool_sizes)
                     // frame_count sets UBO + un set par texture + 1 set shadow map
-                    // + 1 set cartes du monde
-                    .max_sets(frame_count + MAX_TEXTURES + 2),
+                    // + 1 set cartes du monde + 1 set matériaux
+                    .max_sets(frame_count + MAX_TEXTURES + 3),
                 None,
             )?)
         }
@@ -160,6 +169,23 @@ impl DescriptorHandler {
                     .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             })
             .collect();
+        unsafe {
+            Ok(context.device.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
+                None,
+            )?)
+        }
+    }
+
+    fn create_materials_descriptor_set_layout(
+        context: &RenderingContext,
+    ) -> Result<vk::DescriptorSetLayout> {
+        let bindings = [vk::DescriptorSetLayoutBinding::default()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(1)
+            // VERTEX : albédo par sommet (provisoire) ; FRAGMENT : mélange au pixel.
+            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)];
         unsafe {
             Ok(context.device.create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
@@ -319,6 +345,32 @@ impl DescriptorHandler {
         unsafe { self.context.device.update_descriptor_sets(&writes, &[]) };
         Ok(descriptor_set)
     }
+
+    /// Alloue et écrit le set de la table des matériaux (set 4) : `buffer` entier au
+    /// binding 0.
+    pub fn create_materials_descriptor_set(&self, buffer: vk::Buffer) -> Result<vk::DescriptorSet> {
+        let descriptor_set = unsafe {
+            self.context.device.allocate_descriptor_sets(
+                &vk::DescriptorSetAllocateInfo::default()
+                    .descriptor_pool(self.descriptor_pool)
+                    .set_layouts(&[self.materials_descriptor_set_layout]),
+            )?
+        }[0];
+
+        let buffer_info = [vk::DescriptorBufferInfo::default()
+            .buffer(buffer)
+            .offset(0)
+            .range(vk::WHOLE_SIZE)];
+        let write = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor_set)
+            .dst_binding(0)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .buffer_info(&buffer_info);
+
+        unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
+        Ok(descriptor_set)
+    }
 }
 
 impl Drop for DescriptorHandler {
@@ -339,6 +391,9 @@ impl Drop for DescriptorHandler {
             self.context
                 .device
                 .destroy_descriptor_set_layout(self.world_maps_descriptor_set_layout, None);
+            self.context
+                .device
+                .destroy_descriptor_set_layout(self.materials_descriptor_set_layout, None);
         }
     }
 }

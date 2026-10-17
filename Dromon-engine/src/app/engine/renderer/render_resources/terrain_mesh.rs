@@ -1,5 +1,6 @@
 use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::rendering_context::RenderingContext;
+use crate::app::engine::terrain_generation::{VOXEL_MATERIALS, Voxel};
 use crate::profile;
 use anyhow::Result;
 use ash::vk;
@@ -8,15 +9,40 @@ use glam::Vec3;
 use std::mem::offset_of;
 use std::sync::Arc;
 
+/// Canaux de matériau d'un sommet : 4 et non [`VOXEL_MATERIALS`] (3), car Vulkan ne
+/// garantit les formats de sommet 8/16 bits qu'en 4 composantes. Le 4ᵉ reste à zéro.
+const VERTEX_MATERIAL_CHANNELS: usize = 4;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct TerrainVertex {
     pub pos: Vec3,
     pub normal: Vec3, // normale lissée (gradient de densité), pour l'éclairage
-    pub color: Vec3,  // couleur du sommet : mélange des matériaux résolu côté CPU
+    /// IDs de matériau (`R16G16B16A16_UINT`), indices dans la table GPU.
+    pub materials: [u16; VERTEX_MATERIAL_CHANNELS],
+    /// Poids associés (`R8G8B8A8_UNORM` : 255 → 1.0), somme 255.
+    pub weights: [u8; VERTEX_MATERIAL_CHANNELS],
 }
 
 impl TerrainVertex {
+    pub fn new(pos: Vec3, normal: Vec3, voxel: Voxel) -> TerrainVertex {
+        let mut materials = [0; VERTEX_MATERIAL_CHANNELS];
+        let mut weights = [0; VERTEX_MATERIAL_CHANNELS];
+        materials[..VOXEL_MATERIALS].copy_from_slice(&voxel.materials);
+        weights[..VOXEL_MATERIALS].copy_from_slice(&voxel.weights);
+        TerrainVertex {
+            pos,
+            normal,
+            materials,
+            weights,
+        }
+    }
+
+    /// Remplace les matériaux par `material` seul (teintes de debug).
+    pub fn set_material(&mut self, material: u16) {
+        *self = TerrainVertex::new(self.pos, self.normal, Voxel::solid(material));
+    }
+
     pub fn get_binding_description() -> vk::VertexInputBindingDescription {
         vk::VertexInputBindingDescription {
             binding: 0,
@@ -25,7 +51,7 @@ impl TerrainVertex {
         }
     }
 
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
+    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 4] {
         [
             vk::VertexInputAttributeDescription {
                 binding: 0,
@@ -42,8 +68,14 @@ impl TerrainVertex {
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 2,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(TerrainVertex, color) as u32,
+                format: vk::Format::R16G16B16A16_UINT,
+                offset: offset_of!(TerrainVertex, materials) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: 3,
+                format: vk::Format::R8G8B8A8_UNORM,
+                offset: offset_of!(TerrainVertex, weights) as u32,
             },
         ]
     }

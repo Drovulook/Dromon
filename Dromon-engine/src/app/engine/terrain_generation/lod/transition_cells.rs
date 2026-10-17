@@ -25,7 +25,7 @@ use rustc_hash::FxHashMap;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
-        chunk::{CHUNK_SIZE, ISO_LEVEL},
+        chunk::{CHUNK_SIZE, ISO_LEVEL, Voxel},
         generation::DensityField,
         lod::{
             Face,
@@ -35,7 +35,7 @@ use crate::app::engine::{
                 TRANSITION_CORNER_UV, transition_edge,
             },
         },
-        mesh::vertex::{EdgeKey, cached_color, vertex_normal},
+        mesh::vertex::{EdgeKey, cached_material, vertex_normal},
     },
 };
 
@@ -98,7 +98,7 @@ pub fn add_transition_cells(
     indices: &mut Vec<u32>,
     trans_map: &mut FxHashMap<EdgeKey, u32>,
     normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
-    surface_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    surface_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
 ) {
     let n = CHUNK_SIZE as i32;
     let frame = face_frame(coord, face);
@@ -177,7 +177,7 @@ pub fn add_transition_cells(
                     vertices,
                     trans_map,
                     normal_cache,
-                    surface_colors,
+                    surface_materials,
                 );
                 vi[k] = idx;
                 vp[k] = p;
@@ -202,7 +202,7 @@ pub fn add_transition_cells(
 
 /// Sommet mutualisé posé sur l'arête `c0–c1` d'une cellule de transition (indices parmi
 /// les 13 points). Même schéma qu'[`edge_vertex`] — interpolation linéaire à l'iso, puis
-/// normale/couleur mémoïsées — mais en **demi-unités monde** : les positions y sont
+/// normale/matériaux mémoïsés — mais en **demi-unités monde** : les positions y sont
 /// entières malgré le rentrement d'un demi-pas, donc utilisables telles quelles comme
 /// clé exacte (cf. [`transition_point`]).
 #[allow(clippy::too_many_arguments)]
@@ -219,7 +219,7 @@ fn transition_vertex(
     vertices: &mut Vec<TerrainVertex>,
     trans_map: &mut FxHashMap<EdgeKey, u32>,
     normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
-    surface_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    surface_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
 ) -> (u32, Vec3, Vec3) {
     // Aucune arête de la table ne relie la face haute réso à la basse (vérifié sur les 512
     // cas) : un sommet appartient donc entièrement à l'une ou à l'autre. C'est ce qui rend
@@ -262,7 +262,7 @@ fn transition_vertex(
     };
     // Point d'échantillonnage : l'interpolé sur le PLAN FRONTIÈRE, sans le retrait — c'est
     // lui qui est sur l'iso-surface (même raison qu'en MC, cf. [`edge_vertex`]), et c'est
-    // exactement le point que calcule le sommet MC jumeau ⇒ normale et couleur identiques
+    // exactement le point que calcule le sommet MC jumeau ⇒ normale et matériaux identiques
     // des deux côtés de la soudure.
     let pf = |k: usize| plane[k].as_vec3();
     let p_field = pf(c0) + (pf(c1) - pf(c0)) * t;
@@ -275,13 +275,11 @@ fn transition_vertex(
 
     let normal = vertex_normal(field, normal_cache, p_field);
     // Teinte de debug (`debug.ron`) appliquée après coup par `mesh_chunk`.
-    let color = cached_color(surface_colors, p_field, |q| field.surface_color(q, normal));
-    let idx = vertices.len() as u32;
-    vertices.push(TerrainVertex {
-        pos: p,
-        normal,
-        color,
+    let material = cached_material(surface_materials, p_field, |q| {
+        field.surface_material(q, normal)
     });
+    let idx = vertices.len() as u32;
+    vertices.push(TerrainVertex::new(p, normal, material));
     trans_map.insert(key, idx);
     (idx, p, normal)
 }

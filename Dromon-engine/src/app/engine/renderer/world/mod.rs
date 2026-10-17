@@ -21,7 +21,7 @@ use crate::app::{
         renderer::{
             camera::Camera,
             descriptors::DescriptorHandler,
-            render_resources::{RenderObject, RenderResourceManager, WorldMaps},
+            render_resources::{MaterialBuffer, RenderObject, RenderResourceManager, WorldMaps},
         },
         rendering_context::RenderingContext,
         timer::Timer,
@@ -49,6 +49,8 @@ pub struct World {
     pub(crate) water: Option<Water>,
     /// Cartes du monde pour les shaders (set 3), créées avec le terrain.
     pub(crate) world_maps: Option<WorldMaps>,
+    /// Table des matériaux pour les shaders (set 4), créée avec le terrain.
+    pub(crate) materials: Option<MaterialBuffer>,
     /// Pour créer le set des cartes du monde au moment du `setup`.
     descriptor_handler: Arc<DescriptorHandler>,
     /// Contexte GPU, conservé pour pouvoir allouer les buffers du terrain au
@@ -98,6 +100,7 @@ impl World {
             terrain: None,
             water: None,
             world_maps: None,
+            materials: None,
             descriptor_handler,
             context,
             frames_in_flight: frames_in_flight as u64,
@@ -132,6 +135,9 @@ impl World {
         }
         if let Some(world_maps) = self.world_maps.as_ref() {
             world_maps.record_upload(&self.rrm.texture_handler, command_buffer)?;
+        }
+        if let Some(materials) = self.materials.as_ref() {
+            materials.record_upload(&self.context.device, *command_buffer);
         }
         self.rrm.initialize(command_buffer)
     }

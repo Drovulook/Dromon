@@ -1,0 +1,27 @@
+// Table des matériaux du terrain (cf. `MaterialsConfig`).
+// L'ID d'un matériau = sa position + 1 (0 = air, réservé) ; le code les désigne par
+// leur `name` : l'ordre est libre. Une propriété absente prend sa valeur par défaut.
+//
+// albedo : couleur de base LINÉAIRE (pas sRGB), composantes dans [0, 1].
+// humidity_tint : Some((dry_albedo, dry, wet)) — couleur fondue de dry_albedo (pluie
+//   ≤ dry) vers albedo (pluie ≥ wet). Pluie normalisée : médiane des terres ~0,36,
+//   1 = côte humide de référence.
+(
+    materials: [
+        (name: "rock",  albedo: (0.40, 0.38, 0.35)),
+        (name: "dirt",  albedo: (0.38, 0.31, 0.22)),
+        (
+            name: "grass",
+            albedo: (0.17, 0.40, 0.10),     // humide : vert dense et saturé
+            humidity_tint: Some((
+                dry_albedo: (0.52, 0.48, 0.13), // sec : herbe jaunie (≠ terre, plus brune)
+                dry: 0.15,
+                wet: 0.6,
+            )),
+        ),
+        (name: "snow",  albedo: (0.95, 0.96, 0.98)),
+        (name: "sand",  albedo: (0.80, 0.73, 0.52)),
+        // Vase des fonds marins, au-delà du plateau continental.
+        (name: "mud",   albedo: (0.26, 0.25, 0.22)),
+    ],
+)

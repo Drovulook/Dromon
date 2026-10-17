@@ -1,4 +1,6 @@
-use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ISO_LEVEL, TerrainSnapshot};
+use crate::app::engine::terrain_generation::chunk::{
+    CHUNK_SIZE, ISO_LEVEL, TerrainSnapshot, Voxel,
+};
 use crate::app::engine::terrain_generation::lod::Face;
 use crate::app::engine::terrain_generation::lod::grid::LodGrid;
 use crate::app::engine::terrain_generation::lod::transition_cells::add_transition_cells;
@@ -78,19 +80,19 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     let mut vertices: Vec<TerrainVertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    // Normales et couleurs sont coûteuses (gradient multi-rayon, choix de matériau).
+    // Normales et matériaux sont coûteux (gradient multi-rayon, règles de placement).
     // On les mémoïse par coin entier : les nombreux sommets voisins d'un chunk
     // retombent sur les mêmes clés → calcul fait ~une fois par colonne. `FxHashMap`
     // (hash non-cryptographique) au lieu du `HashMap` SipHash : bien plus rapide sur
     // ces clés entières.
     //
-    // Deux caches de couleur, car deux règles distinctes selon où tombe le sommet : SUR
+    // Deux caches de matériaux, car deux règles distinctes selon où tombe le sommet : SUR
     // l'iso-surface (profondeur nulle) ou DANS la matière — parois et fond, dont la coupe
     // doit montrer les strates. Un cache commun les mélangerait : le haut d'une paroi est
     // à `z ≈ relief`, donc à la même clé arrondie qu'un sommet de surface.
     let mut normal_cache: FxHashMap<(i32, i32, i32), Vec3> = FxHashMap::default();
-    let mut surface_colors: FxHashMap<(i32, i32, i32), Vec3> = FxHashMap::default();
-    let mut volume_colors: FxHashMap<(i32, i32, i32), Vec3> = FxHashMap::default();
+    let mut surface_materials: FxHashMap<(i32, i32, i32), Voxel> = FxHashMap::default();
+    let mut volume_materials: FxHashMap<(i32, i32, i32), Voxel> = FxHashMap::default();
 
     // Mutualisation des sommets : arête de grille → index. Chaque arête ne produit
     // qu'un sommet, partagé par tous les cubes/triangles qui la touchent.
@@ -145,7 +147,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
                         &mut vertices,
                         &mut vertex_map,
                         &mut normal_cache,
-                        &mut surface_colors,
+                        &mut surface_materials,
                     )
                 };
 
@@ -202,7 +204,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
         debug,
         &mut vertices,
         &mut indices,
-        &mut volume_colors,
+        &mut volume_materials,
     );
 
     // Cellules de transition (Transvoxel) : scellent les faces bordant un voisin PLUS
@@ -232,12 +234,13 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
                 &mut indices,
                 &mut trans_map,
                 &mut normal_cache,
-                &mut surface_colors,
+                &mut surface_materials,
             );
         }
         if debug.transition_color {
+            let magenta = field.debug_material();
             for v in &mut vertices[first_transition_vertex..] {
-                v.color = Vec3::new(1.0, 0.0, 1.0);
+                v.set_material(magenta);
             }
         }
     }
@@ -247,7 +250,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{MeshDebug, WorldGenConfig};
+    use crate::config::{ConfigFile, MaterialsConfig, MeshDebug, WorldGenConfig};
     use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ChunkStore, TerrainSource};
     use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
     use crate::app::engine::terrain_generation::lod::Face;
@@ -276,7 +279,9 @@ mod tests {
         // Monde par défaut : rayon 4 chunks. `build`, pas `load_or_build` : ne pas
         // écraser le cache du vrai monde.
         let config = WorldGenConfig::default();
-        let source = Arc::new(TerrainSource::new(&config, MacroMap::build(&config)));
+        let materials = MaterialsConfig::load().unwrap();
+        let source =
+            Arc::new(TerrainSource::new(&config, &materials, MacroMap::build(&config)).unwrap());
         let terrain =
             TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
         let lods = lod_grid(&[(fine, 0), (coarse, 1)]);

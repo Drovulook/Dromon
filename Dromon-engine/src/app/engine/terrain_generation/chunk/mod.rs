@@ -5,7 +5,7 @@ mod voxel;
 
 pub use chunk_store::{ChunkStore, TerrainSnapshot};
 pub use terrain_source::{TerrainSource, WorldDisc};
-pub use voxel::Voxel;
+pub use voxel::{VOXEL_MATERIALS, Voxel};
 
 /// Côté horizontal d'un chunk en voxels (axes X et Y). La hauteur, elle, est réglable
 /// (`WorldShape::max_height`).

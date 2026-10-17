@@ -3,13 +3,18 @@
 #include "lib/shadow.slang"
 #include "lib/atmosphere.slang"
 #include "lib/water.slang"
+#include "lib/materials.slang"
 
-// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0,1,2).
+// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0 à 3).
 struct VSInput {
-  float3 inPosition; // location 0
-  float3 inNormal;   // location 1 — normale lissée (gradient de densité)
-  float3 inColor;    // location 2 — couleur du sommet (matériaux mélangés côté CPU)
+  float3 inPosition;  // location 0
+  float3 inNormal;    // location 1 — normale lissée (gradient de densité)
+  uint4 inMaterials;  // location 2 — IDs dans la table des matériaux (w inutilisé)
+  float4 inWeights;   // location 3 — poids associés, somme 1 (w inutilisé)
 }
+
+// Matériaux portés par un sommet (3, cf. `VOXEL_MATERIALS`).
+static const int VERTEX_MATERIALS = 3;
 
 struct VSOutput {
   float4 pos : SV_Position;
@@ -26,7 +31,14 @@ VSOutput terrainVertMain(VSInput input) {
   // model = identité pour le terrain, mais on applique la normalMatrix par
   // cohérence (gère un éventuel scale non uniforme).
   output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
-  output.color = input.inColor;
+  // Albédo du sommet, interpolé ensuite (Gouraud) : pour une grandeur linéaire comme
+  // l'albédo, identique à interpoler les poids. Les précipitations varient au km : une
+  // lecture par sommet suffit (cf. vault, Generation-Monde).
+  float rain = precipitation(worldPos.xy);
+  float3 albedo = 0.0;
+  for (int i = 0; i < VERTEX_MATERIALS; i++)
+    albedo += input.inWeights[i] * materialAlbedo(input.inMaterials[i], rain);
+  output.color = albedo;
   output.worldPos = worldPos.xyz;
   return output;
 }
@@ -49,8 +61,8 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   // La renormaliser : l'interpolation linéaire raccourcit le vecteur.
   float3 N = normalize(vertIn.worldNormal);
 
-  // Couleur du matériau : déjà calculée côté CPU (mélange des matériaux dominants
-  // selon l'altitude) et interpolée par le rasterizer entre les sommets.
+  // Albédo du mélange de matériaux, calculé par sommet (table GPU) et interpolé par
+  // le rasterizer.
   float3 material = vertIn.color;
 
   float3 L = normalize(-ubo.lightDirection.xyz);

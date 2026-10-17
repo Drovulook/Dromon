@@ -1,6 +1,8 @@
 use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
+use crate::app::engine::terrain_generation::generation::material::MaterialTable;
 use crate::app::engine::terrain_generation::generation::world_sampler::WorldSampler;
-use crate::config::WorldGenConfig;
+use crate::config::{MaterialsConfig, WorldGenConfig};
+use anyhow::Result;
 use crate::app::engine::terrain_generation::lod::chunk_distance;
 use glam::{IVec2, Vec2};
 
@@ -71,6 +73,8 @@ impl WorldDisc {
 pub struct TerrainSource {
     /// Altitude, côte, climat (carte macro + fBm). Alimente le champ de densité.
     sampler: WorldSampler,
+    /// Matériaux de `materials.ron`, résolus en IDs.
+    materials: MaterialTable,
     world: WorldDisc,
     /// Plafond du monde, en voxels.
     max_height: u32,
@@ -78,13 +82,19 @@ pub struct TerrainSource {
 
 impl TerrainSource {
     /// `macro_map` doit avoir été construite depuis `config` (cf.
-    /// [`MacroMap::load_or_build`]).
-    pub fn new(config: &WorldGenConfig, macro_map: MacroMap) -> TerrainSource {
-        TerrainSource {
+    /// [`MacroMap::load_or_build`]). Échoue si un matériau nommé par les règles manque
+    /// dans `materials`.
+    pub fn new(
+        config: &WorldGenConfig,
+        materials: &MaterialsConfig,
+        macro_map: MacroMap,
+    ) -> Result<TerrainSource> {
+        Ok(TerrainSource {
             sampler: WorldSampler::new(config, macro_map),
+            materials: MaterialTable::new(materials)?,
             world: WorldDisc::new(config.macro_.world.radius_chunks),
             max_height: config.macro_.world.max_height,
-        }
+        })
     }
 
     /// Plafond du monde, en voxels.
@@ -95,6 +105,11 @@ impl TerrainSource {
     /// L'échantillonneur, pour le [`DensityField`](super::super::generation::DensityField).
     pub(super) fn sampler(&self) -> &WorldSampler {
         &self.sampler
+    }
+
+    /// La table des matériaux, pour le [`DensityField`](super::super::generation::DensityField).
+    pub(super) fn materials(&self) -> &MaterialTable {
+        &self.materials
     }
 
     /// La forme du monde.

@@ -9,7 +9,7 @@ use crate::{
     app::{
         engine::{
             renderer::{
-                render_resources::{MeshData, WorldMaps},
+                render_resources::{MaterialBuffer, MeshData, WorldMaps},
                 world::{
                     terrain::{
                         Terrain, culling::VisibleSet, graveyard::Graveyard, mesh_job::MeshJob,
@@ -26,7 +26,7 @@ use crate::{
         },
         logger::Logger,
     },
-    config::{DebugConfig, TerrainRenderParams, WorldGenConfig},
+    config::{DebugConfig, MaterialsConfig, TerrainRenderParams, WorldGenConfig},
     profile,
 };
 
@@ -39,6 +39,7 @@ impl World {
 
         let terrain = Terrain::new(
             config,
+            &self.config.materials,
             &self.config.render.terrain,
             &self.config.debug,
             self.camera.position,
@@ -68,6 +69,11 @@ impl World {
             &self.descriptor_handler,
             terrain.source.macro_map(),
         )?);
+        self.materials = Some(MaterialBuffer::new(
+            self.context.clone(),
+            &self.descriptor_handler,
+            &self.config.materials,
+        )?);
         self.terrain = Some(terrain);
         Ok(())
     }
@@ -78,6 +84,7 @@ impl Terrain {
     /// terrain rend la main vide, ses meshes apparaissent au fil des frames suivantes.
     fn new(
         config: &WorldGenConfig,
+        materials: &MaterialsConfig,
         params: &TerrainRenderParams,
         debug: &DebugConfig,
         camera_position: Vec3,
@@ -89,7 +96,7 @@ impl Terrain {
 
         // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
         let macro_map = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
-        let source = Arc::new(TerrainSource::new(config, macro_map));
+        let source = Arc::new(TerrainSource::new(config, materials, macro_map)?);
 
         // Altitude moyenne du relief : plan de référence de la composante verticale du
         //    LOD. Mesurée une seule fois — le relief ne bouge pas.

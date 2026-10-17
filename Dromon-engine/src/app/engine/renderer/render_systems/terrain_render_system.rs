@@ -8,7 +8,7 @@ use crate::{
         renderer::{
             descriptors::DescriptorHandler,
             pipelines,
-            render_resources::{TerrainVertex, WorldMaps},
+            render_resources::{MaterialBuffer, TerrainVertex, WorldMaps},
             world::terrain::meshes::InstalledChunks,
         },
         rendering_context::RenderingContext,
@@ -59,6 +59,8 @@ impl TerrainRenderSystem {
                         descriptor_handler.shadow_descriptor_set_layout,
                         // set 3 : cartes du monde (masque de la mer).
                         descriptor_handler.world_maps_descriptor_set_layout,
+                        // set 4 : table des matériaux (SSBO).
+                        descriptor_handler.materials_descriptor_set_layout,
                     ])
                     .push_constant_ranges(&push_constant_ranges),
                 None,
@@ -114,6 +116,7 @@ impl TerrainRenderSystem {
         chunks: &InstalledChunks,
         visible_chunks: &[IVec2],
         world_maps: &WorldMaps,
+        materials: &MaterialBuffer,
     ) {
         if chunks.is_empty() {
             return;
@@ -155,6 +158,16 @@ impl TerrainRenderSystem {
                 self.pipeline_layout,
                 3,
                 &[world_maps.descriptor_set],
+                &[],
+            );
+
+            // set 4 : table des matériaux
+            self.context.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                4,
+                &[materials.descriptor_set],
                 &[],
             );
 

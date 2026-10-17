@@ -13,9 +13,6 @@
 use super::super::super::utils::smoothstep;
 use super::MaterialQuery;
 use super::mix::MaterialMix;
-use super::{
-    MATERIAL_DIRT, MATERIAL_GRASS, MATERIAL_MUD, MATERIAL_ROCK, MATERIAL_SAND, MATERIAL_SNOW,
-};
 
 // ─── Strates ─────────────────────────────────────────────────────────────────
 /// Profondeur (en voxels sous la surface) de la couche de surface; au-dessous,
@@ -47,9 +44,9 @@ const SNOW_JITTER_MAX_DISTANCE: f64 = 80.0;
 // ─── Littoral et fonds marins ────────────────────────────────────────────────
 /// Largeur des plages (distance à la côte, voxels) : sable en deçà, herbe au-delà.
 /// Le sable couvre aussi tout le fond marin (d < 0) jusqu'à la vase.
-const BEACH_WIDTH: f64 = 40.0;
+const BEACH_WIDTH: f64 = 80.0;
 /// Largeur de la transition sable → herbe (voxels de distance à la côte).
-const BEACH_BLEND: f64 = 20.0;
+const BEACH_BLEND: f64 = 10.0;
 /// Profondeur sous la mer de la frontière sable → vase : le plateau continental
 /// (≥ −30) reste sableux, le talus et les abysses sont vaseux.
 const MUD_DEPTH: f64 = 120.0;
@@ -95,9 +92,9 @@ pub(super) fn base_layer(q: &MaterialQuery) -> MaterialMix {
         shore(q, &mut mix);
         mix
     } else if q.depth < DIRT_DEPTH {
-        MaterialMix::solid(MATERIAL_DIRT)
+        MaterialMix::solid(q.ids.dirt)
     } else {
-        MaterialMix::solid(MATERIAL_ROCK)
+        MaterialMix::solid(q.ids.rock)
     }
 }
 
@@ -109,9 +106,9 @@ fn snow_cover(q: &MaterialQuery) -> MaterialMix {
     // Plancher : un smoothstep de largeur nulle diviserait 0 par 0.
     let half = (SNOW_BLEND.min(SNOW_BLEND_MAX_DISTANCE * g) * 0.5).max(1e-6);
     let t = q.climate.temperature + jitter;
-    let mut mix = MaterialMix::solid(MATERIAL_GRASS);
+    let mut mix = MaterialMix::solid(q.ids.grass);
     mix.overlay(
-        MATERIAL_SNOW,
+        q.ids.snow,
         1.0 - smoothstep(SNOW_TEMPERATURE - half, SNOW_TEMPERATURE + half, t),
     );
     mix
@@ -123,12 +120,12 @@ fn snow_cover(q: &MaterialQuery) -> MaterialMix {
 fn shore(q: &MaterialQuery, mix: &mut MaterialMix) {
     let half = BEACH_BLEND * 0.5;
     mix.overlay(
-        MATERIAL_SAND,
+        q.ids.sand,
         1.0 - smoothstep(BEACH_WIDTH - half, BEACH_WIDTH + half, q.shore_d),
     );
     let half = MUD_BLEND * 0.5;
     mix.overlay(
-        MATERIAL_MUD,
+        q.ids.mud,
         smoothstep(MUD_DEPTH - half, MUD_DEPTH + half, q.sea_depth),
     );
 }
@@ -147,7 +144,7 @@ pub(super) fn dirt_patches(q: &MaterialQuery, mix: &mut MaterialMix) {
     let a = ((t - PATCH_START) / (PATCH_FULL - PATCH_START)).clamp(0.0, 1.0);
     let threshold = PATCH_THRESHOLD_START + (PATCH_THRESHOLD_FULL - PATCH_THRESHOLD_START) * a;
     let patch = smoothstep(threshold - PATCH_EDGE, threshold + PATCH_EDGE, noise);
-    mix.transfer(MATERIAL_GRASS, MATERIAL_DIRT, patch);
+    mix.transfer(q.ids.grass, q.ids.dirt, patch);
 }
 
 /// Grandes pentes → roche à nu, sauf sur les replats locaux (corniches) où la
@@ -161,12 +158,12 @@ pub(super) fn slope_rock(q: &MaterialQuery, mix: &mut MaterialMix) {
 
     // Part de neige posée par la couche de base : suit la limite de neige (jitter
     // et bande de transition compris), sans constante d'altitude en plus.
-    let snow = mix.weight(MATERIAL_SNOW);
+    let snow = mix.weight(q.ids.snow);
     let lerp = |a: f64, b: f64| a + (b - a) * snow;
     let full = lerp(ROCK_SLOPE_FULL, SNOW_ROCK_SLOPE_FULL);
     let none = lerp(ROCK_SLOPE_NONE, SNOW_ROCK_SLOPE_NONE);
 
     let steep = 1.0 - smoothstep(full, none, macro_up);
     let ledge = smoothstep(LEDGE_NONE, LEDGE_FULL, n.z as f64);
-    mix.overlay(MATERIAL_ROCK, steep * (1.0 - ledge));
+    mix.overlay(q.ids.rock, steep * (1.0 - ledge));
 }

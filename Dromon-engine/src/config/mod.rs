@@ -11,6 +11,7 @@
 
 mod debug;
 mod environment;
+mod materials;
 mod render;
 mod world_gen;
 
@@ -19,6 +20,7 @@ pub use environment::{
     AtmosphereParams, ClockParams, DayNightParams, EnvironmentConfig, SkyKeyframe, StarsParams,
     SunDisk, WaterParams, WaveParams,
 };
+pub use materials::{HumidityTint, MaterialDef, MaterialsConfig};
 pub use render::{
     CameraParams, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
     TerrainRenderParams, WaterRenderParams,
@@ -37,13 +39,15 @@ use std::path::{Path, PathBuf};
 pub const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../config");
 
 /// Configs lues par le **moteur** au démarrage, avant la création du renderer
-/// (`render.ron`, `environment.ron`, `debug.ron`). Les
+/// (`render.ron`, `environment.ron`, `debug.ron`, `materials.ron`). Les
 /// configs propres à une scène (ex. [`WorldGenConfig`]) sont chargées par la scène.
 #[derive(Clone, Debug)]
 pub(crate) struct EngineConfig {
     pub render: RenderConfig,
     pub environment: EnvironmentConfig,
     pub debug: DebugConfig,
+    /// Lue par la génération (IDs) et, à terme, par le rendu (table GPU).
+    pub materials: MaterialsConfig,
 }
 
 impl EngineConfig {
@@ -52,6 +56,7 @@ impl EngineConfig {
             render: RenderConfig::load()?,
             environment: EnvironmentConfig::load()?,
             debug: DebugConfig::load()?,
+            materials: MaterialsConfig::load()?,
         })
     }
 }

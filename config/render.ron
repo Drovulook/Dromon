@@ -33,7 +33,7 @@
         lod: (
             // Distances (unités monde) de passage au niveau suivant. Leur nombre fixe le
             // LOD max (pas = 1 << lod voxels) : 4 rayons → LOD 0 à 4.
-            radii: [800.0, 1600.0, 3200.0, 6400.0],
+            radii: [1000.0, 2000.0, 4000.0, 8000.0],
             hysteresis: 0.08,   // bande morte relative autour de chaque rayon
             height_weight: 1.0, // 1 = distance 3D œil → chunk, 0 = horizontale seule
         ),

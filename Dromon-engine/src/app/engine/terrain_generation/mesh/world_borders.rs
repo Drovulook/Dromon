@@ -5,10 +5,10 @@ use crate::config::MeshDebug;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
-        chunk::CHUNK_SIZE,
+        chunk::{CHUNK_SIZE, Voxel},
         generation::DensityField,
         lod::Face,
-        mesh::{mesher::WORLD_FLOOR, vertex::cached_color},
+        mesh::{mesher::WORLD_FLOOR, vertex::cached_material},
     },
 };
 
@@ -27,7 +27,7 @@ pub fn add_mesh_borders(
     debug: MeshDebug,
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
-    volume_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    volume_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
 ) {
     let n = CHUNK_SIZE as i32;
     let x0 = coord.x * n;
@@ -43,7 +43,7 @@ pub fn add_mesh_borders(
             vertices,
             indices,
             field,
-            volume_colors,
+            volume_materials,
             [
                 Vec3::new(x0 as f32, y0 as f32, f),
                 Vec3::new(x1 as f32, y0 as f32, f),
@@ -73,7 +73,7 @@ pub fn add_mesh_borders(
                     vertices,
                     indices,
                     field,
-                    volume_colors,
+                    volume_materials,
                     [
                         Vec3::new(a0.0 as f32, a0.1 as f32, f),
                         Vec3::new(a1.0 as f32, a1.1 as f32, f),
@@ -105,13 +105,13 @@ fn push_quad(
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     field: &DensityField,
-    volume_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    volume_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
     quad: [Vec3; 4],
     normal: Vec3,
 ) {
     let [a, b, c, d] = quad;
-    push_tri(vertices, indices, field, volume_colors, a, b, c, normal);
-    push_tri(vertices, indices, field, volume_colors, a, c, d, normal);
+    push_tri(vertices, indices, field, volume_materials, a, b, c, normal);
+    push_tri(vertices, indices, field, volume_materials, a, c, d, normal);
 }
 
 /// Émet un triangle avec normale de face imposée, en orientant l'enroulement pour que
@@ -121,7 +121,7 @@ fn push_tri(
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     field: &DensityField,
-    volume_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    volume_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
     p0: Vec3,
     p1: Vec3,
     p2: Vec3,
@@ -135,12 +135,8 @@ fn push_tri(
     };
     let start = vertices.len() as u32;
     for p in [p0, p1, p2] {
-        let color = cached_color(volume_colors, p, |q| field.volume_color(q));
-        vertices.push(TerrainVertex {
-            pos: p,
-            normal,
-            color,
-        });
+        let material = cached_material(volume_materials, p, |q| field.volume_material(q));
+        vertices.push(TerrainVertex::new(p, normal, material));
     }
     indices.extend_from_slice(&[start, start + 1, start + 2]);
 }

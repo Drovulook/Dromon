@@ -4,17 +4,17 @@ use rustc_hash::FxHashMap;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
-        chunk::ISO_LEVEL,
+        chunk::{ISO_LEVEL, Voxel},
         generation::DensityField,
         lod::transition_shrink::HalfStepShrink,
         marching_cubes::mc_tables::{CORNERS, EDGE_CORNERS},
-        mesh::vertex::{EdgeKey, cached_color, vertex_normal},
+        mesh::vertex::{EdgeKey, cached_material, vertex_normal},
     },
 };
 
 /// Sommet mutualisé de l'arête de grille `e` du cube `base`. L'arête est identifiée
 /// par ses deux coins entiers triés ([`EdgeKey`]) : la 1re fois on interpole la
-/// position (là où la densité vaut ISO_LEVEL), on calcule normale+couleur et on pousse
+/// position (là où la densité vaut ISO_LEVEL), on calcule normale+matériaux et on pousse
 /// le sommet ; les fois suivantes (cube voisin, autre triangle) on réutilise l'index.
 /// Renvoie `(index, position, normale)` — la position/normale servent au test
 /// d'orientation de l'appelant sans re-lire le buffer.
@@ -29,7 +29,7 @@ pub fn edge_vertex(
     vertices: &mut Vec<TerrainVertex>,
     vertex_map: &mut FxHashMap<EdgeKey, u32>,
     normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
-    surface_colors: &mut FxHashMap<(i32, i32, i32), Vec3>,
+    surface_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
 ) -> (u32, Vec3, Vec3) {
     let [a, b] = EDGE_CORNERS[e];
     let ca = CORNERS[a];
@@ -69,7 +69,7 @@ pub fn edge_vertex(
     };
     // Deux positions distinctes, et c'est volontaire : `p_field` est le point interpolé,
     // donc SUR l'iso-surface ; `p` est ce point comprimé, donc décollé d'elle. Normale et
-    // couleur s'échantillonnent sur `p_field`, exactement comme le fait la dalle ⇒ les deux
+    // matériaux s'échantillonnent sur `p_field`, exactement comme le fait la dalle ⇒ les deux
     // côtés de la couture évaluent le même point, aucune rupture d'éclairage ni de matériau.
     // La clé de mutualisation, elle, reste les coins entiers d'origine : le sommet partagé
     // avec le cube voisin garde le même index.
@@ -77,13 +77,11 @@ pub fn edge_vertex(
     let p = shrink.apply(p_field);
 
     let normal = vertex_normal(field, normal_cache, p_field);
-    let color = cached_color(surface_colors, p_field, |q| field.surface_color(q, normal));
-    let idx = vertices.len() as u32;
-    vertices.push(TerrainVertex {
-        pos: p,
-        normal,
-        color,
+    let material = cached_material(surface_materials, p_field, |q| {
+        field.surface_material(q, normal)
     });
+    let idx = vertices.len() as u32;
+    vertices.push(TerrainVertex::new(p, normal, material));
     vertex_map.insert(key, idx);
     (idx, p, normal)
 }

@@ -1,3 +1,4 @@
+mod material_buffer;
 mod object_mesh;
 mod object_mesh_handler;
 mod terrain_mesh;
@@ -21,6 +22,7 @@ use crate::app::{
 };
 use anyhow::Result;
 use ash::vk;
+pub use material_buffer::MaterialBuffer;
 pub use object_mesh::{ObjectMesh, ObjectVertex};
 use std::{collections::HashMap, sync::Arc};
 pub use terrain_mesh::{MeshData, TerrainMesh, TerrainVertex};

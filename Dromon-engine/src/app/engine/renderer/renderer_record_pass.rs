@@ -154,15 +154,18 @@ impl Renderer {
             );
 
             // Les cartes du monde sont créées avec le terrain (`generate_terrain`).
-            if let (Some(terrain), Some(world_maps)) =
-                (self.world.terrain.as_ref(), self.world.world_maps.as_ref())
-            {
+            if let (Some(terrain), Some(world_maps), Some(materials)) = (
+                self.world.terrain.as_ref(),
+                self.world.world_maps.as_ref(),
+                self.world.materials.as_ref(),
+            ) {
                 self.terrain_render_sytem.record_render_terrain(
                     frame.command_buffer,
                     self.frame_index,
                     &terrain.chunks,
                     &terrain.visible.camera,
                     world_maps,
+                    materials,
                 );
             }
 

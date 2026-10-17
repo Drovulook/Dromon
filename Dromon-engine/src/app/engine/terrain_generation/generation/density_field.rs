@@ -9,8 +9,8 @@ use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, Voxel};
 use crate::profile;
 
 use super::material::{
-    BEACH_JITTER_AMP, MACRO_SLOPE_RADIUS, MaterialQuery, SEABED_JITTER_AMP, evaluate,
-    material_color,
+    BEACH_JITTER_AMP, MACRO_SLOPE_RADIUS, MaterialQuery, MaterialTable, SEABED_JITTER_AMP,
+    evaluate,
 };
 use super::world_sampler::WorldSampler;
 use glam::{DVec2, IVec2, IVec3, Vec3};
@@ -43,6 +43,8 @@ const MACRO_APRON: i32 = MACRO_SLOPE_RADIUS as i32 + 1;
 pub struct DensityField<'a> {
     /// Altitude des colonnes (carte macro + fBm), côte et climat pour les matériaux.
     sampler: &'a WorldSampler,
+    /// Matériaux (IDs pour les règles).
+    materials: &'a MaterialTable,
     /// Édits couvrant la région (chunk + apron), en coordonnées monde. Fusionnés une
     /// fois à la construction par [`TerrainSnapshot::density_field`] : ne contient que
     /// ce que cette région peut échantillonner, donc vide dans l'immense majorité des
@@ -74,6 +76,7 @@ impl<'a> DensityField<'a> {
     /// `max_height` le plafond du monde.
     pub fn new(
         sampler: &'a WorldSampler,
+        materials: &'a MaterialTable,
         edits: FxHashMap<IVec3, f32>,
         coord: IVec2,
         apron: i32,
@@ -85,6 +88,7 @@ impl<'a> DensityField<'a> {
         let side = CHUNK_SIZE as i32 + 2 * apron + 1;
         let mut field = DensityField {
             sampler,
+            materials,
             edits,
             origin_x: coord.x * CHUNK_SIZE as i32,
             origin_y: coord.y * CHUNK_SIZE as i32,
@@ -145,7 +149,7 @@ impl<'a> DensityField<'a> {
     /// Relief interpolé (bilinéaire) à la colonne monde **flottante** `(wx, wy)` :
     /// [`DensityField::relief`] accepte seulement des entiers. Aux coins entiers il
     /// redonne exactement la grille. Sert à mesurer la profondeur d'un sommet à sa
-    /// position exacte (cf. [`DensityField::volume_color`]).
+    /// position exacte (cf. [`DensityField::volume_material`]).
     #[inline]
     fn relief_interp(&self, wx: f64, wy: f64) -> f32 {
         let fx = wx - self.origin_x as f64 + self.apron as f64;
@@ -228,8 +232,8 @@ impl<'a> DensityField<'a> {
         (self.z_min, self.z_max)
     }
 
-    /// Couleur d'un sommet d'**iso-surface** de normale `normal` : matériau de surface à
-    /// son altitude et selon sa pente.
+    /// Matériaux d'un sommet d'**iso-surface** de normale `normal` : couverture de
+    /// surface selon son climat et sa pente.
     ///
     /// Sa profondeur sous le toit vaut zéro *par construction* — on ne la mesure donc
     /// pas. La mesurer serait même faux : le mailleur pose le sommet sur la corde
@@ -243,14 +247,15 @@ impl<'a> DensityField<'a> {
     /// en moins cher et sans écart de résolution.
     ///
     /// [`relief_interp`]: DensityField::relief_interp
-    pub fn surface_color(&self, p: Vec3, normal: Vec3) -> Vec3 {
+    pub fn surface_material(&self, p: Vec3, normal: Vec3) -> Voxel {
         let (wx, wy) = (p.x as f64, p.y as f64);
         // Jitter unitaire, mis à l'échelle par frontière (il est linéaire en `amp`).
         let jitter = self.sampler.material_jitter(wx, wy, 1.0);
         // Altitude au-dessus de la mer : référence des frontières littorales.
         let alt = p.z as f64 - self.sampler.sea_level();
         let gradient = self.macro_gradient(wx, wy);
-        blend(evaluate(&MaterialQuery {
+        evaluate(&MaterialQuery {
+            ids: &self.materials.ids,
             pos: p,
             depth: 0.0,
             climate: self.sampler.climate(wx, wy, p.z as f64, gradient),
@@ -261,22 +266,24 @@ impl<'a> DensityField<'a> {
             // ‖∇h‖ = tan θ → cos θ = 1 / √(1 + tan² θ), comparable à `normal.z`.
             macro_up: Some(1.0 / (1.0 + gradient.length_squared()).sqrt()),
             patch_noise: Some(self.sampler.dirt_patch_noise(wx, wy)),
-        }))
+        })
     }
 
-    /// Couleur d'un point **de volume** en `p` (coordonnées monde flottantes) : matériau
-    /// à sa profondeur réelle sous le relief. Réservée aux parois de bordure et au fond,
+    /// Matériaux d'un point **de volume** en `p` (coordonnées monde flottantes) : à sa
+    /// profondeur réelle sous le relief. Réservés aux parois de bordure et au fond,
     /// dont la géométrie coupe le terrain et doit en montrer les strates.
     ///
     /// Leurs sommets sont posés à des colonnes **entières**, où l'interpolation retombe
     /// exactement sur la grille pré-échantillonnée : la profondeur y est exacte quel que
-    /// soit le LOD. Pour un sommet d'iso-surface, prendre [`DensityField::surface_color`].
-    pub fn volume_color(&self, p: Vec3) -> Vec3 {
+    /// soit le LOD. Pour un sommet d'iso-surface, prendre
+    /// [`DensityField::surface_material`].
+    pub fn volume_material(&self, p: Vec3) -> Voxel {
         let (wx, wy) = (p.x as f64, p.y as f64);
         let surface = self.relief_interp(wx, wy) as f64;
         let jitter = self.sampler.material_jitter(wx, wy, 1.0);
         let alt = surface - self.sampler.sea_level();
-        blend(evaluate(&MaterialQuery {
+        evaluate(&MaterialQuery {
+            ids: &self.materials.ids,
             pos: p,
             depth: surface - p.z as f64,
             // Climat de la surface au-dessus : c'est elle que couvre la neige.
@@ -287,15 +294,11 @@ impl<'a> DensityField<'a> {
             normal: None,
             macro_up: None,
             patch_noise: None,
-        }))
+        })
     }
-}
 
-/// Albédo d'un descripteur de matière : ses matériaux, pondérés par leurs poids.
-fn blend(voxel: Voxel) -> Vec3 {
-    let mut color = Vec3::ZERO;
-    for i in 0..4 {
-        color += material_color(voxel.materials[i]) * (voxel.weights[i] as f32 / 255.0);
+    /// ID du matériau de debug (magenta), pour les teintes de `debug.ron`.
+    pub fn debug_material(&self) -> u16 {
+        self.materials.ids.debug
     }
-    color
 }

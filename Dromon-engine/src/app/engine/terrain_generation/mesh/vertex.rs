@@ -2,7 +2,7 @@ use glam::Vec3;
 use rustc_hash::FxHashMap;
 
 use crate::app::engine::terrain_generation::{
-    generation::DensityField, mesh::mesher::NORMAL_RADIUS,
+    chunk::Voxel, generation::DensityField, mesh::mesher::NORMAL_RADIUS,
 };
 
 /// Clé d'une arête de la grille : ses deux coins entiers, **triés** (pour que deux
@@ -42,18 +42,19 @@ pub fn vertex_normal(
     n
 }
 
-/// Couleur du sommet `p`, mémoïsée au coin entier le plus proche : les sommets voisins
-/// y partagent une couleur quasi identique, économie sans artefact visible. Le calcul
-/// lui-même prend la position **flottante** exacte.
+/// Matériaux du sommet `p`, mémoïsés au coin entier le plus proche : les sommets
+/// voisins y partagent un mélange quasi identique, économie sans artefact visible. Le
+/// calcul lui-même prend la position **flottante** exacte.
 ///
-/// `eval` porte la règle de coloration, donc le choix du cache qui va avec :
-/// [`DensityField::surface_color`] pour l'iso-surface, [`DensityField::volume_color`] pour les
-/// parois et le fond (cf. `surface_colors` / `volume_colors` dans [`mesh_chunk`]).
-pub fn cached_color(
-    cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
+/// `eval` porte la règle de placement, donc le choix du cache qui va avec :
+/// [`DensityField::surface_material`] pour l'iso-surface,
+/// [`DensityField::volume_material`] pour les parois et le fond (cf.
+/// `surface_materials` / `volume_materials` dans [`mesh_chunk`]).
+pub fn cached_material(
+    cache: &mut FxHashMap<(i32, i32, i32), Voxel>,
     p: Vec3,
-    eval: impl FnOnce(Vec3) -> Vec3,
-) -> Vec3 {
+    eval: impl FnOnce(Vec3) -> Voxel,
+) -> Voxel {
     let key = (p.x.round() as i32, p.y.round() as i32, p.z.round() as i32);
     if let Some(&c) = cache.get(&key) {
         return c;
