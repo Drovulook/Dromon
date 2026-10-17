@@ -4,6 +4,7 @@ use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::stars::Stars;
 use crate::app::engine::renderer::world::water::{LAND_MARGIN, WAVE_COUNT, Water};
 use crate::app::engine::{renderer::camera::Camera, rendering_context::RenderingContext};
+use crate::config::{CoastMoisture, TonemapParams};
 use crate::profile;
 use anyhow::Result;
 use ash::vk;
@@ -47,6 +48,8 @@ struct UniformBufferObject {
     // Écume (`FoamParams`) : (albedo, zone_depth, patch_size, bubble_size),
     // (bubble_speed, drift, surge_period, surge_spread), (calm_zone, calm_density, –, –).
     foam: [Vec4; 3],
+    material_tint: Vec4, // x = humidité côtière (ajout), y = sa portée (voxels), zw inutilisés
+    tonemap: Vec4,       // x = 1 si actif, y = exposition, zw inutilisés
 }
 
 pub struct UniformBuffer {
@@ -84,6 +87,8 @@ impl UniformBuffer {
         stars: &Stars,
         world_maps_uv: Vec4,
         water: Option<&Water>,
+        coast_moisture: &CoastMoisture,
+        tonemap: &TonemapParams,
         real_time_secs: f32,
     ) {
         profile!();
@@ -160,6 +165,13 @@ impl UniformBuffer {
             waves,
             wave_params,
             foam,
+            material_tint: Vec4::new(coast_moisture.amount, coast_moisture.range, 0.0, 0.0),
+            tonemap: Vec4::new(
+                if tonemap.enabled { 1.0 } else { 0.0 },
+                tonemap.exposure,
+                0.0,
+                0.0,
+            ),
         };
 
         unsafe {

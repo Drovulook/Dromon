@@ -2,6 +2,7 @@
 // UBO caméra et push constants : lib/bindings.slang ; shadow map et
 // computeShadow : lib/shadow.slang.
 #include "lib/shadow.slang"
+#include "lib/tonemap.slang"
 
 struct VSInput {
   float3 inPosition;
@@ -63,5 +64,5 @@ float4 fragMain(VSOutput vertIn) : SV_Target {
   // L'ambiant reste toujours présent → les zones d'ombre ne sont pas noires.
   float3 color = baseColor * lightCol * NdotL * shadow + ambient;
 
-  return float4(color, 1.0);
+  return float4(tonemap(color), 1.0);
 }

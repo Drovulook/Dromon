@@ -26,7 +26,7 @@ use crate::{
         },
         logger::Logger,
     },
-    config::{DebugConfig, MaterialsConfig, TerrainRenderParams, WorldGenConfig},
+    config::{DebugConfig, MaterialRulesConfig, MaterialsConfig, TerrainRenderParams, WorldGenConfig},
     profile,
 };
 
@@ -40,6 +40,7 @@ impl World {
         let terrain = Terrain::new(
             config,
             &self.config.materials,
+            &self.config.material_rules,
             &self.config.render.terrain,
             &self.config.debug,
             self.camera.position,
@@ -85,6 +86,7 @@ impl Terrain {
     fn new(
         config: &WorldGenConfig,
         materials: &MaterialsConfig,
+        material_rules: &MaterialRulesConfig,
         params: &TerrainRenderParams,
         debug: &DebugConfig,
         camera_position: Vec3,
@@ -96,7 +98,7 @@ impl Terrain {
 
         // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
         let macro_map = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
-        let source = Arc::new(TerrainSource::new(config, materials, macro_map)?);
+        let source = Arc::new(TerrainSource::new(config, materials, material_rules, macro_map)?);
 
         // Altitude moyenne du relief : plan de référence de la composante verticale du
         //    LOD. Mesurée une seule fois — le relief ne bouge pas.

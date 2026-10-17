@@ -4,6 +4,7 @@
 #include "lib/atmosphere.slang"
 #include "lib/water.slang"
 #include "lib/materials.slang"
+#include "lib/tonemap.slang"
 
 // Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0 à 3).
 struct VSInput {
@@ -15,6 +16,14 @@ struct VSInput {
 
 // Matériaux portés par un sommet (3, cf. `VOXEL_MATERIALS`).
 static const int VERTEX_MATERIALS = 3;
+
+// Humidité côtière ajoutée aux précipitations pour la **teinte** des matériaux (sable
+// de plage beige, frange côtière plus verte) : pleine sur la côte, nulle à `range`
+// voxels dans les terres (material_rules.ron → `coast_moisture`).
+float coastMoisture(float2 xy) {
+  float coast = 1.0 - smoothstep(0.0, ubo.materialTint.y, coastDistance(xy));
+  return ubo.materialTint.x * coast;
+}
 
 struct VSOutput {
   float4 pos : SV_Position;
@@ -34,7 +43,7 @@ VSOutput terrainVertMain(VSInput input) {
   // Albédo du sommet, interpolé ensuite (Gouraud) : pour une grandeur linéaire comme
   // l'albédo, identique à interpoler les poids. Les précipitations varient au km : une
   // lecture par sommet suffit (cf. vault, Generation-Monde).
-  float rain = precipitation(worldPos.xy);
+  float rain = precipitation(worldPos.xy) + coastMoisture(worldPos.xy);
   float3 albedo = 0.0;
   for (int i = 0; i < VERTEX_MATERIALS; i++)
     albedo += input.inWeights[i] * materialAlbedo(input.inMaterials[i], rain);
@@ -94,5 +103,5 @@ float4 terrainFragMain(VSOutput vertIn) : SV_Target {
   if (!(cameraUnderSea() && vertIn.worldPos.z < seaLevel()))
     color = applyFog(color, airPathEnd(vertIn.worldPos), L, lightCol);
 
-  return float4(color, 1.0);
+  return float4(tonemap(color), 1.0);
 }

@@ -14,8 +14,9 @@ pub struct LocalClimate {
     /// plaine (latitude seule).
     pub temperature_gradient: f64,
     /// Précipitations normalisées (1 = côte humide de référence).
-    #[allow(dead_code)] // servira aux règles arides
     pub precipitation: f64,
+    /// `|∇pluie|` (par voxel horizontal) : même rôle que `temperature_gradient`.
+    pub precipitation_gradient: f64,
 }
 
 impl WorldSampler {
@@ -35,12 +36,14 @@ impl WorldSampler {
                 + self.lapse_rate * above_sea(m.climate_relief.sample(x, y) as f64)
         };
 
+        let rain = |x: f64, y: f64| m.precipitation.sample(x, y) as f64;
+
         // Différences centrées sur une cellule climatique.
         let s = m.temperature.shape().cell_size;
-        let climate_gradient = DVec2::new(
-            sea_temp(wx + s, wy) - sea_temp(wx - s, wy),
-            sea_temp(wx, wy + s) - sea_temp(wx, wy - s),
-        ) / (2.0 * s);
+        let gradient = |f: &dyn Fn(f64, f64) -> f64| {
+            DVec2::new(f(wx + s, wy) - f(wx - s, wy), f(wx, wy + s) - f(wx, wy - s)) / (2.0 * s)
+        };
+        let climate_gradient = gradient(&sea_temp);
         let altitude_gradient = if z > self.sea_level {
             self.lapse_rate * height_gradient
         } else {
@@ -50,7 +53,8 @@ impl WorldSampler {
         LocalClimate {
             temperature: sea_temp(wx, wy) - self.lapse_rate * above_sea(z),
             temperature_gradient: (climate_gradient - altitude_gradient).length(),
-            precipitation: m.precipitation.sample(wx, wy) as f64,
+            precipitation: rain(wx, wy),
+            precipitation_gradient: gradient(&rain).length(),
         }
     }
 }

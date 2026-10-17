@@ -221,55 +221,6 @@ impl HeightField {
         if norm > 0.0 { sum / norm } else { 0.0 }
     }
 
-    /// Perturbation d'altitude (en voxels) à AJOUTER aux seuils de matériau de
-    /// surface (sable/herbe/neige) pour casser leurs frontières rectilignes.
-    ///
-    /// C'est un bruit de Perlin propre, fonction des seules coordonnées **monde**
-    /// (donc continu et sans couture entre chunks, comme [`HeightField::height`]),
-    /// mais **décorrélé du relief** par un grand décalage spatial : il ne suit pas
-    /// les bosses du terrain, il ondule indépendamment. Deux octaves : une basse
-    /// fréquence (grandes ondulations de la frontière) + une plus fine (dentelure
-    /// de bord), ce qui donne un contour naturel plutôt qu'une simple vague molle.
-    ///
-    /// On perturbe ainsi l'altitude *testée* (et non le seuil) : la frontière
-    /// devient l'iso-courbe de `surface + jitter` au lieu de `surface = seuil`.
-    pub fn material_jitter(&self, wx: f64, wy: f64, amp: f64) -> f64 {
-        // Décalage monde qui décorrèle ce bruit de l'altitude (même source Perlin).
-        const OFFSET: f64 = 4096.0;
-        // Fréquence des grandes ondulations (longueur d'onde ≈ 1/FREQ voxels).
-        const FREQ: f64 = 0.01;
-
-        let x = wx + OFFSET;
-        let y = wy + OFFSET;
-        let macro_n = self.noise.get([x * FREQ, y * FREQ]);
-        let detail_n = self.noise.get([x * FREQ * 4.0, y * FREQ * 4.0]);
-        (macro_n + 0.35 * detail_n) * amp
-    }
-
-    /// Bruit des **plaques de terre**, normalisé dans `[-1, 1]` : la règle de matériau
-    /// le seuille, plus bas en altitude, pour découper des plaques (cf.
-    /// `rules::dirt_patches`). Décorrélé du relief et du jitter par son décalage.
-    ///
-    /// Divisé par la somme des amplitudes : borne garantie, pas seulement typique — un
-    /// seuil ≥ 1 + bord adouci n'émet donc **aucune** plaque. Revers : les extrêmes
-    /// (les deux octaves culminant ensemble) sont rares, l'essentiel tient dans ~±0,6.
-    ///
-    /// Longueur d'onde ~200 voxels : les plaques doivent rester grandes devant
-    /// l'espacement des sommets en LOD 3 (8 voxels), sinon elles apparaissent et
-    /// disparaissent au changement de LOD. L'octave de détail (~75 voxels, ratio non
-    /// entier) dentelle les bords sans créer de petites plaques.
-    pub fn dirt_patch_noise(&self, wx: f64, wy: f64) -> f64 {
-        const OFFSET: f64 = 8192.0;
-        const FREQ: f64 = 0.001;
-        const DETAIL_AMP: f64 = 0.25;
-
-        let x = wx + OFFSET;
-        let y = wy + OFFSET;
-        let macro_n = self.noise.get([x * FREQ, y * FREQ]);
-        let detail_n = self.noise.get([x * FREQ * 2.7, y * FREQ * 2.7]);
-        (macro_n + DETAIL_AMP * detail_n) / (1.0 + DETAIL_AMP)
-    }
-
     /// Valeur du bruit + gradient `(∂/∂x, ∂/∂y)` en `(x, y)` (espace bruit), par
     /// différences finies forward. `EPS` est un compromis : trop petit → erreurs
     /// d'arrondi flottant, trop grand → gradient « moyenné » qui lisse les détails.

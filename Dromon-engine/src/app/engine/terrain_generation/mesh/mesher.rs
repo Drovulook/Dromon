@@ -250,7 +250,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{ConfigFile, MaterialsConfig, MeshDebug, WorldGenConfig};
+    use crate::config::{ConfigFile, MaterialRulesConfig, MaterialsConfig, MeshDebug, WorldGenConfig};
     use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ChunkStore, TerrainSource};
     use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
     use crate::app::engine::terrain_generation::lod::Face;
@@ -280,8 +280,10 @@ mod tests {
         // écraser le cache du vrai monde.
         let config = WorldGenConfig::default();
         let materials = MaterialsConfig::load().unwrap();
-        let source =
-            Arc::new(TerrainSource::new(&config, &materials, MacroMap::build(&config)).unwrap());
+        let rules = MaterialRulesConfig::load().unwrap();
+        let source = Arc::new(
+            TerrainSource::new(&config, &materials, &rules, MacroMap::build(&config)).unwrap(),
+        );
         let terrain =
             TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
         let lods = lod_grid(&[(fine, 0), (coarse, 1)]);

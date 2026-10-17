@@ -4,23 +4,44 @@
 //
 // albedo : couleur de base LINÉAIRE (pas sRGB), composantes dans [0, 1].
 // humidity_tint : Some((dry_albedo, dry, wet)) — couleur fondue de dry_albedo (pluie
-//   ≤ dry) vers albedo (pluie ≥ wet). Pluie normalisée : médiane des terres ~0,36,
-//   1 = côte humide de référence.
+//   ≤ dry) vers albedo (pluie ≥ wet). Pluie normalisée sur les terres : 18 % sous
+//   0,05, médiane ~0,32, 1 = côte humide de référence. Le sable des déserts apparaît
+//   sous ~0,10 (règles, `DESERT_EDGE`) : l'herbe doit être sèche avant.
 (
     materials: [
         (name: "rock",  albedo: (0.40, 0.38, 0.35)),
-        (name: "dirt",  albedo: (0.38, 0.31, 0.22)),
+        // Roche des zones arides (pluie ≲ 0,25), à la place de `rock` : ocre-rouge.
+        (name: "sandstone", albedo: (0.52, 0.34, 0.20)),
+        (
+            name: "dirt",
+            albedo: (0.30, 0.24, 0.17),     // humide : brun sombre (un sol mouillé fonce)
+            humidity_tint: Some((
+                dry_albedo: (0.48, 0.38, 0.26), // sec : ocre clair, poussiéreux
+                dry: 0.10,
+                wet: 0.50,
+            )),
+        ),
         (
             name: "grass",
-            albedo: (0.17, 0.40, 0.10),     // humide : vert dense et saturé
+            albedo: (0.19, 0.40, 0.08),     // humide : vert dense, légèrement chaud
             humidity_tint: Some((
-                dry_albedo: (0.52, 0.48, 0.13), // sec : herbe jaunie (≠ terre, plus brune)
-                dry: 0.15,
-                wet: 0.6,
+                dry_albedo: (0.46, 0.47, 0.13), // sec : vert-jaune sec (≠ terre, plus brune)
+                dry: 0.20,
+                wet: 0.70,
             )),
         ),
         (name: "snow",  albedo: (0.95, 0.96, 0.98)),
-        (name: "sand",  albedo: (0.80, 0.73, 0.52)),
+        // Albédo réel du sable : 0,3–0,45. Au-delà, sans tone mapping, le soleil sature
+        // les canaux et le sable vire au blanc (confondu avec la neige).
+        (
+            name: "sand",
+            albedo: (0.62, 0.55, 0.40),     // humide (plages) : beige clair
+            humidity_tint: Some((
+                dry_albedo: (0.58, 0.47, 0.30), // sec (désert) : beige doré
+                dry: 0.05,
+                wet: 0.30,
+            )),
+        ),
         // Vase des fonds marins, au-delà du plateau continental.
         (name: "mud",   albedo: (0.26, 0.25, 0.22)),
     ],

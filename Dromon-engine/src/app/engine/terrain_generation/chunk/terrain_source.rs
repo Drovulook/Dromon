@@ -1,7 +1,7 @@
 use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
 use crate::app::engine::terrain_generation::generation::material::MaterialTable;
 use crate::app::engine::terrain_generation::generation::world_sampler::WorldSampler;
-use crate::config::{MaterialsConfig, WorldGenConfig};
+use crate::config::{MaterialRulesConfig, MaterialsConfig, WorldGenConfig};
 use anyhow::Result;
 use crate::app::engine::terrain_generation::lod::chunk_distance;
 use glam::{IVec2, Vec2};
@@ -73,7 +73,7 @@ impl WorldDisc {
 pub struct TerrainSource {
     /// Altitude, côte, climat (carte macro + fBm). Alimente le champ de densité.
     sampler: WorldSampler,
-    /// Matériaux de `materials.ron`, résolus en IDs.
+    /// Matériaux de `materials.ron` (résolus en IDs) et réglages de `material_rules.ron`.
     materials: MaterialTable,
     world: WorldDisc,
     /// Plafond du monde, en voxels.
@@ -87,11 +87,13 @@ impl TerrainSource {
     pub fn new(
         config: &WorldGenConfig,
         materials: &MaterialsConfig,
+        rules: &MaterialRulesConfig,
         macro_map: MacroMap,
     ) -> Result<TerrainSource> {
         Ok(TerrainSource {
             sampler: WorldSampler::new(config, macro_map),
-            materials: MaterialTable::new(materials)?,
+            // Même graine que le relief : les motifs ne dépendent que du monde.
+            materials: MaterialTable::new(materials, rules, config.macro_.seed)?,
             world: WorldDisc::new(config.macro_.world.radius_chunks),
             max_height: config.macro_.world.max_height,
         })

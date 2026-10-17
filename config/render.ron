@@ -80,4 +80,12 @@
             focus_distance: 1500.0, // centre de la boîte, devant la caméra
         ),
     ),
+
+    // Tone mapping (Khronos PBR Neutral, lib/tonemap.slang) : identité sous ~0,76, puis
+    // compression des hautes lumières en gardant la teinte (au lieu de couper chaque
+    // canal à 1, qui blanchit les couleurs claires au soleil).
+    tonemap: (
+        enabled: true,  // false : coupure à 1 comme avant (comparaison)
+        exposure: 1.0,  // multiplicateur avant la courbe ; > 1 éclaircit
+    ),
 )

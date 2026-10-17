@@ -34,6 +34,8 @@ struct UniformBuffer {
     // Écume : (albedo, zone_depth, patch_size, bubble_size),
     // (bubble_speed, drift, surge_period, surge_spread), (calm_zone, calm_density, –, –)
     float4 foam[3];
+    float4 materialTint;    // x = humidité côtière (ajout), y = sa portée (voxels)
+    float4 tonemapParams;   // x = 1 si actif, y = exposition
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

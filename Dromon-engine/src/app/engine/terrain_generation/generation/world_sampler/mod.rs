@@ -1,5 +1,6 @@
 //! **Échantillonneur du monde** : tout ce que le détail (⑤) lit en un point, carte
-//! macro interpolée + bruits fins. Immuable, partagé entre les threads de maillage.
+//! macro interpolée + relief fin. Immuable, partagé entre les threads de maillage.
+//! (Les bruits des matériaux sont dans `material::noise`.)
 //!
 //! - [`height`] : altitude d'une colonne ;
 //! - [`climate`] : température (corrigée par l'altitude) et précipitations.
@@ -54,15 +55,5 @@ impl WorldSampler {
     /// Niveau de la mer, en voxels.
     pub fn sea_level(&self) -> f64 {
         self.sea_level
-    }
-
-    /// Cf. [`HeightField::material_jitter`].
-    pub fn material_jitter(&self, wx: f64, wy: f64, amp: f64) -> f64 {
-        self.mountain.material_jitter(wx, wy, amp)
-    }
-
-    /// Cf. [`HeightField::dirt_patch_noise`].
-    pub fn dirt_patch_noise(&self, wx: f64, wy: f64) -> f64 {
-        self.mountain.dirt_patch_noise(wx, wy)
     }
 }

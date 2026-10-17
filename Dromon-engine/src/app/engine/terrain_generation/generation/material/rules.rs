@@ -1,4 +1,5 @@
-//! Étapes du pipeline de matériaux, une fonction par règle.
+//! Étapes du pipeline de matériaux, une fonction par règle. Réglages :
+//! `config/material_rules.ron` (cf. [`MaterialRulesConfig`]), lus via `q.rules`.
 //!
 //! - [`base_layer`] crée le mélange initial ;
 //! - les modificateurs ont la forme `fn(&MaterialQuery, &mut MaterialMix)` et
@@ -9,108 +10,59 @@
 //! plutôt une bande de transition où l'intensité du recouvrement monte en
 //! `smoothstep` ; avec l'interpolation du rasterizer entre sommets, on obtient un
 //! dégradé au lieu d'un trait.
+//!
+//! [`MaterialRulesConfig`]: crate::config::MaterialRulesConfig
 
 use super::super::super::utils::smoothstep;
 use super::MaterialQuery;
 use super::mix::MaterialMix;
+use crate::config::ClimateEdge;
 
-// ─── Strates ─────────────────────────────────────────────────────────────────
-/// Profondeur (en voxels sous la surface) de la couche de surface; au-dessous,
-/// c'est de la terre puis de la roche.
-const SURFACE_DEPTH: f64 = 1.0;
-/// Profondeur jusqu'à laquelle on place de la terre ; au-delà, de la roche.
-const DIRT_DEPTH: f64 = 4.0;
+/// Part ∈ [0, 1] du côté **haut** de la frontière climatique `edge`, pour `value` de
+/// gradient `gradient` et le bruit unitaire `jitter`.
+///
+/// Jitter et transition sont bornés **en distance au sol** : un écart Δ de la grandeur
+/// déplace la frontière de `Δ / |∇|`. En plaine, où le climat varie à peine (T :
+/// ~3·10⁻⁴ °C/voxel), un jitter en valeur la déplacerait de milliers de voxels →
+/// mosaïque de taches. On garde donc `min(amplitude, distance max × |∇|)` : là où le
+/// climat varie vite (montagne), l'amplitude l'emporte.
+fn above(edge: &ClimateEdge, value: f64, gradient: f64, jitter: f64) -> f64 {
+    let v = value + jitter * edge.jitter.min(edge.jitter_max_distance * gradient);
+    // Plancher : un smoothstep de largeur nulle diviserait 0 par 0.
+    let half = (edge.blend.min(edge.blend_max_distance * gradient) * 0.5).max(1e-9);
+    smoothstep(edge.threshold - half, edge.threshold + half, v)
+}
 
-// ─── Limite des neiges ───────────────────────────────────────────────────────
-// En température de l'air (cf. `MaterialQuery::climate`) : la neige descend avec la
-// latitude. Moyenne annuelle : la neige persistante demande T ≲ 0 °C.
-//
-// Jitter et transition sont bornés **en distance au sol** : un écart de T déplace la
-// frontière de `ΔT / |∇T|`. En plaine (|∇T| ≈ 3·10⁻⁴ °C/voxel), 1,5 °C de jitter la
-// déplacerait de ~5 000 voxels → mosaïque de taches. On garde donc
-// `min(amplitude en °C, distance max × |∇T|)` : en montagne le °C l'emporte.
-/// Température de la frontière herbe → neige : en dessous, neige.
-const SNOW_TEMPERATURE: f64 = -1.0;
-/// Largeur (°C) de la bande de transition herbe → neige (~40 voxels d'altitude).
-const SNOW_BLEND: f64 = 1.0;
-/// Largeur max de cette bande, en voxels au sol.
-const SNOW_BLEND_MAX_DISTANCE: f64 = 40.0;
-/// Amplitude (°C) du jitter de la limite (~60 voxels d'altitude).
-const SNOW_JITTER: f64 = 1.5;
-/// Déplacement max de la limite par le jitter, en voxels au sol (~ la longueur
-/// d'onde du bruit, 100 : la ligne ondule sans se fragmenter en îlots).
-const SNOW_JITTER_MAX_DISTANCE: f64 = 80.0;
-
-// ─── Littoral et fonds marins ────────────────────────────────────────────────
-/// Largeur des plages (distance à la côte, voxels) : sable en deçà, herbe au-delà.
-/// Le sable couvre aussi tout le fond marin (d < 0) jusqu'à la vase.
-const BEACH_WIDTH: f64 = 80.0;
-/// Largeur de la transition sable → herbe (voxels de distance à la côte).
-const BEACH_BLEND: f64 = 10.0;
-/// Profondeur sous la mer de la frontière sable → vase : le plateau continental
-/// (≥ −30) reste sableux, le talus et les abysses sont vaseux.
-const MUD_DEPTH: f64 = 120.0;
-/// Largeur de la transition sable → vase (voxels de profondeur).
-const MUD_BLEND: f64 = 30.0;
-
-// ─── Plaques de terre ────────────────────────────────────────────────────────
-// En température, comme la neige : elles annoncent la limite des neiges.
-/// Température des premières plaques de terre (rares, petites).
-const PATCH_START: f64 = SNOW_TEMPERATURE + 7.5;
-/// Température où la terre a remplacé toute l'herbe, juste avant la neige.
-const PATCH_FULL: f64 = SNOW_TEMPERATURE + 1.0;
-/// Demi-largeur (en unités de bruit) du bord adouci d'une plaque.
-const PATCH_EDGE: f64 = 0.12;
-/// Seuil du bruit à `PATCH_START` : au-dessus du bruit presque partout → aucune
-/// plaque, puis les premiers pics émergent en montant.
-const PATCH_THRESHOLD_START: f64 = 1.0 + PATCH_EDGE;
-/// Seuil du bruit à `PATCH_FULL` : sous le bruit partout → terre pleine.
-const PATCH_THRESHOLD_FULL: f64 = -1.0 - PATCH_EDGE;
-
-// ─── Pentes ──────────────────────────────────────────────────────────────────
-// Seuils en cos(pente) : `normal.z` et `macro_up` valent tous deux cos θ.
-// La pente macro est une moyenne, donc plus douce que la pente locale : ses
-// seuils sont plus bas.
-/// Pente macro : roche pleine au-delà de ~47° (cos 47°).
-const ROCK_SLOPE_FULL: f64 = 0.682;
-/// Pente macro : aucune roche en dessous de ~35° (cos 35°).
-const ROCK_SLOPE_NONE: f64 = 0.820;
-/// Pente locale : replat plein (la couverture reprend) en dessous de ~15° (cos 15°).
-const LEDGE_FULL: f64 = 0.966;
-/// Pente locale : plus de replat au-delà de ~25° (cos 25°).
-const LEDGE_NONE: f64 = 0.906;
-/// Pente macro en zone enneigée : la neige tient plus raide, la roche
-/// n'apparaît qu'au-delà de ~45° et devient pleine vers ~60°.
-const SNOW_ROCK_SLOPE_FULL: f64 = 0.500; // cos 60°
-const SNOW_ROCK_SLOPE_NONE: f64 = 0.707; // cos 45°
-
-/// Couche de base : cascade par profondeur; couverture (altitude puis littoral) en
+/// Couche de base : cascade par profondeur; couverture (climat puis littoral) en
 /// surface, puis terre, puis roche.
 pub(super) fn base_layer(q: &MaterialQuery) -> MaterialMix {
-    if q.depth < SURFACE_DEPTH {
-        let mut mix = snow_cover(q);
+    let strata = &q.rules.strata;
+    if q.depth < strata.surface_depth {
+        let mut mix = climate_cover(q);
         shore(q, &mut mix);
         mix
-    } else if q.depth < DIRT_DEPTH {
+    } else if q.depth < strata.dirt_depth {
         MaterialMix::solid(q.ids.dirt)
     } else {
         MaterialMix::solid(q.ids.rock)
     }
 }
 
-/// Couverture de surface selon la température : herbe, recouverte de neige quand il
-/// fait froid à travers la bande de transition.
-fn snow_cover(q: &MaterialQuery) -> MaterialMix {
-    let g = q.climate.temperature_gradient;
-    let jitter = q.jitter * SNOW_JITTER.min(SNOW_JITTER_MAX_DISTANCE * g);
-    // Plancher : un smoothstep de largeur nulle diviserait 0 par 0.
-    let half = (SNOW_BLEND.min(SNOW_BLEND_MAX_DISTANCE * g) * 0.5).max(1e-6);
-    let t = q.climate.temperature + jitter;
+/// Couverture de surface selon le climat : herbe, remplacée par le sable dans les
+/// déserts, puis recouverte de neige quand il fait froid. En zone sèche, la limite des
+/// neiges est testée sur une température relevée (`snow_dryness`) : il y faut faire
+/// plus froid, la limite monte en montagne et quitte les plaines sèches.
+fn climate_cover(q: &MaterialQuery) -> MaterialMix {
+    let c = &q.climate;
     let mut mix = MaterialMix::solid(q.ids.grass);
-    mix.overlay(
-        q.ids.snow,
-        1.0 - smoothstep(SNOW_TEMPERATURE - half, SNOW_TEMPERATURE + half, t),
-    );
+    let r = q.rules;
+    let desert = 1.0 - above(&r.desert_edge, c.precipitation, c.precipitation_gradient, q.jitter);
+    mix.transfer(q.ids.grass, q.ids.sand, desert);
+    let d = &r.snow_dryness;
+    let dryness = 1.0 - smoothstep(d.dry, d.wet, c.precipitation);
+    let snow_t = c.temperature + d.warming * dryness;
+    let snow = 1.0 - above(&r.snow_edge, snow_t, c.temperature_gradient, q.jitter);
+    mix.overlay(q.ids.snow, snow);
     mix
 }
 
@@ -118,15 +70,16 @@ fn snow_cover(q: &MaterialQuery) -> MaterialMix {
 /// plateau continental. Recouvre la couverture d'altitude (l'herbe ne pousse pas
 /// sous l'eau).
 fn shore(q: &MaterialQuery, mix: &mut MaterialMix) {
-    let half = BEACH_BLEND * 0.5;
+    let s = &q.rules.shore;
+    let half = s.beach_blend * 0.5;
     mix.overlay(
         q.ids.sand,
-        1.0 - smoothstep(BEACH_WIDTH - half, BEACH_WIDTH + half, q.shore_d),
+        1.0 - smoothstep(s.beach_width - half, s.beach_width + half, q.shore_d),
     );
-    let half = MUD_BLEND * 0.5;
+    let half = s.mud_blend * 0.5;
     mix.overlay(
         q.ids.mud,
-        smoothstep(MUD_DEPTH - half, MUD_DEPTH + half, q.sea_depth),
+        smoothstep(s.mud_depth - half, s.mud_depth + half, q.sea_depth),
     );
 }
 
@@ -134,36 +87,55 @@ fn shore(q: &MaterialQuery, mix: &mut MaterialMix) {
 ///
 /// Le bruit est un relief imaginaire noyé sous un niveau d'eau (le seuil) : les
 /// plaques sont les îles qui émergent. En refroidissant, le seuil baisse — les îles
-/// grossissent, fusionnent, et à `PATCH_FULL` tout a émergé. Ne convertit que la
+/// grossissent, fusionnent, et à `full_above_snow` tout a émergé. Ne convertit que la
 /// part d'**herbe** : sable et neige restent intacts.
 pub(super) fn dirt_patches(q: &MaterialQuery, mix: &mut MaterialMix) {
     let Some(noise) = q.patch_noise else {
         return;
     };
-    let t = q.climate.temperature;
-    let a = ((t - PATCH_START) / (PATCH_FULL - PATCH_START)).clamp(0.0, 1.0);
-    let threshold = PATCH_THRESHOLD_START + (PATCH_THRESHOLD_FULL - PATCH_THRESHOLD_START) * a;
-    let patch = smoothstep(threshold - PATCH_EDGE, threshold + PATCH_EDGE, noise);
+    let p = &q.rules.dirt_patches;
+    let start = q.rules.snow_edge.threshold + p.start_above_snow;
+    let full = q.rules.snow_edge.threshold + p.full_above_snow;
+    // Seuil du bruit : au-dessus du bruit partout au début (aucune plaque), sous le
+    // bruit partout à la fin (terre pleine). Bruit ∈ [-1, 1], bord adouci compris.
+    let (threshold_start, threshold_full) = (1.0 + p.edge, -1.0 - p.edge);
+
+    let a = ((q.climate.temperature - start) / (full - start)).clamp(0.0, 1.0);
+    let threshold = threshold_start + (threshold_full - threshold_start) * a;
+    let patch = smoothstep(threshold - p.edge, threshold + p.edge, noise);
     mix.transfer(q.ids.grass, q.ids.dirt, patch);
 }
 
 /// Grandes pentes → roche à nu, sauf sur les replats locaux (corniches) où la
 /// couverture tient. Les petits ressauts raides sur terrain doux restent couverts.
-/// En zone enneigée, les seuils glissent vers `SNOW_ROCK_SLOPE_*` (la neige tient
-/// plus raide). Ne concerne que la surface exposée.
+/// En zone enneigée, les seuils glissent vers `snow_rock_*` (la neige tient plus
+/// raide). En zone aride, la roche est du grès, sauf sur les massifs que le bruit de
+/// géologie garde en roche normale. Ne concerne que la surface exposée.
+///
+/// Seuils comparés en cos(pente) : `normal.z` et `macro_up` valent tous deux cos θ.
 pub(super) fn slope_rock(q: &MaterialQuery, mix: &mut MaterialMix) {
     let (Some(n), Some(macro_up)) = (q.normal, q.macro_up) else {
         return;
     };
+    let s = &q.rules.slope;
 
     // Part de neige posée par la couche de base : suit la limite de neige (jitter
     // et bande de transition compris), sans constante d'altitude en plus.
     let snow = mix.weight(q.ids.snow);
     let lerp = |a: f64, b: f64| a + (b - a) * snow;
-    let full = lerp(ROCK_SLOPE_FULL, SNOW_ROCK_SLOPE_FULL);
-    let none = lerp(ROCK_SLOPE_NONE, SNOW_ROCK_SLOPE_NONE);
+    let full = lerp(s.rock_full.cos(), s.snow_rock_full.cos());
+    let none = lerp(s.rock_none.cos(), s.snow_rock_none.cos());
 
     let steep = 1.0 - smoothstep(full, none, macro_up);
-    let ledge = smoothstep(LEDGE_NONE, LEDGE_FULL, n.z as f64);
+    let ledge = smoothstep(s.ledge_none.cos(), s.ledge_full.cos(), n.z as f64);
     mix.overlay(q.ids.rock, steep * (1.0 - ledge));
+
+    let c = &q.climate;
+    let arid =
+        1.0 - above(&q.rules.sandstone_edge, c.precipitation, c.precipitation_gradient, q.jitter);
+    let o = &q.rules.outcrop;
+    let outcrop = q
+        .geology_noise
+        .map_or(0.0, |n| smoothstep(o.threshold - o.edge, o.threshold + o.edge, n));
+    mix.transfer(q.ids.rock, q.ids.sandstone, arid * (1.0 - outcrop));
 }

@@ -1,0 +1,115 @@
+// Règles globales des matériaux (cf. `MaterialRulesConfig`) : où ils vont (placement,
+// CPU) et comment leurs teintes sont modulées (shader). Ce qu'est chaque matériau
+// (couleurs) : materials.ron.
+// Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
+//
+// Frontières climatiques (*_edge) : un écart Δ de la grandeur déplace
+// la frontière de Δ / |∇| au sol. En plaine le climat varie à peine (T ~3·10⁻⁴ °C/voxel) :
+// un jitter en valeur y ferait une mosaïque. D'où, pour la transition comme pour le
+// jitter, une valeur dans l'unité de la grandeur ET un plafond en voxels au sol ; le
+// plus petit des deux l'emporte.
+(
+    // Couches sous la surface (voxels de profondeur) : couverture, terre, puis roche.
+    strata: (
+        surface_depth: 1.0,
+        dirt_depth: 4.0,
+    ),
+
+    // Neige, en température de l'air (°C). Moyenne annuelle : la neige persistante
+    // demande T ≲ 0 °C. Transition ~40 voxels d'altitude, jitter ~60.
+    snow_edge: (
+        threshold: -1.0,
+        blend: 1.0,
+        blend_max_distance: 40.0,
+        jitter: 1.5,
+        jitter_max_distance: 80.0, // ~ longueur d'onde du bruit (100) : pas d'îlots
+    ),
+
+    // Moins de neige là où il pleut peu : la limite est testée sur T + warming × sécheresse
+    // (sécheresse = 1 sous `dry`, 0 au-dessus de `wet`). La limite se déplace au lieu de
+    // se diluer : +warming / lapse_rate voxels en montagne (4 / 0,025 = 160).
+    snow_dryness: (
+        dry: 0.05,
+        wet: 0.30,
+        warming: 2.5, // °C
+    ),
+
+    // Sable des déserts, en précipitations normalisées (terres : 18 % sous 0,05, 24 %
+    // sous 0,10, médiane ~0,32). Plein sous ~0,04, absent au-dessus de ~0,10.
+    desert_edge: (
+        threshold: 0.07,
+        blend: 0.06,
+        blend_max_distance: 200.0,
+        jitter: 0.03,
+        jitter_max_distance: 150.0,
+    ),
+
+    // Grès à la place de la roche, en précipitations. Plein sous ~0,12, absent
+    // au-dessus de ~0,25 : plus large que le sable, les reliefs des steppes sèches sont
+    // déjà en grès.
+    sandstone_edge: (
+        threshold: 0.185,
+        blend: 0.13,
+        blend_max_distance: 300.0,
+        jitter: 0.04,
+        jitter_max_distance: 150.0,
+    ),
+
+    // Massifs restés en roche normale en zone aride (bruit de géologie, λ ~2 000 voxels).
+    outcrop: (
+        threshold: 0.15, // plus haut = moins de roche normale (~1/4 à 1/3 aujourd'hui)
+        edge: 0.005,     // largeur au sol ≈ 2 · edge / noise.geology.frequency ≈ 20 voxels
+    ),
+
+    // Littoral et fonds marins (voxels).
+    shore: (
+        beach_width: 200.0,   // distance à la côte : sable en deçà
+        beach_blend: 10.0,
+        beach_jitter: 30.0,
+        mud_depth: 120.0,    // sous la mer : sable au-dessus (plateau), vase au-delà
+        mud_blend: 30.0,
+        seabed_jitter: 15.0,
+    ),
+
+    // Plaques de terre dans l'herbe, en °C au-dessus de la limite des neiges.
+    dirt_patches: (
+        start_above_snow: 7.5, // premières plaques (rares, petites)
+        full_above_snow: 1.0,  // toute l'herbe est devenue terre
+        edge: 0.12,            // bord adouci d'une plaque (unités de bruit)
+    ),
+
+    // Pentes, en degrés. Macro = moyenne sur macro_radius, plus douce que la pente
+    // locale (normale) : seuils plus bas.
+    slope: (
+        macro_radius: 12.0,   // voxels ; les reliefs plus étroits que 2 × rayon n'y comptent pas
+        rock_full: 47.0,      // macro : roche pleine au-delà
+        rock_none: 35.0,      // macro : aucune roche en deçà
+        ledge_full: 15.0,     // locale : replat plein (la couverture reprend) en deçà
+        ledge_none: 25.0,     // locale : plus de replat au-delà
+        snow_rock_full: 60.0, // en zone enneigée (la neige tient plus raide)
+        snow_rock_none: 45.0,
+    ),
+
+    // Bruits des règles : une octave de forme (longueur d'onde ≈ 1 / frequency voxels)
+    // + une octave de détail (frequency × detail_ratio, NON entier sinon les octaves
+    // s'alignent ; amplitude detail_amp, forte → îlots le long des bords).
+    // Les motifs doivent rester grands devant l'espacement des sommets au loin (8–32
+    // voxels), sinon ils apparaissent et disparaissent aux changements de LOD.
+    noise: (
+        // Ondulation de toutes les frontières (neige, désert, grès, plages, fonds).
+        // Non normalisé (~±1,35) : les amplitudes *_jitter ci-dessus en tiennent compte.
+        jitter: (frequency: 0.01, detail_ratio: 4.1, detail_amp: 0.35),
+        // Plaques de terre, normalisé dans [-1, 1].
+        dirt_patches: (frequency: 0.001, detail_ratio: 2.7, detail_amp: 0.25),
+        // Géologie : massifs de roche normale en zone aride, normalisé dans [-1, 1].
+        geology: (frequency: 0.0005, detail_ratio: 3.1, detail_amp: 0.2),
+    ),
+
+    // Humidité côtière ajoutée aux précipitations pour les teintes (humidity_tint de
+    // materials.ron) : plages beiges même en zone désertique, frange côtière plus
+    // verte. Rendu seulement : ne change pas le placement des matériaux.
+    coast_moisture: (
+        amount: 0.3,   // ajout sur la côte (pluie normalisée)
+        range: 200.0,  // voxels vers les terres où l'ajout s'annule
+    ),
+)

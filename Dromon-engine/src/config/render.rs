@@ -14,6 +14,27 @@ pub struct RenderConfig {
     pub shadow: ShadowSettings,
     pub terrain: TerrainRenderParams,
     pub water: WaterRenderParams,
+    pub tonemap: TonemapParams,
+}
+
+/// Tone mapping (Khronos PBR Neutral) appliqué en fin de chaque fragment shader
+/// (`lib/tonemap.slang`) : compresse les hautes lumières au lieu de les couper à 1.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TonemapParams {
+    /// `false` : coupure à 1 comme avant (comparaison).
+    pub enabled: bool,
+    /// Multiplicateur de la luminance avant la courbe (1 = neutre).
+    pub exposure: f32,
+}
+
+impl Default for TonemapParams {
+    fn default() -> Self {
+        TonemapParams {
+            enabled: true,
+            exposure: 1.0,
+        }
+    }
 }
 
 impl ConfigFile for RenderConfig {
@@ -34,6 +55,8 @@ impl ConfigFile for RenderConfig {
             c.start_pitch_deg.abs() <= MAX_PITCH_DEG,
             "camera.start_pitch_deg doit être dans [-{MAX_PITCH_DEG}, {MAX_PITCH_DEG}]"
         );
+
+        ensure!(self.tonemap.exposure > 0.0, "tonemap.exposure doit être > 0");
 
         let s = &self.shadow;
         ensure!(s.map_resolution > 0, "shadow.map_resolution doit être > 0");
