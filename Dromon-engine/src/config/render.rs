@@ -10,6 +10,7 @@ use super::ConfigFile;
 #[serde(default, deny_unknown_fields)]
 pub struct RenderConfig {
     pub present_mode: PresentMode,
+    pub display_mode: DisplayMode,
     pub camera: CameraParams,
     pub shadow: ShadowSettings,
     pub terrain: TerrainRenderParams,
@@ -229,6 +230,18 @@ pub enum PresentMode {
     Mailbox,
     /// Sans vsync : FPS illimités, tearing. Utile pour mesurer les performances.
     Immediate,
+}
+
+/// Affichage des meshes (objets et terrain) : debug du maillage.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DisplayMode {
+    /// Triangles pleins (rendu normal).
+    #[default]
+    Fill,
+    /// Arêtes seules (fil de fer).
+    Edges,
+    /// Sommets seuls.
+    Vertices,
 }
 
 /// Caméra libre : pose de départ, projection et contrôles.

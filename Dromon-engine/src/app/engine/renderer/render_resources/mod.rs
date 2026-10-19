@@ -11,6 +11,7 @@ mod world_maps;
 use crate::app::{
     engine::{
         renderer::{
+            buffer::Buffer,
             descriptors::DescriptorHandler,
             render_resources::{
                 object_mesh_handler::ObjectMeshHandler, texture_handler::TextureHandler,
@@ -34,6 +35,8 @@ pub use world_maps::WorldMaps;
 pub struct RenderResourceManager {
     logger: Arc<Logger>,
     pub textures: HashMap<String, Arc<Texture>>,
+    /// Textures en attente d'envoi et leur staging, libéré par `release_texture_staging`.
+    pending_textures: Vec<(Arc<Texture>, Buffer)>,
     pub meshes: HashMap<String, Arc<ObjectMesh>>,
     pub texture_handler: TextureHandler,
     pub mesh_handler: ObjectMeshHandler,
@@ -48,6 +51,7 @@ impl RenderResourceManager {
         Ok(RenderResourceManager {
             logger: logger.clone(),
             textures: HashMap::new(),
+            pending_textures: Vec::new(),
             meshes: HashMap::new(),
             texture_handler: TextureHandler::new(
                 context.clone(),
@@ -64,8 +68,10 @@ impl RenderResourceManager {
                 .warn(&format!("texture {} already exists", name));
             return Ok(());
         }
-        let texture = self.texture_handler.create_object_texture(&path)?;
-        self.textures.insert(name, Arc::new(texture));
+        let (texture, staging) = self.texture_handler.create_object_texture(&path)?;
+        let texture = Arc::new(texture);
+        self.pending_textures.push((texture.clone(), staging));
+        self.textures.insert(name, texture);
         Ok(())
     }
 
@@ -80,13 +86,20 @@ impl RenderResourceManager {
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
-        for texture in self.textures.values() {
-            self.texture_handler.initialize(texture, command_buffer)?;
+        for (texture, staging) in &self.pending_textures {
+            self.texture_handler
+                .initialize(texture, staging, command_buffer)?;
         }
         for mesh in self.meshes.values() {
             self.mesh_handler.initialize(mesh, command_buffer);
         }
         Ok(())
+    }
+
+    /// Libère les stagings des textures. Seulement une fois la passe de transfert
+    /// **exécutée** (après l'attente de la queue).
+    pub fn release_texture_staging(&mut self) {
+        self.pending_textures.clear();
     }
 
     pub fn get_texture(&self, name: &str) -> Option<Arc<Texture>> {

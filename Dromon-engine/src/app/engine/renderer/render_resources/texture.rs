@@ -2,15 +2,16 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::app::engine::{renderer::buffer::Buffer, rendering_context::RenderingContext};
+use crate::app::engine::rendering_context::RenderingContext;
 
+/// Image device-local et sa vue. Le staging qui la remplit n'en fait pas partie : il
+/// est rendu à part par `TextureHandler` et libéré après la passe de transfert.
 pub struct Texture {
     context: Arc<RenderingContext>,
     pub image_width: u32,
     pub image_height: u32,
     pub mip_levels: u32,
     pub format: vk::Format,
-    pub staging_buffer: Buffer,
     pub texture_image: vk::Image,
     pub texture_image_memory: vk::DeviceMemory,
     pub texture_image_view: vk::ImageView,
@@ -26,7 +27,6 @@ impl Texture {
         image_height: u32,
         mip_levels: u32,
         format: vk::Format,
-        staging_buffer: Buffer,
         texture_image: vk::Image,
         texture_image_memory: vk::DeviceMemory,
         texture_image_view: vk::ImageView,
@@ -38,7 +38,6 @@ impl Texture {
             image_height,
             mip_levels,
             format,
-            staging_buffer,
             texture_image,
             texture_image_memory,
             texture_image_view,

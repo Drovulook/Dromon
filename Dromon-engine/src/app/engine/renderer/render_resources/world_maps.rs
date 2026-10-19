@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use ash::vk;
 use glam::Vec4;
 use std::sync::Arc;
@@ -27,6 +27,9 @@ pub struct WorldMaps {
     /// Binding 2 : chunks installés (`LoadedMask` du terrain), `R8_UNORM`, adressage
     /// torique. **Réécrit en cours de jeu**, contrairement aux autres.
     loaded_chunks: Texture,
+    /// Stagings de l'envoi initial, dans l'ordre des bindings ; vidé par
+    /// `release_texture_staging`.
+    startup_staging: Vec<Buffer>,
     /// Staging du masque, en anneau : chacun est réutilisé `frames_in_flight + 1` envois
     /// plus tard (un envoi par frame au plus), donc après la fin de toute frame qui a pu
     /// le lire.
@@ -53,7 +56,7 @@ impl WorldMaps {
         let n = shape.n as u32;
         // Grille rangée `[j·n + i]`, i selon X : c'est déjà l'ordre ligne par ligne
         // d'une texture (u selon X, v selon Y).
-        let coast_distance = texture_handler.create_map_texture(
+        let (coast_distance, coast_staging) = texture_handler.create_map_texture(
             n,
             n,
             vk::Format::R32_SFLOAT,
@@ -70,7 +73,7 @@ impl WorldMaps {
             .zip(map.sst.values())
             .map(|((&t, &p), &sst)| [t, p, sst, 0.0])
             .collect();
-        let climate = texture_handler.create_map_texture(
+        let (climate, climate_staging) = texture_handler.create_map_texture(
             climate_shape.n as u32,
             climate_shape.n as u32,
             vk::Format::R32G32B32A32_SFLOAT,
@@ -79,7 +82,7 @@ impl WorldMaps {
 
         // Aucun chunk installé au démarrage.
         let mask_bytes = (loaded_mask_size * loaded_mask_size) as usize;
-        let loaded_chunks = texture_handler.create_map_texture(
+        let (loaded_chunks, loaded_chunks_staging) = texture_handler.create_map_texture(
             loaded_mask_size,
             loaded_mask_size,
             vk::Format::R8_UNORM,
@@ -122,6 +125,7 @@ impl WorldMaps {
             coast_distance,
             climate,
             loaded_chunks,
+            startup_staging: vec![coast_staging, climate_staging, loaded_chunks_staging],
             loaded_staging,
             next_staging: 0,
             sampler,
@@ -152,9 +156,21 @@ impl WorldMaps {
         texture_handler: &TextureHandler,
         command_buffer: &vk::CommandBuffer,
     ) -> Result<()> {
-        texture_handler.initialize(&self.coast_distance, command_buffer)?;
-        texture_handler.initialize(&self.climate, command_buffer)?;
-        texture_handler.initialize(&self.loaded_chunks, command_buffer)
+        ensure!(
+            !self.startup_staging.is_empty(),
+            "cartes du monde déjà envoyées : staging libéré"
+        );
+        let textures = [&self.coast_distance, &self.climate, &self.loaded_chunks];
+        for (texture, staging) in textures.into_iter().zip(&self.startup_staging) {
+            texture_handler.initialize(texture, staging, command_buffer)?;
+        }
+        Ok(())
+    }
+
+    /// Libère les stagings de l'envoi initial. Seulement une fois la passe de transfert
+    /// **exécutée** (après l'attente de la queue).
+    pub fn release_texture_staging(&mut self) {
+        self.startup_staging.clear();
     }
 
     /// Remplace le masque des chunks installés par `texels`. À enregistrer en tête de

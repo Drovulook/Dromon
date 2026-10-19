@@ -6,6 +6,10 @@
     // Repli sur Fifo si le mode n'est pas supporté.
     present_mode: Mailbox,
 
+    // Affichage des meshes (objets et terrain) : Fill (triangles pleins), Edges (arêtes
+    // seules, fil de fer) ou Vertices (sommets seuls, 1 pixel). Lu au démarrage.
+    display_mode: Fill,
+
     camera: (
         // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
         // (world_macro.ron) : on démarre alors au-dessus des plus hauts sommets.

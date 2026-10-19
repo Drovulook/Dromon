@@ -7,7 +7,7 @@ use ash::vk;
 use std::sync::Arc;
 
 impl Renderer {
-    pub(super) fn initialize(context: Arc<RenderingContext>, world: &World) -> Result<()> {
+    pub(super) fn initialize(context: Arc<RenderingContext>, world: &mut World) -> Result<()> {
         //create transfer command pool and buffer
         let transfer_command_pool = unsafe {
             context.device.create_command_pool(
@@ -51,6 +51,8 @@ impl Renderer {
             )
         }?;
         unsafe { context.device.queue_wait_idle(graphics_queue) }?;
+        // Copies exécutées : les stagings ne servent plus.
+        world.release_texture_staging();
 
         // cleanup
         unsafe {

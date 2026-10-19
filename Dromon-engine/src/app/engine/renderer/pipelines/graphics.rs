@@ -13,6 +13,7 @@ pub(crate) fn create_graphics_pipeline(
     color_format: vk::Format,
     depth_format: vk::Format,
     msaa_samples: vk::SampleCountFlags,
+    polygon_mode: vk::PolygonMode,
     pipeline_cache: vk::PipelineCache,
 ) -> Result<vk::Pipeline> {
     let entry_point = CStr::from_bytes_with_nul(b"main\0")?;
@@ -58,7 +59,7 @@ pub(crate) fn create_graphics_pipeline(
                     )
                     .rasterization_state(
                         &vk::PipelineRasterizationStateCreateInfo::default()
-                            .polygon_mode(vk::PolygonMode::FILL)
+                            .polygon_mode(polygon_mode)
                             .cull_mode(vk::CullModeFlags::BACK)
                             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
                             .depth_clamp_enable(false)

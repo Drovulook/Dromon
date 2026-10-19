@@ -27,7 +27,7 @@ pub use material_rules::{
 };
 pub use materials::{HumidityTint, MaterialDef, MaterialsConfig};
 pub use render::{
-    CameraParams, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
+    CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
     TerrainRenderParams, TonemapParams, WaterRenderParams,
 };
 pub use world_gen::{

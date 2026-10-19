@@ -29,6 +29,7 @@ impl ObjectRenderSystem {
         msaa_samples: vk::SampleCountFlags,
         extent: vk::Extent2D,
         shadow_map_format: vk::Format,
+        polygon_mode: vk::PolygonMode,
     ) -> Result<Self> {
         unsafe {
             let vertex_shader = pipelines::load_shader_module(&context.device,"object_vert.spv")?;
@@ -67,6 +68,7 @@ impl ObjectRenderSystem {
                 color_format,
                 depth_format,
                 msaa_samples,
+                polygon_mode,
                 vk::PipelineCache::default(),
             )?;
 

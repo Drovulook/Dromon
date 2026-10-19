@@ -250,7 +250,9 @@ impl RenderingContext {
                     .queue_create_infos(&queue_create_infos)
                     .enabled_features(
                         &vk::PhysicalDeviceFeatures::default()
-                            .sampler_anisotropy(true),
+                            .sampler_anisotropy(true)
+                            // PolygonMode::LINE / POINT (vue fil de fer du terrain).
+                            .fill_mode_non_solid(true),
                     )
                     .enabled_extension_names(&[ash::khr::swapchain::NAME.as_ptr()])
                     .push_next(

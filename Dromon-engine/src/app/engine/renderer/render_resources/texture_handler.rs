@@ -59,8 +59,9 @@ impl TextureHandler {
     }
 
     /// Texture d'objet : image couleur lue depuis un fichier, en sRGB, avec mipmaps et
-    /// son propre descriptor set (set 1).
-    pub fn create_object_texture(&self, path: &str) -> Result<Texture> {
+    /// son propre descriptor set (set 1). Rend aussi son staging (cf.
+    /// `create_texture_from_bytes`).
+    pub fn create_object_texture(&self, path: &str) -> Result<(Texture, Buffer)> {
         let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let img = ImageReader::open(full_path)?.decode()?.to_rgba8();
@@ -75,7 +76,7 @@ impl TextureHandler {
         ));
 
         let mip_levels = ((image_width.max(image_height) as f32).log2().floor() as u32) + 1;
-        let mut texture = self.create_texture_from_bytes(
+        let (mut texture, staging) = self.create_texture_from_bytes(
             image_width,
             image_height,
             vk::Format::R8G8B8A8_SRGB,
@@ -88,7 +89,7 @@ impl TextureHandler {
             &texture.texture_image_view,
             &self.object_texture_sampler,
         )?);
-        Ok(texture)
+        Ok((texture, staging))
     }
 
     /// Texture de **données** (carte du monde) : `bytes` contient les texels rangés
@@ -101,12 +102,13 @@ impl TextureHandler {
         height: u32,
         format: vk::Format,
         bytes: &[u8],
-    ) -> Result<Texture> {
+    ) -> Result<(Texture, Buffer)> {
         self.create_texture_from_bytes(width, height, format, 1, bytes)
     }
 
-    /// Staging rempli + image device-local et sa vue ; la copie de l'un vers l'autre
-    /// reste à enregistrer (`initialize`).
+    /// Image device-local et sa vue + staging rempli ; la copie de l'un vers l'autre
+    /// reste à enregistrer (`initialize`). Le staging est rendu à part : l'appelant le
+    /// garde jusqu'à la **fin d'exécution** de la copie, puis le libère.
     fn create_texture_from_bytes(
         &self,
         width: u32,
@@ -114,7 +116,7 @@ impl TextureHandler {
         format: vk::Format,
         mip_levels: u32,
         bytes: &[u8],
-    ) -> Result<Texture> {
+    ) -> Result<(Texture, Buffer)> {
         // staging buffer
         let staging_buffer = Buffer::new(
             self.context.clone(),
@@ -144,23 +146,29 @@ impl TextureHandler {
             mip_levels,
         )?;
 
-        Ok(Texture::new(
+        let texture = Texture::new(
             self.context.clone(),
             width,
             height,
             mip_levels,
             format,
-            staging_buffer,
             texture_image,
             texture_image_memory,
             texture_image_view,
             None,
-        ))
+        );
+        Ok((texture, staging_buffer))
     }
 
-    // put the image from the staging buffer into the
-    // image
-    pub fn initialize(&self, texture: &Texture, command_buffer: &vk::CommandBuffer) -> Result<()> {
+    /// Enregistre la copie `staging` → `texture` (+ mipmaps et passage en lecture).
+    /// Seulement **enregistrée** : `staging` doit vivre jusqu'à la fin d'exécution du
+    /// command buffer.
+    pub fn initialize(
+        &self,
+        texture: &Texture,
+        staging: &Buffer,
+        command_buffer: &vk::CommandBuffer,
+    ) -> Result<()> {
         // L'image est créée en UNDEFINED ; la copie exige TRANSFER_DST_OPTIMAL.
         self.context.transition_image_layout(
             *command_buffer,
@@ -198,7 +206,7 @@ impl TextureHandler {
         unsafe {
             self.context.device.cmd_copy_buffer_to_image(
                 *command_buffer,
-                texture.staging_buffer.buffer,
+                staging.buffer,
                 texture.texture_image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[region],

@@ -8,12 +8,27 @@ use anyhow::{Result, ensure};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use super::ConfigFile;
 
 /// IDs disponibles : `u16` (cf. `Voxel`), 0 réservé à l'air, le dernier au matériau
 /// de debug.
 const MAX_MATERIALS: usize = u16::MAX as usize - 1;
+
+/// Textures du terrain : un sous-dossier par texture, aux cartes nommées
+/// [`TEXTURE_COLOR`], [`TEXTURE_HEIGHT`]…
+pub const TERRAIN_TEXTURE_DIR: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/res/textures/terrain_textures");
+/// Albédo, sRGB.
+pub const TEXTURE_COLOR: &str = "color.png";
+/// Hauteur du relief (blanc = haut), pour le mélange par hauteur.
+pub const TEXTURE_HEIGHT: &str = "height.png";
+
+/// Chemin de la carte `file` de la texture `texture`.
+pub fn terrain_texture_path(texture: &str, file: &str) -> PathBuf {
+    Path::new(TERRAIN_TEXTURE_DIR).join(texture).join(file)
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -34,6 +49,11 @@ pub struct MaterialDef {
     /// Teinte selon les précipitations locales (herbe : verte → paille). `None` :
     /// couleur fixe.
     pub humidity_tint: Option<HumidityTint>,
+    /// Texture : sous-dossier de [`TERRAIN_TEXTURE_DIR`], partageable entre matériaux.
+    /// `None` : couleur unie.
+    pub texture: Option<String>,
+    /// Côté d'une répétition de la texture, en unités monde (voxels).
+    pub texture_size: f32,
 }
 
 impl Default for MaterialDef {
@@ -43,6 +63,8 @@ impl Default for MaterialDef {
             // Magenta : un albédo oublié saute aux yeux.
             albedo: Vec3::new(1.0, 0.0, 1.0),
             humidity_tint: None,
+            texture: None,
+            texture_size: 4.0,
         }
     }
 }
@@ -84,6 +106,27 @@ impl MaterialsConfig {
     pub fn debug_id(&self) -> u16 {
         (self.materials.len() + 1) as u16
     }
+
+    /// Textures distinctes, dans l'ordre de première apparition : la couche `i` du
+    /// texture array est `textures()[i]`.
+    pub fn textures(&self) -> Vec<&str> {
+        let mut textures = Vec::new();
+        for t in self.materials.iter().filter_map(|m| m.texture.as_deref()) {
+            if !textures.contains(&t) {
+                textures.push(t);
+            }
+        }
+        textures
+    }
+
+    /// Couche du texture array de `def`, `None` s'il n'est pas texturé.
+    pub fn texture_layer(&self, def: &MaterialDef) -> Option<u32> {
+        let texture = def.texture.as_deref()?;
+        self.textures()
+            .iter()
+            .position(|&t| t == texture)
+            .map(|i| i as u32)
+    }
 }
 
 impl ConfigFile for MaterialsConfig {
@@ -113,6 +156,13 @@ impl ConfigFile for MaterialsConfig {
                     "{} : il faut humidity_tint.dry < humidity_tint.wet",
                     m.name
                 );
+            }
+            ensure!(m.texture_size > 0.0, "{} : texture_size doit être > 0", m.name);
+            if let Some(t) = &m.texture {
+                for file in [TEXTURE_COLOR, TEXTURE_HEIGHT] {
+                    let path = terrain_texture_path(t, file);
+                    ensure!(path.is_file(), "{} : {} introuvable", m.name, path.display());
+                }
             }
         }
         Ok(())

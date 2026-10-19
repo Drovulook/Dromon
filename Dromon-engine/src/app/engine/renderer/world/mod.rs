@@ -142,6 +142,14 @@ impl World {
         self.rrm.initialize(command_buffer)
     }
 
+    /// Libère les stagings de `initialize`, une fois la passe de transfert exécutée.
+    pub fn release_texture_staging(&mut self) {
+        if let Some(world_maps) = self.world_maps.as_mut() {
+            world_maps.release_texture_staging();
+        }
+        self.rrm.release_texture_staging();
+    }
+
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {
         profile!();
         self.game_clock.advance(timer.delta_secs() as f64);

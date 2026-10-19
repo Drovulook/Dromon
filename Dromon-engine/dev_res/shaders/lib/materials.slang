@@ -7,6 +7,7 @@ struct Material {
   float4 albedo;    // rgb = albédo linéaire (humide si teinté)
   float4 dryAlbedo; // rgb = albédo en zone sèche (= albedo si non teinté)
   float4 humidity;  // x, y = précipitations du fondu sec → humide
+  float4 textureParams; // x = couche du texture array (−1 : aucune), y = 1 / taille d'une répétition
 };
 
 [[vk::binding(0, 4)]]

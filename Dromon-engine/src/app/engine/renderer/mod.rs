@@ -25,7 +25,7 @@ use crate::app::engine::renderer::world::World;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
-use crate::config::EngineConfig;
+use crate::config::{DisplayMode, EngineConfig};
 use crate::profile;
 use crate::profiling::render::GpuProfiler;
 use crate::{Scene, app::engine::renderer::render_systems::ObjectRenderSystem};
@@ -123,6 +123,14 @@ impl Renderer {
                 shadow_map.sampler,
             )?);
 
+            // Figé dans les pipelines : changer de mode = relancer. Lu avant que
+            // `config` parte dans `World`.
+            let polygon_mode = match config.render.display_mode {
+                DisplayMode::Fill => vk::PolygonMode::FILL,
+                DisplayMode::Edges => vk::PolygonMode::LINE,
+                DisplayMode::Vertices => vk::PolygonMode::POINT,
+            };
+
             let mut world = World::new(
                 logger.clone(),
                 context.clone(),
@@ -166,6 +174,7 @@ impl Renderer {
                 swapchain.msaa_samples,
                 swapchain.extent,
                 shadow_map.format,
+                polygon_mode,
             )?;
 
             let terrain_render_sytem = TerrainRenderSystem::new(
@@ -176,6 +185,7 @@ impl Renderer {
                 swapchain.msaa_samples,
                 swapchain.extent,
                 shadow_map.format,
+                polygon_mode,
             )?;
 
             let sky_render_system = SkyRenderSystem::new(
@@ -194,7 +204,7 @@ impl Renderer {
                 swapchain.msaa_samples,
             )?;
 
-            Renderer::initialize(context.clone(), &world)?;
+            Renderer::initialize(context.clone(), &mut world)?;
 
             // Profiler GPU : nb de nanosecondes par tick + support des timestamps sur
             // la queue graphique (0 bit valide = non supporté).

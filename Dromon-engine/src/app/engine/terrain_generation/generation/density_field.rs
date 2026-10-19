@@ -14,6 +14,11 @@ use glam::{DVec2, IVec2, IVec3, Vec3};
 use rustc_hash::FxHashMap;
 use std::cell::Cell;
 
+/// Pas du treillis global sur lequel est calculée la pente macro aux pas fins (cf.
+/// [`DensityField::node_macro_gradient`]). Le rayon y est arrondi à un multiple de 4
+/// (`lattice_macro_radius`) : les colonnes lues à ±r retombent sur le treillis.
+const MACRO_LATTICE: i32 = 4;
+
 /// Vue échantillonnable du champ 3D sur la **région d'un chunk** (plus une marge
 /// « apron » pour les normales). Construite le temps d'un maillage.
 ///
@@ -176,12 +181,41 @@ impl<'a> DensityField<'a> {
         ga.lerp(gb, t as f64)
     }
 
+    /// Pente macro au nœud `(wx, wy)` d'une grille de pas `scale`.
+    ///
+    /// Aux pas fins (< [`MACRO_LATTICE`]), interpolée bilinéairement entre les nœuds du
+    /// treillis global de pas `MACRO_LATTICE`. Calculée à chaque nœud, à ±12 voxels, elle
+    /// lisait toute la bande d'apron autour du chunk : 2 730 colonnes de fBm sur 7 345 à
+    /// LOD 0 (21 % du chunk), pour une pente lissée sur 24 voxels de toute façon. Sur le
+    /// treillis, ces colonnes tombent toutes sur la grille de pas 4 (~16× moins).
+    ///
+    /// Treillis **global** : deux chunks voisins lisent la même pente sur leur bord commun
+    /// (matériaux continus). Aux pas ≥ 4, les nœuds y sont déjà : calcul direct, valeurs
+    /// identiques à celles qu'interpole un chunk plus fin.
+    fn node_macro_gradient(&self, wx: i32, wy: i32, scale: i32) -> DVec2 {
+        if scale >= MACRO_LATTICE {
+            return self.lattice_macro_gradient(wx, wy, scale);
+        }
+        let p = MACRO_LATTICE;
+        let (x0, y0) = (wx.div_euclid(p) * p, wy.div_euclid(p) * p);
+        let tx = (wx - x0) as f64 / p as f64;
+        let ty = (wy - y0) as f64 / p as f64;
+        // Nœud suivant lu seulement s'il pèse : sur le bord haut du chunk (x = 64), il
+        // tomberait hors de l'apron.
+        let x1 = if tx > 0.0 { x0 + p } else { x0 };
+        let y1 = if ty > 0.0 { y0 + p } else { y0 };
+        let g = |x: i32, y: i32| self.lattice_macro_gradient(x, y, p);
+        let g0 = g(x0, y0).lerp(g(x1, y0), tx);
+        let g1 = g(x0, y1).lerp(g(x1, y1), tx);
+        g0.lerp(g1, ty)
+    }
+
     /// Gradient `∇h` **moyen** du relief au nœud `(wx, wy)`, par différences centrées
     /// d'écart `2r` ([`DensityField::lattice_macro_radius`]). Une différence de hauteurs
     /// sur `[x−r, x+r]` vaut la moyenne de la pente locale sur ce segment : les bosses
     /// plus étroites que `2r` s'annulent, seules les grandes pentes restent. Lue dans la
     /// grille mémoïsée, pas au fBm.
-    fn node_macro_gradient(&self, wx: i32, wy: i32, scale: i32) -> DVec2 {
+    fn lattice_macro_gradient(&self, wx: i32, wy: i32, scale: i32) -> DVec2 {
         let r = self.lattice_macro_radius(scale);
         let h = |x: i32, y: i32| self.relief(x, y) as f64;
         let span = (2 * r) as f64;

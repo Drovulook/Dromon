@@ -36,6 +36,7 @@ impl TerrainRenderSystem {
         msaa_samples: vk::SampleCountFlags,
         extent: vk::Extent2D,
         shadow_map_format: vk::Format,
+        polygon_mode: vk::PolygonMode,
     ) -> Result<Self> {
         unsafe {
             let vertex_shader = pipelines::load_shader_module(&context.device,"terrain_vert.spv")?;
@@ -77,6 +78,7 @@ impl TerrainRenderSystem {
                 color_format,
                 depth_format,
                 msaa_samples,
+                polygon_mode,
                 vk::PipelineCache::default(),
             )?;
 
