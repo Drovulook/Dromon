@@ -311,7 +311,7 @@ impl Renderer {
             // Meshes de terrain installés depuis la dernière frame : leur copie
             // staging → device s'enregistre ici, hors rendering scope, suivie de sa
             // barrière. Les passes ci-dessous les dessineront dans cette même frame.
-            self.world.record_terrain_uploads(frame.command_buffer);
+            self.world.record_terrain_uploads(frame.command_buffer)?;
 
             // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
             // passe principale lisent la même `light_view_proj` depuis le set 0.

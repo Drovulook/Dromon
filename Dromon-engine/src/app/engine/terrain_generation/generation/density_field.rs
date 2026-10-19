@@ -243,6 +243,27 @@ impl<'a> DensityField<'a> {
         (self.z_min, self.z_max)
     }
 
+    /// Relief min et max aux 4 coins de la colonne de cubes MC de coin `(wx, wy)` et de
+    /// côté `step`. Hors de cet intervalle en z, la densité `relief − z` (linéaire en z)
+    /// est de même signe aux 8 coins d'un cube : pas de surface. `None` si la région porte
+    /// des édits, qui cassent ce raisonnement.
+    #[inline]
+    pub fn cube_column_relief(&self, wx: i32, wy: i32, step: i32) -> Option<(f32, f32)> {
+        if !self.edits.is_empty() {
+            return None;
+        }
+        let h = [
+            self.relief(wx, wy),
+            self.relief(wx + step, wy),
+            self.relief(wx, wy + step),
+            self.relief(wx + step, wy + step),
+        ];
+        Some((
+            h.iter().copied().fold(f32::INFINITY, f32::min),
+            h.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        ))
+    }
+
     /// Matériaux d'un sommet d'**iso-surface** de normale `normal` et de pente macro
     /// `gradient` (cf. [`DensityField::edge_macro_gradient`]) : couverture de surface
     /// selon son climat et sa pente.

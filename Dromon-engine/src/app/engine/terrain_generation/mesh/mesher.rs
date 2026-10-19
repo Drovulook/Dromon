@@ -112,7 +112,21 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 
     for lx in (0..n).step_by(step as usize) {
         for ly in (0..n).step_by(step as usize) {
-            for lz in (z_start..=z_max).step_by(step as usize) {
+            // Tranche utile de CETTE colonne de cubes, et non du chunk entier : en
+            // montagne, la tranche du chunk fait des centaines de voxels quand la surface
+            // n'en traverse que quelques-uns par colonne. Un cube de départ `z` est plein
+            // si `min − (z + step) ≥ ISO`, vide si `max − z < ISO`. Bornes entières par
+            // `floor` : sur-ensemble exact (z entier), calé sur le treillis de `z_start`.
+            let (z_lo, z_hi) =
+                match field.cube_column_relief(origin_x + lx, origin_y + ly, step) {
+                    Some((lo, hi)) => {
+                        let first = ((lo - ISO_LEVEL).floor() as i32 - step).div_euclid(step) * step;
+                        let last = (hi - ISO_LEVEL).floor() as i32;
+                        (first.max(z_start), last.min(z_max))
+                    }
+                    None => (z_start, z_max),
+                };
+            for lz in (z_lo..=z_hi).step_by(step as usize) {
                 let base = [origin_x + lx, origin_y + ly, lz];
 
                 // Densité aux 8 coins → index de cas (bit posé quand le coin est

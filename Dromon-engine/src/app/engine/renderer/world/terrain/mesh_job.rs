@@ -14,7 +14,7 @@ use crate::{
     app::engine::{
         renderer::{
             render_resources::{MeshData, TerrainMesh},
-            world::terrain::{meshes::InstalledChunks, mesh_key},
+            world::terrain::{mesh_key, meshes::InstalledChunks},
         },
         rendering_context::RenderingContext,
         terrain_generation::{LodGrid, MeshCache, TerrainSnapshot, mesh_chunk},
@@ -73,6 +73,8 @@ pub struct MeshJob {
     group_of: FxHashMap<IVec2, u32>,
     /// Par groupe : membres pas encore bâtis.
     remaining: Vec<u32>,
+    /// Prochain groupe à installer : les groupes basculent dans l'ordre de leur numéro.
+    next_install: usize,
     /// Par groupe : buffers bâtis, invisibles tant que le groupe n'est pas complet.
     staged: Vec<Vec<(IVec2, Option<TerrainMesh>)>>,
     /// Taille du plus gros groupe, pour les statistiques.
@@ -101,15 +103,50 @@ impl MeshJob {
     /// Lot de re-maillage des chunks `dirty` (triés du plus proche au plus lointain par
     /// l'appelant) contre la configuration `grid`. `installed` dit quels chunks ont un
     /// ancien mesh affiché, ce qui décide des groupes de bascule.
+    ///
+    /// Les workers traitent le lot **groupe par groupe** : d'abord ceux qui contiennent un
+    /// ancien mesh, puis les groupes d'entrants seuls ; chaque catégorie du plus proche au
+    /// plus lointain. Un groupe à ancien mesh peut contenir des entrants (la rangée qui
+    /// borde l'ancien terrain) et attend son membre le plus lent : un entrant isolé
+    /// affiché avant lui, de l'autre côté de cette rangée, l'enclaverait — une déchirure.
+    /// Cas typique : la caméra a dépassé la fenêtre, ses entrants sont les plus proches.
     pub(super) fn start(
         grid: Arc<LodGrid>,
-        dirty: Vec<IVec2>,
+        mut dirty: Vec<IVec2>,
         installed: &InstalledChunks,
         cache: &mut MeshCache,
         snapshot: TerrainSnapshot,
         budget: Duration,
     ) -> MeshJob {
-        let (group_of, sizes) = groups(&dirty, |c| installed.get(&c).is_some());
+        let has_old = |c: IVec2| installed.get(&c).is_some();
+        let (mut group_of, sizes) = groups(&dirty, has_old);
+        let mut group_has_old = vec![false; sizes.len()];
+        for &c in &dirty {
+            group_has_old[group_of[&c] as usize] |= has_old(c);
+        }
+        // Numéro de groupe = rang de son membre le plus proche (cf. `groups`). Tri stable :
+        // l'ordre par distance tient à l'intérieur de chaque groupe.
+        dirty.sort_by_key(|c| {
+            let g = group_of[c];
+            (!group_has_old[g as usize], g)
+        });
+
+        // Renumérotation dans l'ordre de traitement : `build` installe les groupes dans
+        // l'ordre de leurs numéros.
+        let mut new_id = vec![u32::MAX; sizes.len()];
+        let mut new_sizes = Vec::with_capacity(sizes.len());
+        for c in &dirty {
+            let g = group_of[c] as usize;
+            if new_id[g] == u32::MAX {
+                new_id[g] = new_sizes.len() as u32;
+                new_sizes.push(sizes[g]);
+            }
+        }
+        for g in group_of.values_mut() {
+            *g = new_id[*g as usize];
+        }
+        let sizes = new_sizes;
+
         Self::submit(grid, dirty, group_of, sizes, cache, snapshot, false, budget)
     }
 
@@ -172,6 +209,7 @@ impl MeshJob {
             built: Vec::new(),
             group_of,
             remaining: sizes,
+            next_install: 0,
             staged,
             largest_group,
             grid,
@@ -244,8 +282,13 @@ impl MeshJob {
             let g = self.group_of[&coord] as usize;
             self.staged[g].push((coord, mesh));
             self.remaining[g] -= 1;
-            if self.remaining[g] == 0 {
-                self.built.append(&mut self.staged[g]);
+            // Installation strictement dans l'ordre des groupes : ni un hit de cache (bâti
+            // dès la 1re frame) ni un worker rapide ne doit doubler un groupe précédent, sinon
+            // il s'affiche au-delà d'un trou (îlot lointain, rangée manquante enclavée).
+            while self.next_install < self.remaining.len() && self.remaining[self.next_install] == 0
+            {
+                self.built.append(&mut self.staged[self.next_install]);
+                self.next_install += 1;
             }
 
             // Test après avoir traité un élément : au moins un par frame, toujours.
@@ -311,7 +354,9 @@ impl MeshJob {
 /// Groupes de bascule de `dirty` : composantes connexes en **8-voisinage** (un coin est
 /// partagé par 4 chunks), deux chunks n'étant liés que si **l'un au moins** a un ancien
 /// mesh affiché (`has_old`). Deux entrants voisins restent indépendants : installer l'un
-/// sans l'autre laisse un trou, pas une fissure.
+/// sans l'autre laisse un trou, pas une fissure — à condition que ce trou reste en
+/// bordure du terrain affiché, ce que garantit l'ordre de traitement (cf. [`MeshJob::start`]).
+/// Corollaire : un groupe sans ancien mesh est un entrant seul.
 ///
 /// Renvoie le groupe de chaque chunk et la taille de chaque groupe. Les groupes sont
 /// numérotés dans l'ordre de `dirty` : trié par distance, les proches ont les petits
@@ -339,7 +384,9 @@ fn groups(dirty: &[IVec2], has_old: impl Fn(IVec2) -> bool) -> (FxHashMap<IVec2,
     let old: Vec<bool> = dirty.iter().map(|&c| has_old(c)).collect();
     for (i, &c) in dirty.iter().enumerate() {
         for off in HALF {
-            let Some(&j) = index.get(&(c + off)) else { continue };
+            let Some(&j) = index.get(&(c + off)) else {
+                continue;
+            };
             if old[i] || old[j] {
                 let (a, b) = (find(&mut parent, i), find(&mut parent, j));
                 parent[a] = b;

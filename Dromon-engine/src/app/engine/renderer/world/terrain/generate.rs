@@ -12,8 +12,8 @@ use crate::{
                 render_resources::{MaterialBuffer, MeshData, WorldMaps},
                 world::{
                     terrain::{
-                        Terrain, culling::VisibleSet, graveyard::Graveyard, mesh_job::MeshJob,
-                        meshes::InstalledChunks,
+                        Terrain, culling::VisibleSet, graveyard::Graveyard,
+                        loaded_mask::LoadedMask, mesh_job::MeshJob, meshes::InstalledChunks,
                     },
                     water::Water,
                 },
@@ -51,10 +51,11 @@ impl World {
 
         let world = &config.macro_.world;
         let world_radius = (world.radius_chunks as usize * CHUNK_SIZE) as f32;
-        // L'eau s'arrête là où le terrain n'est plus chargé : au-delà, elle couvrirait
-        // les terres absentes.
-        let water_distance =
-            (self.config.render.terrain.load_radius_chunks as usize * CHUNK_SIZE) as f32;
+        // Au-delà, plus aucun chunk chargé : nœuds d'eau rejetés d'office. La coupure fine
+        // suit le masque des chunks installés (`Terrain::take_loaded_mask`).
+        let params = &self.config.render.terrain;
+        let water_distance = (params.load_radius_chunks as f32 + params.unload_margin_chunks)
+            * CHUNK_SIZE as f32;
         self.water = Some(Water::new(
             self.context.clone(),
             terrain.source.clone(),
@@ -69,6 +70,8 @@ impl World {
             &self.rrm.texture_handler,
             &self.descriptor_handler,
             terrain.source.macro_map(),
+            terrain.loaded_mask_size(),
+            self.frames_in_flight,
         )?);
         self.materials = Some(MaterialBuffer::new(
             self.context.clone(),
@@ -137,6 +140,13 @@ impl Terrain {
             source,
             store,
             chunks: InstalledChunks::new(),
+            // Fenêtre : disque de rayon `portée + marge` chunks, soit au plus
+            // ⌈2·rayon⌉ + 1 chunks sur un axe.
+            loaded_mask: LoadedMask::new(
+                (2.0 * (params.load_radius_chunks as f32 + params.unload_margin_chunks)).ceil()
+                    as u32
+                    + 1,
+            ),
             streamer,
             reference_z,
             mesh_cache,

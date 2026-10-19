@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 /// Nombre de cartes du monde (bindings du set 3). ⚠ Synchronisé avec `WorldMaps` et
 /// `lib/world_maps.slang`.
-pub const WORLD_MAP_COUNT: u32 = 2;
+pub const WORLD_MAP_COUNT: u32 = 3;
 
 pub struct DescriptorHandler {
     context: Arc<RenderingContext>,

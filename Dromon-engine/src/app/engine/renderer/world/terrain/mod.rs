@@ -1,6 +1,7 @@
 pub(crate) mod culling;
 mod generate;
 mod graveyard;
+mod loaded_mask;
 mod mesh_job;
 pub(crate) mod meshes;
 
@@ -16,6 +17,7 @@ use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
 use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
+use crate::app::engine::renderer::world::terrain::loaded_mask::LoadedMask;
 use crate::app::engine::renderer::world::terrain::mesh_job::MeshJob;
 use crate::app::engine::renderer::world::terrain::meshes::InstalledChunks;
 use crate::app::engine::rendering_context::RenderingContext;
@@ -44,6 +46,8 @@ pub struct Terrain {
     /// permet de remplacer le mesh d'un chunk précis quand son LOD change (un `Vec`
     /// n'avait aucun lien avec les positions, les chunks vides décalant même les index).
     pub chunks: InstalledChunks,
+    /// Les mêmes, en masque pour les shaders de la mer.
+    loaded_mask: LoadedMask,
     /// Chunks chargés et leur LOD, suivant la caméra.
     streamer: ChunkStreamer,
     /// Altitude moyenne du relief : plan de référence de la composante « hauteur de
@@ -179,6 +183,7 @@ impl Terrain {
                     if let Some(old) = self.chunks.insert(coord, mesh) {
                         self.graveyard.bury(old);
                     }
+                    self.loaded_mask.set(coord, true);
                     self.pending_uploads.push(coord);
                 }
                 // Le chunk devient vide : vraie suppression.
@@ -193,6 +198,18 @@ impl Terrain {
         if let Some(old) = self.chunks.remove(&coord) {
             self.graveyard.bury(old);
         }
+        self.loaded_mask.set(coord, false);
+    }
+
+    /// Côté du masque des chunks installés (texels), pour créer sa texture.
+    pub(crate) fn loaded_mask_size(&self) -> u32 {
+        self.loaded_mask.size()
+    }
+
+    /// Masque des chunks installés, s'il a changé depuis le dernier appel. À envoyer
+    /// dans la frame qui dessine les meshes installés : eau et terrain apparaissent ensemble.
+    pub(crate) fn take_loaded_mask(&mut self) -> Option<&[u8]> {
+        self.loaded_mask.take_changes()
     }
 
     /// Enregistre les copies staging → device des meshes fraîchement installés.

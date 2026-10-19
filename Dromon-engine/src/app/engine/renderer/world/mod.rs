@@ -165,10 +165,18 @@ impl World {
         terrain.update(&self.camera)
     }
 
-    /// Copies staging → device des meshes de terrain fraîchement installés.
-    pub fn record_terrain_uploads(&mut self, command_buffer: vk::CommandBuffer) {
-        if let Some(terrain) = self.terrain.as_mut() {
-            terrain.record_uploads(command_buffer);
+    /// Copies staging → device des meshes de terrain fraîchement installés, et du masque
+    /// des chunks installés s'il a changé.
+    pub fn record_terrain_uploads(&mut self, command_buffer: vk::CommandBuffer) -> Result<()> {
+        let Some(terrain) = self.terrain.as_mut() else {
+            return Ok(());
+        };
+        terrain.record_uploads(command_buffer);
+        if let (Some(texels), Some(world_maps)) =
+            (terrain.take_loaded_mask(), self.world_maps.as_mut())
+        {
+            world_maps.record_loaded_chunks_upload(command_buffer, texels)?;
         }
+        Ok(())
     }
 }

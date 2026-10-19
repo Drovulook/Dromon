@@ -9,11 +9,16 @@
 float seaLevel() { return ubo.water.x; }
 
 // Vrai si la mer recouvre la verticale de `xy`. Même critère au pixel pour la surface
-// (discard) et le fond (absorption) : l'un n'est jamais teinté sans l'autre.
+// (discard) et le fond (absorption) : l'un n'est jamais teinté sans l'autre. Pas de mer
+// au-dessus d'un chunk non affiché : elle couvrirait des terres absentes.
+//
+// Le test de portée reste indispensable : le masque est torique, donc périodique. Sans
+// lui, le ciel (fond infini) peindrait la mer sur chaque copie de la fenêtre chargée.
 bool seaCovers(float2 xy) {
   if (ubo.water.w == 0.0) return false;
   if (distance(xy, ubo.cameraPosition.xy) > ubo.water.y) return false;
-  return coastDistance(xy) <= ubo.water.z;
+  if (coastDistance(xy) > ubo.water.z) return false;
+  return chunkLoaded(xy);
 }
 
 // Calculé côté CPU (`Water::update`) : le ciel le lit sans les cartes du monde.

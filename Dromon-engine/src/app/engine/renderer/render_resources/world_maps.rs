@@ -3,7 +3,9 @@ use ash::vk;
 use glam::Vec4;
 use std::sync::Arc;
 
+use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
+use crate::app::engine::renderer::image_layout_state::ImageLayoutState;
 use crate::app::engine::renderer::render_resources::texture::Texture;
 use crate::app::engine::renderer::render_resources::texture_handler::TextureHandler;
 use crate::app::engine::rendering_context::RenderingContext;
@@ -13,7 +15,7 @@ use crate::app::engine::terrain_generation::MacroMap;
 /// shaders (eau, plus tard terrain et ciel) via le set 3.
 ///
 /// Statiques : construites une fois depuis la `MacroMap`, envoyées dans la passe de
-/// transfert du démarrage.
+/// transfert du démarrage. Seule exception : le masque des chunks installés.
 pub struct WorldMaps {
     context: Arc<RenderingContext>,
     /// Binding 0 : distance signée à la côte (voxels, > 0 terre), `R32_SFLOAT`.
@@ -22,6 +24,14 @@ pub struct WorldMaps {
     /// R = température de l'air (°C), G = précipitations (normalisées), B = SST (°C),
     /// A = libre (0).
     climate: Texture,
+    /// Binding 2 : chunks installés (`LoadedMask` du terrain), `R8_UNORM`, adressage
+    /// torique. **Réécrit en cours de jeu**, contrairement aux autres.
+    loaded_chunks: Texture,
+    /// Staging du masque, en anneau : chacun est réutilisé `frames_in_flight + 1` envois
+    /// plus tard (un envoi par frame au plus), donc après la fin de toute frame qui a pu
+    /// le lire.
+    loaded_staging: Vec<Buffer>,
+    next_staging: usize,
     /// Clamp (pas de retour de l'autre côté du monde), linéaire, sans anisotropie.
     sampler: vk::Sampler,
     pub descriptor_set: vk::DescriptorSet,
@@ -36,6 +46,8 @@ impl WorldMaps {
         texture_handler: &TextureHandler,
         descriptor_handler: &DescriptorHandler,
         map: &MacroMap,
+        loaded_mask_size: u32,
+        frames_in_flight: u64,
     ) -> Result<WorldMaps> {
         let shape = map.shape();
         let n = shape.n as u32;
@@ -65,9 +77,32 @@ impl WorldMaps {
             bytemuck::cast_slice(&texels),
         )?;
 
+        // Aucun chunk installé au démarrage.
+        let mask_bytes = (loaded_mask_size * loaded_mask_size) as usize;
+        let loaded_chunks = texture_handler.create_map_texture(
+            loaded_mask_size,
+            loaded_mask_size,
+            vk::Format::R8_UNORM,
+            &vec![0u8; mask_bytes],
+        )?;
+        let loaded_staging = (0..=frames_in_flight)
+            .map(|_| {
+                Buffer::new(
+                    context.clone(),
+                    mask_bytes as vk::DeviceSize,
+                    vk::BufferUsageFlags::TRANSFER_SRC,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         let sampler = Self::create_sampler(&context)?;
         let descriptor_set = descriptor_handler.create_world_maps_descriptor_set(
-            &[coast_distance.texture_image_view, climate.texture_image_view],
+            &[
+                coast_distance.texture_image_view,
+                climate.texture_image_view,
+                loaded_chunks.texture_image_view,
+            ],
             sampler,
         )?;
 
@@ -86,6 +121,9 @@ impl WorldMaps {
             context,
             coast_distance,
             climate,
+            loaded_chunks,
+            loaded_staging,
+            next_staging: 0,
             sampler,
             descriptor_set,
             uv_transform,
@@ -115,7 +153,66 @@ impl WorldMaps {
         command_buffer: &vk::CommandBuffer,
     ) -> Result<()> {
         texture_handler.initialize(&self.coast_distance, command_buffer)?;
-        texture_handler.initialize(&self.climate, command_buffer)
+        texture_handler.initialize(&self.climate, command_buffer)?;
+        texture_handler.initialize(&self.loaded_chunks, command_buffer)
+    }
+
+    /// Remplace le masque des chunks installés par `texels`. À enregistrer en tête de
+    /// frame, **hors** de tout rendering scope, une fois par frame au plus.
+    ///
+    /// Les barrières portent sur tout ce qui précède dans la file, frames précédentes
+    /// comprises : la copie attend qu'elles aient fini de lire le masque, et les passes
+    /// de cette frame attendent la copie.
+    pub fn record_loaded_chunks_upload(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        texels: &[u8],
+    ) -> Result<()> {
+        let staging = &self.loaded_staging[self.next_staging];
+        self.next_staging = (self.next_staging + 1) % self.loaded_staging.len();
+        staging.upload(texels)?;
+
+        let image = self.loaded_chunks.texture_image;
+        let read = ImageLayoutState {
+            access_mask: vk::AccessFlags2::SHADER_SAMPLED_READ,
+            layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            stage_mask: vk::PipelineStageFlags2::VERTEX_SHADER
+                | vk::PipelineStageFlags2::FRAGMENT_SHADER,
+            queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+        };
+        let write = ImageLayoutState {
+            access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+            layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            stage_mask: vk::PipelineStageFlags2::COPY,
+            queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+        };
+        self.context
+            .transition_image_layout(command_buffer, &[(image, read, write)], 1);
+
+        let region = vk::BufferImageCopy::default()
+            .image_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1),
+            )
+            .image_extent(vk::Extent3D {
+                width: self.loaded_chunks.image_width,
+                height: self.loaded_chunks.image_height,
+                depth: 1,
+            });
+        unsafe {
+            self.context.device.cmd_copy_buffer_to_image(
+                command_buffer,
+                staging.buffer,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[region],
+            );
+        }
+
+        self.context
+            .transition_image_layout(command_buffer, &[(image, write, read)], 1);
+        Ok(())
     }
 }
 
