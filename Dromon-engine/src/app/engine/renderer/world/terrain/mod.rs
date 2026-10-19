@@ -21,7 +21,7 @@ use crate::app::engine::renderer::world::terrain::meshes::InstalledChunks;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::{
     ChunkStore, ChunkStreamer, LodFocus, LodGrid, MeshCache, MeshKey, TerrainSnapshot,
-    TerrainSource,
+    TerrainSource, chunk_distance,
 };
 use crate::app::logger::Logger;
 use crate::config::DebugConfig;
@@ -86,7 +86,8 @@ impl Terrain {
         self.advance_mesh_job()
     }
 
-    /// Réévalue le LOD et, si des chunks changent de géométrie, lance un lot.
+    /// Réévalue fenêtre et LOD : retire aussitôt les chunks sortis de la fenêtre et, si
+    /// des chunks changent de géométrie, lance un lot.
     ///
     /// **Un seul lot à la fois** : deux lots concurrents mélangeraient deux
     /// configurations LOD au moment du commit, donc rouvriraient des fissures. Tant
@@ -96,22 +97,41 @@ impl Terrain {
         if self.mesh_job.is_some() {
             return;
         }
+        let focus = LodFocus::new(camera.position, self.reference_z);
+        let Some(mut update) = self.streamer.update(focus) else {
+            return;
+        };
+
+        // Les sortants n'attendent pas le lot : ils sont à la portée de chargement, donc
+        // au loin, et leurs voisins encore affichés bordent alors du vide — un trou à
+        // l'horizon, pas une fissure. Leurs voisins sont re-maillés dans le lot.
+        for coord in update.removed {
+            self.remove(coord);
+        }
+        if update.dirty.is_empty() {
+            return;
+        }
+
         // Instantané du terrain pour ce lot : relief immuable + `Arc` des chunks édités
         // tels qu'ils sont maintenant. Le joueur peut creuser pendant le maillage sans
         // que les workers voient la modification à mi-lot — même garantie que la `grid`.
         let snapshot = TerrainSnapshot::new(&self.source, &self.store, self.debug.mesh);
-        let focus = LodFocus::new(camera.position, self.reference_z);
-        self.mesh_job = MeshJob::start(
-            &mut self.streamer,
+        // Du plus proche au plus lointain : les workers suivent cet ordre, donc les
+        // groupes proches de la caméra s'affichent en premier.
+        update
+            .dirty
+            .sort_by(|&a, &b| chunk_distance(a, focus.pos).total_cmp(&chunk_distance(b, focus.pos)));
+        self.mesh_job = Some(MeshJob::start(
+            update.grid,
+            update.dirty,
+            &self.chunks,
             &mut self.mesh_cache,
             snapshot,
-            focus,
             self.frame_budget,
-        );
+        ));
     }
 
-    /// Fait avancer le lot en vol d'une frame, et l'installe dès qu'il est complet, ou
-    /// au fil de l'eau s'il est progressif.
+    /// Fait avancer le lot en vol d'une frame et installe ses groupes complets.
     ///
     /// Les trois emprunts (`mesh_job`, `mesh_cache`, `context`) portent sur des **champs
     /// distincts** de `self` : le borrow checker les accepte simultanément, ce qu'il
@@ -123,19 +143,16 @@ impl Terrain {
         };
         job.collect();
         let complete = job.build(&mut self.mesh_cache, &self.context)?;
-        if job.is_progressive() {
-            let built = job.take_built();
-            self.install(built);
-        }
+        let built = job.take_built();
+        self.install(built);
         if !complete {
             return Ok(());
         }
-        let mut job = self
+        let job = self
             .mesh_job
             .take()
             .expect("présent : `build` vient de signaler le lot complet");
-        self.install(job.take_built());
-        if job.is_progressive() {
+        if job.is_initial() {
             self.logger.info(&format!(
                 "Génération du monde terminée : {} chunks en {:.2} s",
                 job.gathered().len(),
@@ -143,7 +160,7 @@ impl Terrain {
             ));
             log_terrain_stats(&self.logger, job.grid(), job.gathered(), self.max_lod);
         }
-        self.log_batch_stats(job.gathered().len(), job.meshed_count(), &job.mesh_report());
+        self.log_batch_stats(&job);
         self.log_gpu_usage();
         Ok(())
     }
@@ -165,12 +182,16 @@ impl Terrain {
                     self.pending_uploads.push(coord);
                 }
                 // Le chunk devient vide : vraie suppression.
-                None => {
-                    if let Some(old) = self.chunks.remove(&coord) {
-                        self.graveyard.bury(old);
-                    }
-                }
+                None => self.remove(coord),
             }
+        }
+    }
+
+    /// Retire le mesh d'un chunk ; ses buffers attendent au cimetière la fin des frames
+    /// en vol.
+    fn remove(&mut self, coord: IVec2) {
+        if let Some(old) = self.chunks.remove(&coord) {
+            self.graveyard.bury(old);
         }
     }
 
@@ -218,16 +239,23 @@ impl Terrain {
     /// donné, la réponse allant de ~0 % en exploration rectiligne à très rentable pour un
     /// joueur qui tourne autour d'une base.
     ///
+    /// Donne aussi le découpage en groupes de bascule : leur taille est la latence
+    /// d'affichage (un groupe attend son membre le plus lent).
+    ///
     /// Une ligne par lot peut noyer le reste des logs : `log_batch_stats` de `debug.ron`.
-    fn log_batch_stats(&self, batch: usize, meshed: usize, mesh_report: &str) {
+    fn log_batch_stats(&self, job: &MeshJob) {
         if !self.debug.log_batch_stats {
             return;
         }
+        let batch = job.gathered().len();
+        let meshed = job.meshed_count();
+        let (groups, largest) = job.group_stats();
         let (hits, misses) = self.mesh_cache.stats();
         let (bytes, entries) = self.mesh_cache.usage();
         self.logger.info(&format!(
-            "LOD : {batch} chunks installés ({meshed} maillés, {} repris du cache), {mesh_report} — cache {hits}/{} accès, {entries} entrées, {} Mo",
+            "LOD : {batch} chunks installés ({meshed} maillés, {} repris du cache) en {groups} groupes (max {largest}), {} — cache {hits}/{} accès, {entries} entrées, {} Mo",
             batch.saturating_sub(meshed),
+            job.mesh_report(),
             hits + misses,
             bytes / (1024 * 1024),
         ));
@@ -260,5 +288,6 @@ fn mesh_key(grid: &LodGrid, coord: IVec2) -> MeshKey {
         coord,
         lod: grid.lod(coord),
         faces: grid.faces(coord),
+        taper: grid.taper(coord),
     }
 }

@@ -17,10 +17,11 @@
 //! revenir, où les deux seuils ont réellement été franchis.
 //!
 //! ## La clé inclut les coutures
-//! `(coord, lod, faces)` et non `(coord, lod)` : la géométrie dépend aussi du
-//! rétrécissement demi-pas imposé par les faces de transition. Ressortir une maille aux
-//! mauvaises coutures rouvrirait une fissure. Un même `(coord, lod)` peut donc exister en
-//! plusieurs variantes, ce qui abaisse un peu le taux de réutilisation.
+//! `(coord, lod, faces, taper)` et non `(coord, lod)` : la géométrie dépend aussi du
+//! rétrécissement demi-pas imposé par les faces de transition, et de son atténuation aux
+//! extrémités. Ressortir une maille aux mauvaises coutures rouvrirait une fissure. Un
+//! même `(coord, lod)` peut donc exister en plusieurs variantes, ce qui abaisse un peu le
+//! taux de réutilisation.
 
 use crate::app::engine::renderer::render_resources::MeshData;
 use crate::app::engine::terrain_generation::lod::TransitionFaces;
@@ -41,6 +42,8 @@ pub struct MeshKey {
     pub coord: IVec2,
     pub lod: u8,
     pub faces: TransitionFaces,
+    /// Atténuations aux extrémités des faces à dalle (cf. `LodGrid::taper`).
+    pub taper: u8,
 }
 
 struct Entry {

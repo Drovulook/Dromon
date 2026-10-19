@@ -1,3 +1,5 @@
+#[doc(hidden)]
+pub mod bench;
 mod chunk;
 mod generation;
 mod lod;

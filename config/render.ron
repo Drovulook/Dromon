@@ -28,18 +28,18 @@
     ),
 
     terrain: (
-        load_radius_chunks: 100,     // portée de chargement autour de la caméra (~20 000 chunks)
+        load_radius_chunks: 125,     // portée de chargement autour de la caméra (~20 000 chunks)
         unload_margin_chunks: 2.0,  // un chunk ne sort qu'au-delà de portée + marge
         lod: (
             // Distances (unités monde) de passage au niveau suivant. Leur nombre fixe le
             // LOD max (pas = 1 << lod voxels) : 4 rayons → LOD 0 à 4.
-            radii: [1000.0, 2000.0, 4000.0, 8000.0],
+            radii: [1000.0, 2000.0, 4000.0, 7000.0],
             hysteresis: 0.08,   // bande morte relative autour de chaque rayon
             height_weight: 1.0, // 1 = distance 3D œil → chunk, 0 = horizontale seule
         ),
         frame_budget_ms: 1.0,        // construction / destruction de buffers par frame
         initial_load_budget_ms: 1.0, // idem pendant le chargement initial
-        mesh_cache_mb: 2000,         // cache des géométries (allers-retours de caméra)
+        mesh_cache_mb: 5000,         // cache des géométries (allers-retours de caméra)
     ),
 
     // Mer : quadtree CDLOD (cf. vault, Architecture/Rendu-Eau.md).

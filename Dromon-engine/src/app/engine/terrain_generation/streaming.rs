@@ -11,7 +11,7 @@
 //! ```text
 //! chaque frame → focus.moved_sq(last) > seuil²             (~5 ns, jamais de sqrt)
 //! si franchi   → fenêtre + LOD + hystérésis + équilibrage  (< 1 ms)
-//! puis         → diff (lod, faces) + sortants → chunks sales / retirés
+//! puis         → diff (lod, faces, taper) + sortants → chunks sales / retirés
 //! si non vide  → lot envoyé au re-maillage de fond
 //! ```
 //!
@@ -42,7 +42,8 @@ pub const MOVE_THRESHOLD: f32 = 32.0;
 pub struct StreamUpdate {
     /// Configuration cible (chunks chargés + LOD), partagée avec les workers.
     pub grid: Arc<LodGrid>,
-    /// Chunks entrants, ou dont `(lod, faces)` a changé — donc dont la géométrie change.
+    /// Chunks entrants, ou dont `(lod, faces, taper)` a changé — donc dont la géométrie
+    /// change.
     pub dirty: Vec<IVec2>,
     /// Chunks sortis de la fenêtre : leur mesh est à retirer.
     pub removed: Vec<IVec2>,
@@ -110,7 +111,7 @@ impl ChunkStreamer {
             .collect();
 
         // On adopte la nouvelle grille même sans géométrie changée : les niveaux BRUTS ont
-        // pu bouger (état de l'hystérésis) sans que `(lod, faces)` change. Ne pas les
+        // pu bouger (état de l'hystérésis) sans que `(lod, faces, taper)` change. Ne pas les
         // garder ferait repartir l'hystérésis d'un état périmé à la passe suivante.
         self.grid = Arc::new(next);
 

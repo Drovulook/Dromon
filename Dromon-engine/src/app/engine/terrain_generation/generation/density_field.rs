@@ -48,9 +48,9 @@ pub struct DensityField<'a> {
     origin_x: i32,
     origin_y: i32,
     /// Marge de la grille `relief` autour du chunk : couvre le débordement du mailleur
-    /// (coins de cube +1, stencil des normales ±rayon) et celui de
-    /// [`DensityField::macro_gradient`] (`slope.macro_radius`, arrondi à la colonne
-    /// entière la plus proche : `+1`).
+    /// (coins de cube +1, pochoir des normales) et celui de la pente macro
+    /// ([`DensityField::lattice_macro_radius`] : 12 aux pas fins, `+1` de marge ; aux pas
+    /// grossiers, son rayon reste sous celui du pochoir des normales).
     apron: i32,
     /// Côté de la grille `relief` : `CHUNK_SIZE + 2·apron + 1`.
     side: i32,
@@ -120,6 +120,7 @@ impl<'a> DensityField<'a> {
         if !h.is_nan() {
             return h;
         }
+        profile!("colonne (relief)");
         let wx = (self.origin_x + gx - self.apron) as f64;
         let wy = (self.origin_y + gy - self.apron) as f64;
         let h = self.sampler.height(wx, wy) as f32;
@@ -161,25 +162,41 @@ impl<'a> DensityField<'a> {
         h0 + (h1 - h0) * ty
     }
 
-    /// Gradient `∇h` **moyen** du relief sur un voisinage de rayon
-    /// `slope.macro_radius` autour de `(wx, wy)`, par différences centrées d'écart
-    /// `2r`. Une différence de hauteurs sur `[x−r, x+r]` vaut la moyenne de la pente
-    /// locale sur ce segment : les bosses plus étroites que `2r` s'annulent, seules les
-    /// grandes pentes restent.
+    /// Pente macro au sommet posé à la fraction `t` de l'arête `a → b` : interpolation
+    /// des pentes de ses deux extrémités, nœuds de la grille de pas `scale`.
     ///
-    /// Lue dans la grille mémoïsée plutôt qu'au fBm : les sommets voisins retombent sur
-    /// les mêmes colonnes. 4 `height()` par sommet coûtaient la moitié d'un chunk LOD 0.
-    ///
-    /// Colonne **arrondie**, pas interpolée : l'interpolation lit 4 colonnes par point,
-    /// soit 16 par sommet — ruineux aux LOD grossiers, où les sommets espacés partagent
-    /// peu de colonnes. 0,5 voxel d'écart sur une pente mesurée à 12 ne se voit pas.
-    fn macro_gradient(&self, wx: f64, wy: f64) -> DVec2 {
-        let r = self.materials.rules.slope.macro_radius;
-        let h = |x: f64, y: f64| self.relief(x.round() as i32, y.round() as i32) as f64;
+    /// Même raison que pour les normales (`vertex_normal`) : mesurée au point exact, à
+    /// ±12 voxels, la pente lisait 4 colonnes hors grille par sommet, sans partage dès
+    /// que les sommets sont espacés (2,8 colonnes neuves par sommet à LOD 3, premier
+    /// poste du chunk). Aux nœuds, avec un rayon multiple de `scale`, ses colonnes sont
+    /// celles de la géométrie.
+    pub fn edge_macro_gradient(&self, a: IVec3, b: IVec3, t: f32, scale: i32) -> DVec2 {
+        let ga = self.node_macro_gradient(a.x, a.y, scale);
+        let gb = self.node_macro_gradient(b.x, b.y, scale);
+        ga.lerp(gb, t as f64)
+    }
+
+    /// Gradient `∇h` **moyen** du relief au nœud `(wx, wy)`, par différences centrées
+    /// d'écart `2r` ([`DensityField::lattice_macro_radius`]). Une différence de hauteurs
+    /// sur `[x−r, x+r]` vaut la moyenne de la pente locale sur ce segment : les bosses
+    /// plus étroites que `2r` s'annulent, seules les grandes pentes restent. Lue dans la
+    /// grille mémoïsée, pas au fBm.
+    fn node_macro_gradient(&self, wx: i32, wy: i32, scale: i32) -> DVec2 {
+        let r = self.lattice_macro_radius(scale);
+        let h = |x: i32, y: i32| self.relief(x, y) as f64;
+        let span = (2 * r) as f64;
         DVec2::new(
-            (h(wx + r, wy) - h(wx - r, wy)) / (2.0 * r),
-            (h(wx, wy + r) - h(wx, wy - r)) / (2.0 * r),
+            (h(wx + r, wy) - h(wx - r, wy)) / span,
+            (h(wx, wy + r) - h(wx, wy - r)) / span,
         )
+    }
+
+    /// `slope.macro_radius` arrondi au multiple de `scale` le plus proche (au moins un
+    /// pas) : 12 de LOD 0 à 2, 16 à LOD 3 et 4. Écart de rayon invisible à ces
+    /// distances.
+    fn lattice_macro_radius(&self, scale: i32) -> i32 {
+        let r = self.materials.rules.slope.macro_radius;
+        ((r / scale as f64).round() as i32).max(1) * scale
     }
 
     /// Altitude du **toit** du terrain (sommet de la couche pleine) à la colonne
@@ -226,8 +243,9 @@ impl<'a> DensityField<'a> {
         (self.z_min, self.z_max)
     }
 
-    /// Matériaux d'un sommet d'**iso-surface** de normale `normal` : couverture de
-    /// surface selon son climat et sa pente.
+    /// Matériaux d'un sommet d'**iso-surface** de normale `normal` et de pente macro
+    /// `gradient` (cf. [`DensityField::edge_macro_gradient`]) : couverture de surface
+    /// selon son climat et sa pente.
     ///
     /// Sa profondeur sous le toit vaut zéro *par construction* — on ne la mesure donc
     /// pas. La mesurer serait même faux : le mailleur pose le sommet sur la corde
@@ -241,21 +259,25 @@ impl<'a> DensityField<'a> {
     /// en moins cher et sans écart de résolution.
     ///
     /// [`relief_interp`]: DensityField::relief_interp
-    pub fn surface_material(&self, p: Vec3, normal: Vec3) -> Voxel {
+    pub fn surface_material(&self, p: Vec3, normal: Vec3, gradient: DVec2) -> Voxel {
+        profile!("matériau surface");
         let (wx, wy) = (p.x as f64, p.y as f64);
         // Jitter unitaire, mis à l'échelle par chaque frontière.
         let noise = &self.materials.noise;
         let jitter = noise.jitter(wx, wy);
         // Altitude au-dessus de la mer : référence des frontières littorales.
         let alt = p.z as f64 - self.sampler.sea_level();
-        let gradient = self.macro_gradient(wx, wy);
         let shore = &self.materials.rules.shore;
+        let climate = {
+            profile!("climat");
+            self.sampler.climate(wx, wy, p.z as f64, gradient)
+        };
         evaluate(&MaterialQuery {
             ids: &self.materials.ids,
             rules: &self.materials.rules,
             pos: p,
             depth: 0.0,
-            climate: self.sampler.climate(wx, wy, p.z as f64, gradient),
+            climate,
             jitter,
             shore_d: self.sampler.coast_distance(wx, wy) + jitter * shore.beach_jitter,
             sea_depth: -alt + jitter * shore.seabed_jitter,
@@ -271,23 +293,26 @@ impl<'a> DensityField<'a> {
     /// profondeur réelle sous le relief. Réservés aux parois de bordure et au fond,
     /// dont la géométrie coupe le terrain et doit en montrer les strates.
     ///
-    /// Leurs sommets sont posés à des colonnes **entières**, où l'interpolation retombe
-    /// exactement sur la grille pré-échantillonnée : la profondeur y est exacte quel que
-    /// soit le LOD. Pour un sommet d'iso-surface, prendre
+    /// Leurs sommets sont posés aux **nœuds** de la grille du chunk (pas `step`), où
+    /// l'interpolation retombe exactement sur la grille pré-échantillonnée : la
+    /// profondeur y est exacte quel que soit le LOD, et la pente macro s'y lit comme
+    /// celle de la surface. Pour un sommet d'iso-surface, prendre
     /// [`DensityField::surface_material`].
-    pub fn volume_material(&self, p: Vec3) -> Voxel {
+    pub fn volume_material(&self, p: Vec3, step: i32) -> Voxel {
+        profile!("matériau volume");
         let (wx, wy) = (p.x as f64, p.y as f64);
         let surface = self.relief_interp(wx, wy) as f64;
         let jitter = self.materials.noise.jitter(wx, wy);
         let alt = surface - self.sampler.sea_level();
         let shore = &self.materials.rules.shore;
+        let gradient = self.node_macro_gradient(p.x.round() as i32, p.y.round() as i32, step);
         evaluate(&MaterialQuery {
             ids: &self.materials.ids,
             rules: &self.materials.rules,
             pos: p,
             depth: surface - p.z as f64,
             // Climat de la surface au-dessus : c'est elle que couvre la neige.
-            climate: self.sampler.climate(wx, wy, surface, self.macro_gradient(wx, wy)),
+            climate: self.sampler.climate(wx, wy, surface, gradient),
             jitter,
             shore_d: self.sampler.coast_distance(wx, wy) + jitter * shore.beach_jitter,
             sea_depth: -alt + jitter * shore.seabed_jitter,

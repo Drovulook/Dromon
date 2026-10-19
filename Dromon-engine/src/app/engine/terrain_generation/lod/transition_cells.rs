@@ -25,7 +25,7 @@ use rustc_hash::FxHashMap;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
-        chunk::{CHUNK_SIZE, ISO_LEVEL, Voxel},
+        chunk::{CHUNK_SIZE, ISO_LEVEL},
         generation::DensityField,
         lod::{
             Face,
@@ -35,7 +35,7 @@ use crate::app::engine::{
                 TRANSITION_CORNER_UV, transition_edge,
             },
         },
-        mesh::vertex::{EdgeKey, cached_material, vertex_normal},
+        mesh::vertex::{EdgeKey, MaterialCache, NormalCache, cached_material, vertex_normal},
     },
 };
 
@@ -97,8 +97,8 @@ pub fn add_transition_cells(
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     trans_map: &mut FxHashMap<EdgeKey, u32>,
-    normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
-    surface_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
+    normal_cache: &mut NormalCache,
+    surface_materials: &mut MaterialCache,
 ) {
     let n = CHUNK_SIZE as i32;
     let frame = face_frame(coord, face);
@@ -218,8 +218,8 @@ fn transition_vertex(
     field: &DensityField,
     vertices: &mut Vec<TerrainVertex>,
     trans_map: &mut FxHashMap<EdgeKey, u32>,
-    normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
-    surface_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
+    normal_cache: &mut NormalCache,
+    surface_materials: &mut MaterialCache,
 ) -> (u32, Vec3, Vec3) {
     // Aucune arête de la table ne relie la face haute réso à la basse (vérifié sur les 512
     // cas) : un sommet appartient donc entièrement à l'une ou à l'autre. C'est ce qui rend
@@ -273,10 +273,20 @@ fn transition_vertex(
     // suivre latéralement.
     let p = pa + (pb - pa) * t;
 
-    let normal = vertex_normal(field, normal_cache, p_field);
+    // Pochoir de la face où vit le sommet : celui du chunk sur la face haute réso (jumeau
+    // MC dans ce chunk), celui du voisin grossier sur la face basse réso (jumeau MC chez
+    // lui) ⇒ normales et matériaux identiques des deux côtés de chaque soudure, et
+    // l'éclairage passe d'une échelle à l'autre à travers la dalle, sans rupture.
+    let stencil = if TRANSITION_CORNER_UV[c0][2] == 0 {
+        step
+    } else {
+        2 * step
+    };
+    let normal = vertex_normal(field, normal_cache, plane[c0], plane[c1], t, stencil);
     // Teinte de debug (`debug.ron`) appliquée après coup par `mesh_chunk`.
-    let material = cached_material(surface_materials, p_field, |q| {
-        field.surface_material(q, normal)
+    let material = cached_material(surface_materials, p_field, stencil, |q| {
+        let gradient = field.edge_macro_gradient(plane[c0], plane[c1], t, stencil);
+        field.surface_material(q, normal, gradient)
     });
     let idx = vertices.len() as u32;
     vertices.push(TerrainVertex::new(p, normal, material));

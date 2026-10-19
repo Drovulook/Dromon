@@ -17,6 +17,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 pub use app::engine::renderer::render_resources::{RenderObject, Transform};
 pub use app::engine::renderer::world::World;
 pub use app::engine::terrain_generation::{GridShape, MACRO_MAP_CACHE, MacroGrid, MacroMap};
+/// Banc de mesure du maillage, pour `examples/mesh_bench.rs` uniquement.
+#[doc(hidden)]
+pub use app::engine::terrain_generation::bench::mesh_bench;
 pub use app::engine::timer::Timer;
 pub use scene::Scene;
 

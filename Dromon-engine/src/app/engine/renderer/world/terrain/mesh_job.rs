@@ -1,5 +1,6 @@
 use anyhow::Result;
 use glam::IVec2;
+use rustc_hash::FxHashMap;
 use std::{
     sync::{
         Arc,
@@ -13,12 +14,10 @@ use crate::{
     app::engine::{
         renderer::{
             render_resources::{MeshData, TerrainMesh},
-            world::terrain::mesh_key,
+            world::terrain::{meshes::InstalledChunks, mesh_key},
         },
         rendering_context::RenderingContext,
-        terrain_generation::{
-            ChunkStreamer, LodFocus, LodGrid, MeshCache, TerrainSnapshot, mesh_chunk,
-        },
+        terrain_generation::{LodGrid, MeshCache, TerrainSnapshot, mesh_chunk},
     },
     profile,
 };
@@ -26,16 +25,21 @@ use crate::{
 /// Lot de re-maillage **en vol** : ce que les threads de fond sont en train de produire,
 /// plus ce que le cache a déjà fourni.
 ///
-/// ## Pourquoi un lot entier, et pas chunk par chunk
-/// Les chunks ne finissent pas ensemble. Installer A pendant que son voisin B porte
-/// encore l'ancien masque de coutures ouvre une fissure pendant quelques frames. On
-/// accumule donc tout et on ne bascule que **le lot complet** ; entre-temps le terrain
-/// reste cohérent avec l'ancienne configuration. Afficher un LOD périmé ~20 frames est
-/// invisible ; une fissure ne l'est pas.
+/// ## Bascule par groupes, pas chunk par chunk
+/// Les chunks ne finissent pas ensemble. Installer le nouveau A à côté de l'ancien B
+/// ouvre une fissure si B change lui aussi : chacun a été maillé contre une autre
+/// configuration de leur frontière. Le lot est donc découpé en **groupes** (cf.
+/// [`groups`]) qui basculent chacun d'un bloc, dès que tous leurs membres sont bâtis.
 ///
-/// Exception : le **chargement initial** ([`MeshJob::initial_load`]) est progressif.
-/// Tous ses chunks sont maillés contre la même grille et aucun ancien mesh n'existe, donc
-/// deux chunks installés sont toujours cohérents entre eux.
+/// Pourquoi c'est sûr : toute paire de voisins affichés est maillée contre une même
+/// grille.
+/// - deux membres d'un groupe : la nouvelle ;
+/// - un chunk **hors lot** et n'importe qui : son mesh est identique sous l'ancienne et
+///   la nouvelle grille (cf. `LodGrid::dirty_against`) ;
+/// - deux groupes distincts ne se touchent pas, par construction.
+///
+/// Le **chargement initial** n'a aucun ancien mesh : chaque chunk y forme son propre
+/// groupe, d'où une apparition progressive sans traitement spécial.
 ///
 /// ## Trois phases, dont deux étalées dans le temps
 /// ```text
@@ -47,8 +51,8 @@ use crate::{
 /// (create + allocate, pour le vertex et l'index buffer) plus le memcpy vers le staging.
 /// `vkAllocateMemory` est une opération noyau à ~100 µs–1 ms — bâtir 200 meshes d'un coup
 /// coûte donc des centaines de millisecondes, soit une image figée à chaque lot.
-/// On construit sous **budget de temps** (`frame_budget_ms` de `render.ron`) sans rien installer :
-/// l'atomicité reste intacte, seule la latence du lot augmente de quelques frames.
+/// On construit sous **budget de temps** (`frame_budget_ms` de `render.ron`) sans rien
+/// installer : l'atomicité des groupes reste intacte, seule leur latence augmente.
 ///
 /// La phase 3 est la seule à toucher l'état du terrain : elle est donc restée sur
 /// [`Terrain`](super::Terrain), qui consomme le lot via [`MeshJob::take_built`].
@@ -62,15 +66,23 @@ pub struct MeshJob {
     all_meshed: bool,
     /// Index du prochain élément de `gathered` dont il faut bâtir les buffers.
     next_build: usize,
-    /// Zone d'attente : buffers déjà bâtis, pas encore visibles. `None` = chunk devenu
-    /// vide ou sorti de la fenêtre (il faudra retirer son mesh sans en installer d'autre).
+    /// Groupes complets, prêts à installer. `None` = chunk devenu vide (il faudra retirer
+    /// son mesh sans en installer d'autre).
     built: Vec<(IVec2, Option<TerrainMesh>)>,
+    /// Groupe de bascule de chaque chunk du lot.
+    group_of: FxHashMap<IVec2, u32>,
+    /// Par groupe : membres pas encore bâtis.
+    remaining: Vec<u32>,
+    /// Par groupe : buffers bâtis, invisibles tant que le groupe n'est pas complet.
+    staged: Vec<Vec<(IVec2, Option<TerrainMesh>)>>,
+    /// Taille du plus gros groupe, pour les statistiques.
+    largest_group: u32,
     /// Configuration LOD contre laquelle ce lot a été maillé.
     grid: Arc<LodGrid>,
     /// Chunks confiés aux workers ; le reste du lot venait du cache.
     meshed_count: usize,
-    /// Installer au fil de l'eau plutôt qu'en bloc (chargement initial uniquement).
-    progressive: bool,
+    /// Lot du chargement initial (seule différence : le bilan loggé à la fin).
+    initial: bool,
     /// Temps de construction de buffers autorisé par frame.
     budget: Duration,
     /// Soumission du lot, pour mesurer sa durée totale.
@@ -86,27 +98,24 @@ pub struct MeshJob {
 type Meshed = (IVec2, MeshData, Duration);
 
 impl MeshJob {
-    /// Demande une nouvelle configuration (fenêtre + LOD) au `streamer` et, si elle
-    /// change quelque chose, soumet le lot correspondant. `None` = rien à faire.
+    /// Lot de re-maillage des chunks `dirty` (triés du plus proche au plus lointain par
+    /// l'appelant) contre la configuration `grid`. `installed` dit quels chunks ont un
+    /// ancien mesh affiché, ce qui décide des groupes de bascule.
     pub(super) fn start(
-        streamer: &mut ChunkStreamer,
+        grid: Arc<LodGrid>,
+        dirty: Vec<IVec2>,
+        installed: &InstalledChunks,
         cache: &mut MeshCache,
         snapshot: TerrainSnapshot,
-        focus: LodFocus,
         budget: Duration,
-    ) -> Option<MeshJob> {
-        let update = streamer.update(focus)?;
-        let mut job = Self::submit(update.grid, update.dirty, cache, snapshot, false, budget);
-        // Les sortants partent avec le lot, pas avant : retirer un chunk change les
-        // coutures de ses voisins, re-maillés dans ce même lot.
-        job.built
-            .extend(update.removed.into_iter().map(|coord| (coord, None)));
-        Some(job)
+    ) -> MeshJob {
+        let (group_of, sizes) = groups(&dirty, |c| installed.get(&c).is_some());
+        Self::submit(grid, dirty, group_of, sizes, cache, snapshot, false, budget)
     }
 
-    /// Lot du chargement initial : tous les chunks de `grid`, installés **au fil de
-    /// l'eau** dans l'ordre de `coords` (trié du plus proche au plus lointain par
-    /// l'appelant), sous un budget par frame plus large que celui du LOD.
+    /// Lot du chargement initial : tous les chunks de `grid`, dans l'ordre de `coords`
+    /// (trié du plus proche au plus lointain par l'appelant). Aucun ancien mesh, donc un
+    /// groupe par chunk : chacun s'affiche dès qu'il est bâti.
     pub(super) fn start_initial_load(
         grid: Arc<LodGrid>,
         coords: Vec<IVec2>,
@@ -114,22 +123,28 @@ impl MeshJob {
         snapshot: TerrainSnapshot,
         budget: Duration,
     ) -> MeshJob {
-        Self::submit(grid, coords, cache, snapshot, true, budget)
+        let (group_of, sizes) = groups(&coords, |_| false);
+        Self::submit(grid, coords, group_of, sizes, cache, snapshot, true, budget)
     }
 
     /// Répartit `dirty` entre cache et workers, et lance ces derniers.
     ///
     /// Le partage se fait ici, à la soumission : un hit économise 2–10 ms de maillage
     /// contre ~50 µs de ré-upload.
+    #[allow(clippy::too_many_arguments)]
     fn submit(
         grid: Arc<LodGrid>,
         dirty: Vec<IVec2>,
+        group_of: FxHashMap<IVec2, u32>,
+        sizes: Vec<u32>,
         cache: &mut MeshCache,
         snapshot: TerrainSnapshot,
-        progressive: bool,
+        initial: bool,
         budget: Duration,
     ) -> MeshJob {
         let started = Instant::now();
+        let largest_group = sizes.iter().copied().max().unwrap_or(0);
+        let staged = (0..sizes.len()).map(|_| Vec::new()).collect();
         let mut gathered = Vec::with_capacity(dirty.len());
         let mut todo = Vec::new();
         for coord in dirty {
@@ -155,9 +170,13 @@ impl MeshJob {
             all_meshed: false,
             next_build: 0,
             built: Vec::new(),
+            group_of,
+            remaining: sizes,
+            staged,
+            largest_group,
             grid,
             meshed_count,
-            progressive,
+            initial,
             budget,
             started,
             meshing_time: None,
@@ -194,8 +213,8 @@ impl MeshJob {
         }
     }
 
-    /// Phase 2 : bâtit les buffers Vulkan des géométries reçues, **sous budget de temps**
-    /// et sans rien rendre visible. `true` ⇒ le lot est complet.
+    /// Phase 2 : bâtit les buffers Vulkan des géométries reçues, **sous budget de temps**,
+    /// et passe chaque groupe complet dans la zone `built`. `true` ⇒ le lot est complet.
     ///
     /// C'est ici qu'était le pic : 4 allocations Vulkan par chunk × 200 chunks dans une
     /// seule frame donnaient une image de plusieurs centaines de millisecondes.
@@ -222,7 +241,12 @@ impl MeshJob {
             } else {
                 Some(TerrainMesh::new(context.clone(), data)?)
             };
-            self.built.push((coord, mesh));
+            let g = self.group_of[&coord] as usize;
+            self.staged[g].push((coord, mesh));
+            self.remaining[g] -= 1;
+            if self.remaining[g] == 0 {
+                self.built.append(&mut self.staged[g]);
+            }
 
             // Test après avoir traité un élément : au moins un par frame, toujours.
             if Instant::now() >= deadline {
@@ -234,9 +258,14 @@ impl MeshJob {
         Ok(self.all_meshed)
     }
 
-    /// Lot à installer au fil de l'eau plutôt qu'en bloc.
-    pub(super) fn is_progressive(&self) -> bool {
-        self.progressive
+    /// Lot du chargement initial ?
+    pub(super) fn is_initial(&self) -> bool {
+        self.initial
+    }
+
+    /// Nombre de groupes de bascule et taille du plus gros.
+    pub(super) fn group_stats(&self) -> (usize, u32) {
+        (self.remaining.len(), self.largest_group)
     }
 
     /// Temps écoulé depuis la soumission du lot.
@@ -273,11 +302,66 @@ impl MeshJob {
         &self.grid
     }
 
-    /// Vide la zone d'attente. Un lot atomique ne s'appelle qu'une fois complet ; un lot
-    /// progressif, à chaque frame.
+    /// Vide la zone des groupes complets, à installer. Appelé à chaque frame.
     pub(super) fn take_built(&mut self) -> Vec<(IVec2, Option<TerrainMesh>)> {
         std::mem::take(&mut self.built)
     }
+}
+
+/// Groupes de bascule de `dirty` : composantes connexes en **8-voisinage** (un coin est
+/// partagé par 4 chunks), deux chunks n'étant liés que si **l'un au moins** a un ancien
+/// mesh affiché (`has_old`). Deux entrants voisins restent indépendants : installer l'un
+/// sans l'autre laisse un trou, pas une fissure.
+///
+/// Renvoie le groupe de chaque chunk et la taille de chaque groupe. Les groupes sont
+/// numérotés dans l'ordre de `dirty` : trié par distance, les proches ont les petits
+/// numéros.
+fn groups(dirty: &[IVec2], has_old: impl Fn(IVec2) -> bool) -> (FxHashMap<IVec2, u32>, Vec<u32>) {
+    let index: FxHashMap<IVec2, usize> = dirty.iter().enumerate().map(|(i, &c)| (c, i)).collect();
+
+    // Union-find : `parent[i]` remonte jusqu'au représentant du groupe de `dirty[i]`.
+    let mut parent: Vec<usize> = (0..dirty.len()).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]]; // compression de chemin (par sauts de 2)
+            i = parent[i];
+        }
+        i
+    }
+
+    // Demi 8-voisinage : chaque paire n'est examinée qu'une fois.
+    const HALF: [IVec2; 4] = [
+        IVec2::new(1, 0),
+        IVec2::new(-1, 1),
+        IVec2::new(0, 1),
+        IVec2::new(1, 1),
+    ];
+    let old: Vec<bool> = dirty.iter().map(|&c| has_old(c)).collect();
+    for (i, &c) in dirty.iter().enumerate() {
+        for off in HALF {
+            let Some(&j) = index.get(&(c + off)) else { continue };
+            if old[i] || old[j] {
+                let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+                parent[a] = b;
+            }
+        }
+    }
+
+    // Numérotation compacte des représentants, dans l'ordre de `dirty`.
+    let mut id_of_root = vec![u32::MAX; dirty.len()];
+    let mut sizes = Vec::new();
+    let mut group_of = FxHashMap::default();
+    for (i, &c) in dirty.iter().enumerate() {
+        let root = find(&mut parent, i);
+        if id_of_root[root] == u32::MAX {
+            id_of_root[root] = sizes.len() as u32;
+            sizes.push(0);
+        }
+        let g = id_of_root[root];
+        sizes[g as usize] += 1;
+        group_of.insert(c, g);
+    }
+    (group_of, sizes)
 }
 
 /// Lance le maillage de `todo` sur tous les threads du pool, **dans l'ordre** de `todo`.

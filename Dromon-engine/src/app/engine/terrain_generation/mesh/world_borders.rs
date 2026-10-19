@@ -1,14 +1,16 @@
 use glam::{IVec2, Vec3};
-use rustc_hash::FxHashMap;
 
 use crate::config::MeshDebug;
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
-        chunk::{CHUNK_SIZE, Voxel},
+        chunk::CHUNK_SIZE,
         generation::DensityField,
         lod::Face,
-        mesh::{mesher::WORLD_FLOOR, vertex::cached_material},
+        mesh::{
+            mesher::WORLD_FLOOR,
+            vertex::{MaterialCache, cached_material},
+        },
     },
 };
 
@@ -27,7 +29,7 @@ pub fn add_mesh_borders(
     debug: MeshDebug,
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
-    volume_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
+    volume_materials: &mut MaterialCache,
 ) {
     let n = CHUNK_SIZE as i32;
     let x0 = coord.x * n;
@@ -44,6 +46,7 @@ pub fn add_mesh_borders(
             indices,
             field,
             volume_materials,
+            step,
             [
                 Vec3::new(x0 as f32, y0 as f32, f),
                 Vec3::new(x1 as f32, y0 as f32, f),
@@ -74,6 +77,7 @@ pub fn add_mesh_borders(
                     indices,
                     field,
                     volume_materials,
+                    step,
                     [
                         Vec3::new(a0.0 as f32, a0.1 as f32, f),
                         Vec3::new(a1.0 as f32, a1.1 as f32, f),
@@ -100,18 +104,20 @@ pub fn add_mesh_borders(
 
 /// Émet un quad `[a, b, c, d]` (sommets dans l'ordre du contour) en deux triangles,
 /// avec une normale de face constante. Couleurs échantillonnées au champ (strates
-/// visibles en coupe sur les parois).
+/// visibles en coupe sur les parois). `step` = pas du chunk, sur la grille duquel
+/// tombent les coins.
 fn push_quad(
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     field: &DensityField,
-    volume_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
+    volume_materials: &mut MaterialCache,
+    step: i32,
     quad: [Vec3; 4],
     normal: Vec3,
 ) {
     let [a, b, c, d] = quad;
-    push_tri(vertices, indices, field, volume_materials, a, b, c, normal);
-    push_tri(vertices, indices, field, volume_materials, a, c, d, normal);
+    push_tri(vertices, indices, field, volume_materials, step, [a, b, c], normal);
+    push_tri(vertices, indices, field, volume_materials, step, [a, c, d], normal);
 }
 
 /// Émet un triangle avec normale de face imposée, en orientant l'enroulement pour que
@@ -121,10 +127,9 @@ fn push_tri(
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
     field: &DensityField,
-    volume_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
-    p0: Vec3,
-    p1: Vec3,
-    p2: Vec3,
+    volume_materials: &mut MaterialCache,
+    step: i32,
+    [p0, p1, p2]: [Vec3; 3],
     normal: Vec3,
 ) {
     let geo = (p1 - p0).cross(p2 - p0);
@@ -135,7 +140,8 @@ fn push_tri(
     };
     let start = vertices.len() as u32;
     for p in [p0, p1, p2] {
-        let material = cached_material(volume_materials, p, |q| field.volume_material(q));
+        let material =
+            cached_material(volume_materials, p, step, |q| field.volume_material(q, step));
         vertices.push(TerrainVertex::new(p, normal, material));
     }
     indices.extend_from_slice(&[start, start + 1, start + 2]);

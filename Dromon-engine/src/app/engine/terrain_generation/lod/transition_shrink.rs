@@ -53,6 +53,41 @@ struct PlaneShrink {
     taper: [bool; 2],
 }
 
+/// Bit d'atténuation de l'extrémité `end` (0 = basse, 1 = haute) de la face d'index `i`
+/// dans [`Face::ALL`].
+#[inline]
+fn taper_bit(i: usize, end: usize) -> u8 {
+    1 << (2 * i + end)
+}
+
+/// Bits d'atténuation du chunk `coord` : pour chaque face portant une dalle, faut-il
+/// atténuer à chaque extrémité ? Dépend des voisins **tangents**, donc indirectement des
+/// diagonales — d'où leur place dans la signature du mesh (clé de cache, diff de
+/// re-maillage) à côté de `(lod, faces)`.
+///
+/// `lods` doit avoir ses `faces` à jour : celles des voisins entrent dans le calcul.
+pub(super) fn taper_bits(lods: &LodGrid, coord: IVec2) -> u8 {
+    let lod = lods.lod(coord);
+    let faces = lods.faces(coord);
+    let mut bits = 0;
+    for (i, f) in Face::ALL.into_iter().enumerate() {
+        if !faces.contains(f) {
+            continue;
+        }
+        // Voisins le long de l'axe TANGENT à la face : ce sont eux qui partagent le plan
+        // sur lequel la compression déborde. Le test est symétrique (chacun pose la même
+        // question à l'autre), donc les deux côtés concluent pareil.
+        let tangent = if i < 2 { IVec2::Y } else { IVec2::X };
+        for (end, s) in [-1, 1].into_iter().enumerate() {
+            let nb = coord + tangent * s;
+            if lods.lod(nb) != lod || !lods.faces(nb).contains(f) {
+                bits |= taper_bit(i, end);
+            }
+        }
+    }
+    bits
+}
+
 /// Compression de la dernière rangée de sommets MC bordant une face de transition.
 /// Sans effet sur un chunk qui n'en porte aucune (cas courant).
 #[derive(Clone, Copy, Default)]
@@ -67,7 +102,7 @@ pub struct HalfStepShrink {
 impl HalfStepShrink {
     pub fn new(lods: &LodGrid, coord: IVec2, faces: TransitionFaces, step: i32) -> Self {
         let n = CHUNK_SIZE as i32;
-        let lod = lods.lod(coord);
+        let tapers = lods.taper(coord);
         let mut slots = [None; 4];
         for (i, (slot, f)) in slots.iter_mut().zip(Face::ALL).enumerate() {
             if !faces.contains(f) {
@@ -79,14 +114,9 @@ impl HalfStepShrink {
                 Face::NegY => coord.y * n,
                 Face::PosY => (coord.y + 1) * n,
             };
-            // Voisins le long de l'axe TANGENT à la face : ce sont eux qui partagent le
-            // plan sur lequel la compression déborde. Le test est symétrique (chacun pose
-            // la même question à l'autre), donc les deux côtés concluent pareil.
-            let tangent = if i < 2 { IVec2::Y } else { IVec2::X };
-            let taper = [-1, 1].map(|s| {
-                let nb = coord + tangent * s;
-                lods.lod(nb) != lod || !lods.faces(nb).contains(f)
-            });
+            // Lu dans la grille plutôt que recalculé : la clé de cache et le diff de
+            // re-maillage voient ainsi exactement ce que le mesh a supposé.
+            let taper = [0, 1].map(|end| tapers & taper_bit(i, end) != 0);
             *slot = Some(PlaneShrink {
                 plane: plane as f32,
                 taper,

@@ -14,6 +14,11 @@ name = "dromon_engine"
 # selon `ENABLE_PROFILING`. Désactivée par défaut.
 profiling = []
 
+# Sans profilage, le banc ne mesurerait que le temps total.
+[[example]]
+name = "mesh_bench"
+required-features = ["profiling"]
+
 [dependencies]
 anyhow = "1.0.102"
 ash = "0.38.0"

@@ -23,6 +23,7 @@
 //! un chunk que la relaxation abaisse verrait sa bande morte glisser à chaque passe et ne
 //! remonterait jamais. L'équilibrage se réapplique **à neuf** depuis `raw` à chaque passe.
 
+use super::transition_shrink::taper_bits;
 use super::{Face, MAX_LOD_STEP, TransitionFaces, transition_faces};
 use glam::IVec2;
 
@@ -35,6 +36,9 @@ struct Cell {
     lod: u8,
     /// Faces bordant un voisin plus grossier (dérivé de `lod` des 4 voisins).
     faces: TransitionFaces,
+    /// Atténuations aux extrémités des faces à dalle (dérivé des `faces` voisines, cf.
+    /// [`taper_bits`]).
+    taper: u8,
 }
 
 /// Niveaux de LOD de tous les chunks chargés, sur une grille rectangulaire dont les
@@ -136,6 +140,12 @@ impl LodGrid {
         self.cell(c).map_or(TransitionFaces::default(), |x| x.faces)
     }
 
+    /// Bits d'atténuation du chunk `c` (0 si absent), cf. [`taper_bits`].
+    #[inline]
+    pub fn taper(&self, c: IVec2) -> u8 {
+        self.cell(c).map_or(0, |x| x.taper)
+    }
+
     /// Recalcule le niveau **brut** de chaque chunk chargé : `f(coord, raw_courant)`.
     /// Passer le `raw` courant est ce qui permet à l'appelant d'appliquer une hystérésis.
     /// N'a aucun effet visible tant que [`LodGrid::rebalance`] n'a pas suivi.
@@ -218,21 +228,36 @@ impl LodGrid {
                 cell.faces = faces;
             }
         }
+        // Seconde passe : l'atténuation lit les `faces` des voisins, toutes à jour ici.
+        for i in 0..self.coords.len() {
+            let c = self.coords[i];
+            let Some(idx) = self.index(c) else { continue };
+            let taper = taper_bits(self, c);
+            if let Some(cell) = self.cells[idx].as_mut() {
+                cell.taper = taper;
+            }
+        }
     }
 
-    /// Chunks à re-mailler pour passer de `prev` à `self` : ceux dont le couple
-    /// **`(lod, faces)`** a changé, plus ceux qui viennent d'être chargés.
+    /// Chunks à re-mailler pour passer de `prev` à `self` : ceux dont le triplet
+    /// **`(lod, faces, taper)`** a changé, plus ceux qui viennent d'être chargés.
     ///
-    /// Le masque compte autant que le niveau : quand A change de niveau, son voisin B
-    /// garde le sien mais leur face commune devient (ou cesse d'être) une transition —
-    /// or le rétrécissement demi-pas en dépend, donc **la géométrie de B change**.
-    /// Diffé sur `lod` seul, on laisse une fissure permanente le long de la frontière.
+    /// Ce triplet est **tout** ce que le mesh lit de la grille. Le masque compte autant
+    /// que le niveau : quand A change de niveau, son voisin B garde le sien mais leur
+    /// face commune devient (ou cesse d'être) une transition, donc **la géométrie de B
+    /// change**. Idem pour l'atténuation, que modifie un changement en diagonale.
+    ///
+    /// Corollaire dont dépend l'installation progressive (cf. `MeshJob`) : un chunk
+    /// **non** sale a le même mesh sous `prev` et sous `self`, donc se raccorde à ses
+    /// voisins des deux configurations.
     pub fn dirty_against(&self, prev: &LodGrid) -> Vec<IVec2> {
         self.coords
             .iter()
             .copied()
             .filter(|&c| match (self.cell(c), prev.cell(c)) {
-                (Some(now), Some(old)) => (now.lod, now.faces) != (old.lod, old.faces),
+                (Some(now), Some(old)) => {
+                    (now.lod, now.faces, now.taper) != (old.lod, old.faces, old.taper)
+                }
                 // Chunk nouvellement chargé (streaming) : rien à comparer, tout à mailler.
                 _ => true,
             })

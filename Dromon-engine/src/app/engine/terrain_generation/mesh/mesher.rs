@@ -1,5 +1,5 @@
 use crate::app::engine::terrain_generation::chunk::{
-    CHUNK_SIZE, ISO_LEVEL, TerrainSnapshot, Voxel,
+    CHUNK_SIZE, ISO_LEVEL, TerrainSnapshot,
 };
 use crate::app::engine::terrain_generation::lod::Face;
 use crate::app::engine::terrain_generation::lod::grid::LodGrid;
@@ -9,7 +9,7 @@ use crate::app::engine::terrain_generation::marching_cubes::mc_gen::edge_vertex;
 use crate::app::engine::terrain_generation::marching_cubes::mc_tables::{
     CORNERS, EDGE_CORNERS, TRI_TABLE,
 };
-use crate::app::engine::terrain_generation::mesh::vertex::EdgeKey;
+use crate::app::engine::terrain_generation::mesh::vertex::{EdgeKey, MaterialCache, NormalCache};
 use crate::app::engine::{
     renderer::render_resources::{MeshData, TerrainVertex},
     terrain_generation::mesh::world_borders::add_mesh_borders,
@@ -33,13 +33,13 @@ use rustc_hash::FxHashMap;
 // linéaire. Couture sans fissure : la densité ne dépend que de la position MONDE,
 // donc deux chunks voisins calculent des coins identiques sur leur face partagée.
 
-/// Rayon (en voxels) du stencil de différences pour les normales, moyenné sur
 /// Altitude du fond du monde (plancher plein). En dessous, on pose la face du
 /// dessous ; les parois de bordure montent de là jusqu'au relief.
 pub const WORLD_FLOOR: i32 = 0;
+/// Rayon, **en pas de pochoir**, des différences pour les normales, moyennées sur
 /// `k = 1..=NORMAL_RADIUS`. Plus grand = normale lissée sur une zone plus large
 /// (éclairage doux, moins d'aliasing sur les pentes). Dimensionne aussi l'« apron »
-/// que le champ de densité doit pré-échantillonner autour du chunk.
+/// que le champ de densité doit couvrir autour du chunk.
 pub const NORMAL_RADIUS: i32 = 3;
 
 /// Construit le mesh d'un chunk en coordonnées monde (`model` = identité au draw) :
@@ -57,13 +57,19 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     let origin_y = coord.y * n;
 
     // Pas d'échantillonnage MC = `1 << lod` (1, 2, 4…). Il divise CHUNK_SIZE, donc les
-    // chunks se tuilent proprement. N'affecte QUE la géométrie : le stencil des normales
-    // reste à un pas fixe de 1 unité (éclairage continu à travers une frontière de LOD).
+    // chunks se tuilent proprement. C'est aussi le pas du pochoir des normales, dont les
+    // colonnes tombent ainsi sur la grille déjà calculée (cf. `vertex_normal`).
     let step = 1i32 << lods.lod(coord);
+    let lod_transition_faces = lods.faces(coord);
 
-    // Champ de densité échantillonnable sur la région du chunk. L'apron vaut le rayon
-    // des normales : le stencil de différences ne débordera jamais de la région.
-    let field = terrain.density_field(coord, NORMAL_RADIUS, step);
+    // Champ de densité échantillonnable sur la région du chunk. L'apron couvre le
+    // pochoir des normales autour des nœuds de bord — au double pas si le chunk porte
+    // une dalle, dont la face basse réso prend le pochoir du voisin grossier.
+    let stencil_max = if lod_transition_faces.is_empty() { step } else { 2 * step };
+    let field = {
+        profile!("champ de densité");
+        terrain.density_field(coord, NORMAL_RADIUS * stencil_max, step)
+    };
 
     // Tranche verticale à mailler, fournie par le champ : hors d'elle, tout est plein
     // (dessous) ou vide (dessus). Se resserre automatiquement autour de la surface —
@@ -81,8 +87,8 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     let mut indices: Vec<u32> = Vec::new();
 
     // Normales et matériaux sont coûteux (gradient multi-rayon, règles de placement).
-    // On les mémoïse par coin entier : les nombreux sommets voisins d'un chunk
-    // retombent sur les mêmes clés → calcul fait ~une fois par colonne. `FxHashMap`
+    // On les mémoïse par nœud de grille (normales) et par coin entier (matériaux) : les
+    // nombreux sommets voisins d'un chunk retombent sur les mêmes clés. `FxHashMap`
     // (hash non-cryptographique) au lieu du `HashMap` SipHash : bien plus rapide sur
     // ces clés entières.
     //
@@ -90,9 +96,9 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // l'iso-surface (profondeur nulle) ou DANS la matière — parois et fond, dont la coupe
     // doit montrer les strates. Un cache commun les mélangerait : le haut d'une paroi est
     // à `z ≈ relief`, donc à la même clé arrondie qu'un sommet de surface.
-    let mut normal_cache: FxHashMap<(i32, i32, i32), Vec3> = FxHashMap::default();
-    let mut surface_materials: FxHashMap<(i32, i32, i32), Voxel> = FxHashMap::default();
-    let mut volume_materials: FxHashMap<(i32, i32, i32), Voxel> = FxHashMap::default();
+    let mut normal_cache = NormalCache::default();
+    let mut surface_materials = MaterialCache::default();
+    let mut volume_materials = MaterialCache::default();
 
     // Mutualisation des sommets : arête de grille → index. Chaque arête ne produit
     // qu'un sommet, partagé par tous les cubes/triangles qui la touchent.
@@ -100,7 +106,6 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 
     // Faces à coudre — connues AVANT le maillage : elles conditionnent le
     // rétrécissement demi-pas que subit la dernière rangée de sommets qui les borde.
-    let lod_transition_faces = lods.faces(coord);
     let shrink = HalfStepShrink::new(lods, coord, lod_transition_faces, step);
 
     let mut corner_d = [0.0f32; 8];
@@ -196,16 +201,19 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // chargé (bord de la fenêtre de streaming) ne doit pas faire pousser de mur.
     let border_faces = Face::ALL.map(|f| !terrain.in_world(coord + f.offset()));
     let debug = terrain.mesh_debug();
-    add_mesh_borders(
-        &field,
-        coord,
-        border_faces,
-        step,
-        debug,
-        &mut vertices,
-        &mut indices,
-        &mut volume_materials,
-    );
+    {
+        profile!("fond et parois");
+        add_mesh_borders(
+            &field,
+            coord,
+            border_faces,
+            step,
+            debug,
+            &mut vertices,
+            &mut indices,
+            &mut volume_materials,
+        );
+    }
 
     // Cellules de transition (Transvoxel) : scellent les faces bordant un voisin PLUS
     // GROSSIER. Table de mutualisation dédiée — leurs positions sont en demi-unités,
@@ -213,6 +221,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
     // surface ci-dessus, mais le rétrécissement demi-pas a rendu les positions
     // confondues (cf. [`HalfStepShrink`]) : la couture ferme quand même.
     if !lod_transition_faces.is_empty() {
+        profile!("transitions");
         // Les cellules de transition n'ajoutent des sommets qu'à la suite (table de
         // mutualisation à part) : tout ce qui est poussé après ce point leur appartient.
         let first_transition_vertex = vertices.len();

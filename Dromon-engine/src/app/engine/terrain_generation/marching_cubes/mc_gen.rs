@@ -1,14 +1,14 @@
-use glam::Vec3;
+use glam::{IVec3, Vec3};
 use rustc_hash::FxHashMap;
 
 use crate::app::engine::{
     renderer::render_resources::TerrainVertex,
     terrain_generation::{
-        chunk::{ISO_LEVEL, Voxel},
+        chunk::ISO_LEVEL,
         generation::DensityField,
         lod::transition_shrink::HalfStepShrink,
         marching_cubes::mc_tables::{CORNERS, EDGE_CORNERS},
-        mesh::vertex::{EdgeKey, cached_material, vertex_normal},
+        mesh::vertex::{EdgeKey, MaterialCache, NormalCache, cached_material, vertex_normal},
     },
 };
 
@@ -28,8 +28,8 @@ pub fn edge_vertex(
     field: &DensityField,
     vertices: &mut Vec<TerrainVertex>,
     vertex_map: &mut FxHashMap<EdgeKey, u32>,
-    normal_cache: &mut FxHashMap<(i32, i32, i32), Vec3>,
-    surface_materials: &mut FxHashMap<(i32, i32, i32), Voxel>,
+    normal_cache: &mut NormalCache,
+    surface_materials: &mut MaterialCache,
 ) -> (u32, Vec3, Vec3) {
     let [a, b] = EDGE_CORNERS[e];
     let ca = CORNERS[a];
@@ -69,16 +69,18 @@ pub fn edge_vertex(
     };
     // Deux positions distinctes, et c'est volontaire : `p_field` est le point interpolé,
     // donc SUR l'iso-surface ; `p` est ce point comprimé, donc décollé d'elle. Normale et
-    // matériaux s'échantillonnent sur `p_field`, exactement comme le fait la dalle ⇒ les deux
-    // côtés de la couture évaluent le même point, aucune rupture d'éclairage ni de matériau.
+    // matériaux s'évaluent sur l'arête non comprimée (`ia → ib` à `t`, soit `p_field`),
+    // exactement comme le fait la dalle ⇒ les deux côtés de la couture évaluent le même
+    // point, aucune rupture d'éclairage ni de matériau.
     // La clé de mutualisation, elle, reste les coins entiers d'origine : le sommet partagé
     // avec le cube voisin garde le même index.
     let p_field = pa + (pb - pa) * t;
     let p = shrink.apply(p_field);
 
-    let normal = vertex_normal(field, normal_cache, p_field);
-    let material = cached_material(surface_materials, p_field, |q| {
-        field.surface_material(q, normal)
+    let (a, b) = (IVec3::from_array(ia), IVec3::from_array(ib));
+    let normal = vertex_normal(field, normal_cache, a, b, t, step);
+    let material = cached_material(surface_materials, p_field, step, |q| {
+        field.surface_material(q, normal, field.edge_macro_gradient(a, b, t, step))
     });
     let idx = vertices.len() as u32;
     vertices.push(TerrainVertex::new(p, normal, material));
