@@ -78,10 +78,11 @@ impl DescriptorHandler {
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(frame_count),
-            // + la shadow map + les cartes du monde, aussi des combined image samplers.
+            // + la shadow map + les cartes du monde + les textures du terrain, aussi des
+            // combined image samplers.
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(MAX_TEXTURES + 1 + WORLD_MAP_COUNT),
+                .descriptor_count(MAX_TEXTURES + 1 + WORLD_MAP_COUNT + 1),
             // La table des matériaux.
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::STORAGE_BUFFER)
@@ -180,12 +181,20 @@ impl DescriptorHandler {
     fn create_materials_descriptor_set_layout(
         context: &RenderingContext,
     ) -> Result<vk::DescriptorSetLayout> {
-        let bindings = [vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .descriptor_count(1)
-            // VERTEX : albédo par sommet (provisoire) ; FRAGMENT : mélange au pixel.
-            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)];
+        let bindings = [
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                // Lue par le mélange des matériaux au pixel.
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+            // Textures du terrain (texture array).
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        ];
         unsafe {
             Ok(context.device.create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
@@ -348,7 +357,12 @@ impl DescriptorHandler {
 
     /// Alloue et écrit le set de la table des matériaux (set 4) : `buffer` entier au
     /// binding 0.
-    pub fn create_materials_descriptor_set(&self, buffer: vk::Buffer) -> Result<vk::DescriptorSet> {
+    pub fn create_materials_descriptor_set(
+        &self,
+        buffer: vk::Buffer,
+        textures: vk::ImageView,
+        sampler: vk::Sampler,
+    ) -> Result<vk::DescriptorSet> {
         let descriptor_set = unsafe {
             self.context.device.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::default()
@@ -361,14 +375,26 @@ impl DescriptorHandler {
             .buffer(buffer)
             .offset(0)
             .range(vk::WHOLE_SIZE)];
-        let write = vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_set)
-            .dst_binding(0)
-            .dst_array_element(0)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .buffer_info(&buffer_info);
+        let image_info = [vk::DescriptorImageInfo::default()
+            .sampler(sampler)
+            .image_view(textures)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let writes = [
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor_set)
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&buffer_info),
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor_set)
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&image_info),
+        ];
 
-        unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
+        unsafe { self.context.device.update_descriptor_sets(&writes, &[]) };
         Ok(descriptor_set)
     }
 }

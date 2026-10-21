@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
+use crate::app::engine::renderer::render_resources::terrain_textures::TerrainTextures;
+use crate::app::engine::renderer::render_resources::texture_handler::TextureHandler;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::config::{MaterialDef, MaterialsConfig};
 
@@ -62,18 +64,22 @@ impl GpuMaterial {
 /// puis `materials.ron` dans l'ordre — même convention que `MaterialTable` —, puis le
 /// matériau de debug (magenta, cf. `MaterialsConfig::debug_id`).
 ///
+/// Porte aussi les textures du terrain (binding 1 du même set).
+///
 /// Statique : construite avec le terrain, envoyée dans la passe de transfert du
 /// démarrage.
 pub struct MaterialBuffer {
     staging: Buffer,
     buffer: Buffer,
     size: vk::DeviceSize,
+    textures: TerrainTextures,
     pub descriptor_set: vk::DescriptorSet,
 }
 
 impl MaterialBuffer {
     pub fn new(
         context: Arc<RenderingContext>,
+        texture_handler: &TextureHandler,
         descriptor_handler: &DescriptorHandler,
         config: &MaterialsConfig,
     ) -> Result<MaterialBuffer> {
@@ -105,22 +111,32 @@ impl MaterialBuffer {
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
-        let descriptor_set = descriptor_handler.create_materials_descriptor_set(buffer.buffer)?;
+        let textures = TerrainTextures::new(texture_handler, config)?;
+        let descriptor_set = descriptor_handler.create_materials_descriptor_set(
+            buffer.buffer,
+            textures.image_view(),
+            texture_handler.base_texture_sampler,
+        )?;
 
         Ok(MaterialBuffer {
             staging,
             buffer,
             size,
+            textures,
             descriptor_set,
         })
     }
 
-    /// Copie staging → device. Passe de transfert du démarrage uniquement (suivie
-    /// d'une attente complète de la queue : pas de barrière ici).
-    pub fn record_upload(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
+    /// Copie staging → device (table et textures). Passe de transfert du démarrage
+    /// uniquement (suivie d'une attente complète de la queue : pas de barrière ici).
+    pub fn record_upload(
+        &self,
+        texture_handler: &TextureHandler,
+        command_buffer: &vk::CommandBuffer,
+    ) -> Result<()> {
         unsafe {
-            device.cmd_copy_buffer(
-                command_buffer,
+            texture_handler.context.device.cmd_copy_buffer(
+                *command_buffer,
                 self.staging.buffer,
                 self.buffer.buffer,
                 &[vk::BufferCopy {
@@ -130,5 +146,11 @@ impl MaterialBuffer {
                 }],
             );
         }
+        self.textures.record_upload(texture_handler, command_buffer)
+    }
+
+    /// Libère le staging des textures, une fois la passe de transfert exécutée.
+    pub fn release_texture_staging(&mut self) {
+        self.textures.release_texture_staging();
     }
 }

@@ -29,7 +29,13 @@ struct VSOutput {
   float4 pos : SV_Position;
   float3 worldPos;
   float3 worldNormal; // normale monde, interpolée pour l'éclairage lisse
-  float3 color;       // couleur interpolée entre les sommets par le rasterizer
+  // Précipitations + humidité côtière, pour la teinte. Varient au km : une lecture
+  // par sommet suffit (cf. vault, Generation-Monde).
+  float rain;
+  // Matériaux du sommet, **non interpolés** : le fragment lit ceux des 3 sommets de
+  // son triangle (`GetAttributeAtVertex`) et les mélange lui-même.
+  nointerpolation uint4 materialIds;
+  nointerpolation float4 materialWeights;
 }
 
 [shader("vertex")]
@@ -40,16 +46,91 @@ VSOutput terrainVertMain(VSInput input) {
   // model = identité pour le terrain, mais on applique la normalMatrix par
   // cohérence (gère un éventuel scale non uniforme).
   output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
-  // Albédo du sommet, interpolé ensuite (Gouraud) : pour une grandeur linéaire comme
-  // l'albédo, identique à interpoler les poids. Les précipitations varient au km : une
-  // lecture par sommet suffit (cf. vault, Generation-Monde).
-  float rain = precipitation(worldPos.xy) + coastMoisture(worldPos.xy);
-  float3 albedo = 0.0;
-  for (int i = 0; i < VERTEX_MATERIALS; i++)
-    albedo += input.inWeights[i] * materialAlbedo(input.inMaterials[i], rain);
-  output.color = albedo;
+  output.rain = precipitation(worldPos.xy) + coastMoisture(worldPos.xy);
+  output.materialIds = input.inMaterials;
+  output.materialWeights = input.inWeights;
   output.worldPos = worldPos.xyz;
   return output;
+}
+
+// Matériaux distincts au plus dans un triangle : 3 sommets × 3.
+static const int PIXEL_MATERIALS = 3 * VERTEX_MATERIALS;
+// Poids sous lequel un matériau n'est pas lu (3 lectures de texture épargnées).
+static const float MIN_PIXEL_WEIGHT = 0.02;
+// Matériaux lus au plus par pixel (les plus lourds) : leurs lectures sont gardées en
+// registres le temps du mélange par hauteur.
+static const int BLEND_MATERIALS = 4;
+// Profondeur du mélange par hauteur : écart de score sous le meilleur en deçà duquel
+// un matériau contribue encore. → 0 : frontière découpée ; grand : moyenne pondérée.
+static const float HEIGHT_BLEND_DEPTH = 0.2;
+
+// Albédo du mélange de matériaux au pixel. Poids du matériau m :
+//   Σ_sommets λ_v · w_v(m)   (λ = barycentriques, w_v(m) = 0 si v ne porte pas m),
+// soit l'interpolation de ses poids à travers le triangle — ce que faisait le
+// Gouraud par sommet, mais matériau par matériau. `vIds` / `vWeights` : matériaux des
+// 3 sommets (lus dans le point d'entrée : Slang n'accepte `GetAttributeAtVertex` que
+// sur ses entrées directes).
+float3 blendedAlbedo(uint4 vIds[3], float4 vWeights[3], float3 bary, float rain,
+                     SurfacePoint s, float3 w) {
+  uint ids[PIXEL_MATERIALS];
+  float weights[PIXEL_MATERIALS];
+  int count = 0;
+  for (int v = 0; v < 3; v++) {
+    for (int i = 0; i < VERTEX_MATERIALS; i++) {
+      float wi = bary[v] * vWeights[v][i];
+      if (wi <= 0.0)
+        continue;
+      // Fusion des doublons (un matériau porté par plusieurs sommets).
+      int j = 0;
+      while (j < count && ids[j] != vIds[v][i])
+        j++;
+      if (j == count) {
+        ids[count] = vIds[v][i];
+        weights[count] = 0.0;
+        count++;
+      }
+      weights[j] += wi;
+    }
+  }
+
+  // Les BLEND_MATERIALS plus lourds, hors négligeables (tri par insertion).
+  // utilisé pour raison de performance (4*4 registres au lieu de 9 * 4)
+  uint topIds[BLEND_MATERIALS];
+  float topWeights[BLEND_MATERIALS];
+  int n = 0;
+  for (int j = 0; j < count; j++) {
+    if (weights[j] < MIN_PIXEL_WEIGHT)
+      continue;
+    int k = min(n, BLEND_MATERIALS - 1);
+    if (n == BLEND_MATERIALS && weights[j] <= topWeights[k])
+      continue; // liste pleine, plus léger que le dernier
+    while (k > 0 && topWeights[k - 1] < weights[j]) {
+      topIds[k] = topIds[k - 1];
+      topWeights[k] = topWeights[k - 1];
+      k--;
+    }
+    topIds[k] = ids[j];
+    topWeights[k] = weights[j];
+    n = min(n + 1, BLEND_MATERIALS);
+  }
+
+  // Mélange par hauteur : score = hauteur du relief + poids. Seuls les matériaux à
+  // moins de HEIGHT_BLEND_DEPTH du meilleur score contribuent : le relief le plus
+  // haut l'emporte au pixel (frontière irrégulière, pas de surimpression).
+  float4 surfaces[BLEND_MATERIALS];
+  float best = -1.0;
+  for (int j = 0; j < n; j++) {
+    surfaces[j] = surfaceSample(topIds[j], s, w, rain);
+    best = max(best, surfaces[j].a + topWeights[j]);
+  }
+  float3 albedo = 0.0;
+  float total = 0.0;
+  for (int j = 0; j < n; j++) {
+    float b = max(surfaces[j].a + topWeights[j] - best + HEIGHT_BLEND_DEPTH, 0.0);
+    albedo += b * surfaces[j].rgb;
+    total += b;
+  }
+  return total > 0.0 ? albedo / total : 0.0;
 }
 
 // Vertex shader « depth-only » de la passe d'ombre. Entrée minimale (position
@@ -64,15 +145,22 @@ float4 terrainShadowVertMain(ShadowVSInput input) : SV_Position {
 }
 
 [shader("fragment")]
-float4 terrainFragMain(VSOutput vertIn) : SV_Target {
+float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Target {
   // Normale lissée interpolée depuis les sommets (gradient de densité). Donne un
   // ombrage doux sur la surface Surface Nets, contrairement au flat shading.
   // La renormaliser : l'interpolation linéaire raccourcit le vecteur.
   float3 N = normalize(vertIn.worldNormal);
 
-  // Albédo du mélange de matériaux, calculé par sommet (table GPU) et interpolé par
-  // le rasterizer.
-  float3 material = vertIn.color;
+  // Albédo du mélange de matériaux, texturé (triplanaire) ou couleur de table. Pas
+  // de teinte d'humidité sur les textures pour l'instant.
+  SurfacePoint s = { vertIn.worldPos, ddx(vertIn.worldPos), ddy(vertIn.worldPos) };
+  uint4 vIds[3];
+  float4 vWeights[3];
+  for (int v = 0; v < 3; v++) {
+    vIds[v] = GetAttributeAtVertex(vertIn.materialIds, v);
+    vWeights[v] = GetAttributeAtVertex(vertIn.materialWeights, v);
+  }
+  float3 material = blendedAlbedo(vIds, vWeights, bary, vertIn.rain, s, triplanarWeights(N));
 
   float3 L = normalize(-ubo.lightDirection.xyz);
   float NdotL = max(dot(N, L), 0.0);

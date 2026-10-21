@@ -64,7 +64,7 @@ impl Default for MaterialDef {
             albedo: Vec3::new(1.0, 0.0, 1.0),
             humidity_tint: None,
             texture: None,
-            texture_size: 4.0,
+            texture_size: 10.0,
         }
     }
 }
@@ -144,7 +144,11 @@ impl ConfigFile for MaterialsConfig {
             ensure!(m.name != "air", "\"air\" est réservé (ID 0)");
             ensure!(names.insert(&m.name), "matériau \"{}\" en double", m.name);
             let in_unit = |c: Vec3| c.min_element() >= 0.0 && c.max_element() <= 1.0;
-            ensure!(in_unit(m.albedo), "{} : albedo doit être dans [0, 1]", m.name);
+            ensure!(
+                in_unit(m.albedo),
+                "{} : albedo doit être dans [0, 1]",
+                m.name
+            );
             if let Some(t) = &m.humidity_tint {
                 ensure!(
                     in_unit(t.dry_albedo),
@@ -157,11 +161,20 @@ impl ConfigFile for MaterialsConfig {
                     m.name
                 );
             }
-            ensure!(m.texture_size > 0.0, "{} : texture_size doit être > 0", m.name);
+            ensure!(
+                m.texture_size > 0.0,
+                "{} : texture_size doit être > 0",
+                m.name
+            );
             if let Some(t) = &m.texture {
                 for file in [TEXTURE_COLOR, TEXTURE_HEIGHT] {
                     let path = terrain_texture_path(t, file);
-                    ensure!(path.is_file(), "{} : {} introuvable", m.name, path.display());
+                    ensure!(
+                        path.is_file(),
+                        "{} : {} introuvable",
+                        m.name,
+                        path.display()
+                    );
                 }
             }
         }

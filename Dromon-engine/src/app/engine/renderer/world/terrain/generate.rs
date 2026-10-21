@@ -75,6 +75,7 @@ impl World {
         )?);
         self.materials = Some(MaterialBuffer::new(
             self.context.clone(),
+            &self.rrm.texture_handler,
             &self.descriptor_handler,
             &self.config.materials,
         )?);

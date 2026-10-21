@@ -52,11 +52,28 @@ impl RenderingContext {
         aspect_flags: vk::ImageAspectFlags,
         mip_levels: u32,
     ) -> Result<vk::ImageView> {
+        self.create_image_view_layers(image, format, aspect_flags, mip_levels, 1)
+    }
+
+    /// Vue sur `array_layers` couches : `TYPE_2D_ARRAY` dès qu'il y en a plus d'une.
+    pub fn create_image_view_layers(
+        &self,
+        image: &vk::Image,
+        format: vk::Format,
+        aspect_flags: vk::ImageAspectFlags,
+        mip_levels: u32,
+        array_layers: u32,
+    ) -> Result<vk::ImageView> {
+        let view_type = if array_layers > 1 {
+            vk::ImageViewType::TYPE_2D_ARRAY
+        } else {
+            vk::ImageViewType::TYPE_2D
+        };
         let image_view = unsafe {
             self.device.create_image_view(
                 &vk::ImageViewCreateInfo::default()
                     .image(*image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .view_type(view_type)
                     .format(format)
                     .components(vk::ComponentMapping::default())
                     .subresource_range(
@@ -65,7 +82,7 @@ impl RenderingContext {
                             .base_mip_level(0)
                             .level_count(mip_levels)
                             .base_array_layer(0)
-                            .layer_count(1),
+                            .layer_count(array_layers),
                     ),
                 None,
             )
@@ -84,6 +101,32 @@ impl RenderingContext {
         usage: vk::ImageUsageFlags,
         memory_properties: vk::MemoryPropertyFlags,
     ) -> Result<(vk::Image, vk::DeviceMemory)> {
+        self.create_image_layers(
+            width,
+            height,
+            mip_levels,
+            1,
+            num_samples,
+            format,
+            tiling,
+            usage,
+            memory_properties,
+        )
+    }
+
+    /// `create_image` à `array_layers` couches (texture array).
+    pub fn create_image_layers(
+        &self,
+        width: u32,
+        height: u32,
+        mip_levels: u32,
+        array_layers: u32,
+        num_samples: vk::SampleCountFlags,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        memory_properties: vk::MemoryPropertyFlags,
+    ) -> Result<(vk::Image, vk::DeviceMemory)> {
         let image = unsafe {
             self.device.create_image(
                 &vk::ImageCreateInfo::default()
@@ -95,7 +138,7 @@ impl RenderingContext {
                         depth: 1,
                     })
                     .mip_levels(mip_levels)
-                    .array_layers(1)
+                    .array_layers(array_layers)
                     .samples(num_samples)
                     .tiling(tiling)
                     .usage(usage)

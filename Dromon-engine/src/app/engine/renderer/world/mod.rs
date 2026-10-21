@@ -137,7 +137,7 @@ impl World {
             world_maps.record_upload(&self.rrm.texture_handler, command_buffer)?;
         }
         if let Some(materials) = self.materials.as_ref() {
-            materials.record_upload(&self.context.device, *command_buffer);
+            materials.record_upload(&self.rrm.texture_handler, command_buffer)?;
         }
         self.rrm.initialize(command_buffer)
     }
@@ -146,6 +146,9 @@ impl World {
     pub fn release_texture_staging(&mut self) {
         if let Some(world_maps) = self.world_maps.as_mut() {
             world_maps.release_texture_staging();
+        }
+        if let Some(materials) = self.materials.as_mut() {
+            materials.release_texture_staging();
         }
         self.rrm.release_texture_staging();
     }

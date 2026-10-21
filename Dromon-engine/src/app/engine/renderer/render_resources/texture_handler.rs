@@ -16,7 +16,9 @@ use std::sync::Arc;
 pub struct TextureHandler {
     pub context: Arc<RenderingContext>,
     pub logger: Arc<Logger>,
-    pub object_texture_sampler: vk::Sampler,
+    /// Sampler des textures de surface (objets, terrain) : répétition, trilinéaire,
+    /// anisotropie max.
+    pub base_texture_sampler: vk::Sampler,
     descriptor_handler: Arc<DescriptorHandler>,
 }
 
@@ -26,16 +28,16 @@ impl TextureHandler {
         logger: Arc<Logger>,
         descriptor_handler: Arc<DescriptorHandler>,
     ) -> Result<TextureHandler> {
-        let object_texture_sampler = Self::create_object_texture_sampler(&context)?;
+        let base_texture_sampler = Self::create_base_texture_sampler(&context)?;
         Ok(TextureHandler {
             context,
             logger,
-            object_texture_sampler,
+            base_texture_sampler,
             descriptor_handler,
         })
     }
 
-    fn create_object_texture_sampler(context: &RenderingContext) -> Result<vk::Sampler> {
+    fn create_base_texture_sampler(context: &RenderingContext) -> Result<vk::Sampler> {
         let properties = context.physical_device.properties;
         let sampler_info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
@@ -75,19 +77,19 @@ impl TextureHandler {
             pixels.len(),
         ));
 
-        let mip_levels = ((image_width.max(image_height) as f32).log2().floor() as u32) + 1;
         let (mut texture, staging) = self.create_texture_from_bytes(
             image_width,
             image_height,
             vk::Format::R8G8B8A8_SRGB,
-            mip_levels,
+            full_mip_chain(image_width, image_height),
+            1,
             pixels,
         )?;
 
         // create one descriptor set (with one descriptor) per texture
         texture.descriptor_set = Some(self.descriptor_handler.create_texture_descriptor_set(
             &texture.texture_image_view,
-            &self.object_texture_sampler,
+            &self.base_texture_sampler,
         )?);
         Ok((texture, staging))
     }
@@ -103,7 +105,22 @@ impl TextureHandler {
         format: vk::Format,
         bytes: &[u8],
     ) -> Result<(Texture, Buffer)> {
-        self.create_texture_from_bytes(width, height, format, 1, bytes)
+        self.create_texture_from_bytes(width, height, format, 1, 1, bytes)
+    }
+
+    /// **Texture array** de `array_layers` couches `width × height`, avec mipmaps.
+    /// `bytes` = les couches bout à bout, chacune rangée ligne par ligne au `format`.
+    /// Sans descriptor set : l'appelant l'intègre au sien.
+    pub fn create_texture_array(
+        &self,
+        width: u32,
+        height: u32,
+        array_layers: u32,
+        format: vk::Format,
+        bytes: &[u8],
+    ) -> Result<(Texture, Buffer)> {
+        let mip_levels = full_mip_chain(width, height);
+        self.create_texture_from_bytes(width, height, format, mip_levels, array_layers, bytes)
     }
 
     /// Image device-local et sa vue + staging rempli ; la copie de l'un vers l'autre
@@ -115,6 +132,7 @@ impl TextureHandler {
         height: u32,
         format: vk::Format,
         mip_levels: u32,
+        array_layers: u32,
         bytes: &[u8],
     ) -> Result<(Texture, Buffer)> {
         // staging buffer
@@ -126,10 +144,11 @@ impl TextureHandler {
         )?;
         staging_buffer.upload(bytes)?;
 
-        let (texture_image, texture_image_memory) = self.context.create_image(
+        let (texture_image, texture_image_memory) = self.context.create_image_layers(
             width,
             height,
             mip_levels,
+            array_layers,
             vk::SampleCountFlags::TYPE_1,
             format,
             vk::ImageTiling::OPTIMAL,
@@ -139,11 +158,12 @@ impl TextureHandler {
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
 
-        let texture_image_view = self.context.create_image_view(
+        let texture_image_view = self.context.create_image_view_layers(
             &texture_image,
             format,
             vk::ImageAspectFlags::COLOR,
             mip_levels,
+            array_layers,
         )?;
 
         let texture = Texture::new(
@@ -151,6 +171,7 @@ impl TextureHandler {
             width,
             height,
             mip_levels,
+            array_layers,
             format,
             texture_image,
             texture_image_memory,
@@ -194,7 +215,7 @@ impl TextureHandler {
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .mip_level(0)
                     .base_array_layer(0)
-                    .layer_count(1),
+                    .layer_count(texture.array_layers),
             )
             .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
             .image_extent(vk::Extent3D {
@@ -221,10 +242,16 @@ impl TextureHandler {
                 texture.image_width,
                 texture.image_height,
                 texture.mip_levels,
+                texture.array_layers,
             )?;
         }
         Ok(())
     }
+}
+
+/// Nombre de niveaux d'une chaîne de mipmaps complète (jusqu'à 1 × 1).
+fn full_mip_chain(width: u32, height: u32) -> u32 {
+    width.max(height).ilog2() + 1
 }
 
 impl Drop for TextureHandler {
@@ -232,7 +259,7 @@ impl Drop for TextureHandler {
         unsafe {
             self.context
                 .device
-                .destroy_sampler(self.object_texture_sampler, None);
+                .destroy_sampler(self.base_texture_sampler, None);
         }
     }
 }

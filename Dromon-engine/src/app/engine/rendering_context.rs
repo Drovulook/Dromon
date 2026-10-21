@@ -5,7 +5,7 @@
  * - graphics / present / transfer / compute sur la même famille (single_queue_family)
  * - Surface support vérifiée sur queue index 0 uniquement (retain hardcodé)
  * - Features supportées par le GPU : dynamic_rendering, buffer_device_address
- * - Extension VK_KHR_swapchain disponible
+ * - Extensions VK_KHR_swapchain et VK_KHR_fragment_shader_barycentric disponibles
  * - La compatibility_surface est temporaire : détruite après filtrage des devices
  */
 mod commands;
@@ -254,7 +254,16 @@ impl RenderingContext {
                             // PolygonMode::LINE / POINT (vue fil de fer du terrain).
                             .fill_mode_non_solid(true),
                     )
-                    .enabled_extension_names(&[ash::khr::swapchain::NAME.as_ptr()])
+                    .enabled_extension_names(&[
+                        ash::khr::swapchain::NAME.as_ptr(),
+                        // Mélange des matériaux du terrain au pixel (attributs bruts des
+                        // 3 sommets + coordonnées barycentriques).
+                        ash::khr::fragment_shader_barycentric::NAME.as_ptr(),
+                    ])
+                    .push_next(
+                        &mut vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR::default()
+                            .fragment_shader_barycentric(true),
+                    )
                     .push_next(
                         &mut vk::PhysicalDeviceVulkan11Features::default()
                             .shader_draw_parameters(true),

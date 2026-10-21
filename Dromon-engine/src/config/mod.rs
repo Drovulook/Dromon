@@ -25,7 +25,10 @@ pub use material_rules::{
     ClimateEdge, CoastMoisture, DirtPatchParams, MaterialNoiseParams, MaterialRulesConfig,
     NoiseLayer, OutcropParams, ShoreParams, SlopeAngle, SlopeParams, SnowDryness, StrataParams,
 };
-pub use materials::{HumidityTint, MaterialDef, MaterialsConfig};
+pub use materials::{
+    HumidityTint, MaterialDef, MaterialsConfig, TEXTURE_COLOR, TEXTURE_HEIGHT,
+    terrain_texture_path,
+};
 pub use render::{
     CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
     TerrainRenderParams, TonemapParams, WaterRenderParams,

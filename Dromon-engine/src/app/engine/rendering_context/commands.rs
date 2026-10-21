@@ -124,7 +124,8 @@ impl RenderingContext {
                     .base_mip_level(0)
                     .level_count(mip_levels)
                     .base_array_layer(0)
-                    .layer_count(1),
+                    // Toutes les couches (1 hors texture array).
+                    .layer_count(vk::REMAINING_ARRAY_LAYERS),
             )
     }
 
@@ -168,6 +169,7 @@ impl RenderingContext {
         text_width: u32,
         text_height: u32,
         mip_levels: u32,
+        array_layers: u32,
     ) -> Result<()> {
         let props = unsafe {
             self.instance
@@ -190,7 +192,7 @@ impl RenderingContext {
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .level_count(1)
                     .base_array_layer(0)
-                    .layer_count(1),
+                    .layer_count(array_layers),
             );
 
         let mut mip_width = text_width as i32;
@@ -212,7 +214,7 @@ impl RenderingContext {
                 );
             }
 
-            // blit
+            // blit (toutes les couches d'un coup)
             let blit = vk::ImageBlit::default()
                 .src_offsets([
                     vk::Offset3D { x: 0, y: 0, z: 0 },
@@ -235,14 +237,14 @@ impl RenderingContext {
                         .aspect_mask(vk::ImageAspectFlags::COLOR)
                         .mip_level(i - 1)
                         .base_array_layer(0)
-                        .layer_count(1),
+                        .layer_count(array_layers),
                 )
                 .dst_subresource(
                     vk::ImageSubresourceLayers::default()
                         .aspect_mask(vk::ImageAspectFlags::COLOR)
                         .mip_level(i)
                         .base_array_layer(0)
-                        .layer_count(1),
+                        .layer_count(array_layers),
                 );
             unsafe {
                 self.device.cmd_blit_image(
