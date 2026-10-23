@@ -105,7 +105,7 @@ impl Terrain {
         let Some(mut update) = self.streamer.update(focus) else {
             return;
         };
-
+        profile!();
         // Les sortants n'attendent pas le lot : ils sont à la portée de chargement, donc
         // au loin, et leurs voisins encore affichés bordent alors du vide — un trou à
         // l'horizon, pas une fissure. Leurs voisins sont re-maillés dans le lot.
@@ -122,9 +122,9 @@ impl Terrain {
         let snapshot = TerrainSnapshot::new(&self.source, &self.store, self.debug.mesh);
         // Du plus proche au plus lointain : les workers suivent cet ordre, donc les
         // groupes proches de la caméra s'affichent en premier.
-        update
-            .dirty
-            .sort_by(|&a, &b| chunk_distance(a, focus.pos).total_cmp(&chunk_distance(b, focus.pos)));
+        update.dirty.sort_by(|&a, &b| {
+            chunk_distance(a, focus.pos).total_cmp(&chunk_distance(b, focus.pos))
+        });
         self.mesh_job = Some(MeshJob::start(
             update.grid,
             update.dirty,
@@ -145,6 +145,7 @@ impl Terrain {
         let Some(job) = self.mesh_job.as_mut() else {
             return Ok(());
         };
+        profile!();
         job.collect();
         let complete = job.build(&mut self.mesh_cache, &self.context)?;
         let built = job.take_built();

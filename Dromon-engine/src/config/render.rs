@@ -16,6 +16,35 @@ pub struct RenderConfig {
     pub terrain: TerrainRenderParams,
     pub water: WaterRenderParams,
     pub tonemap: TonemapParams,
+    pub textures: TextureParams,
+}
+
+/// Filtrage des textures de surface (objets, terrain : `base_texture_sampler`).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TextureParams {
+    pub anisotropy: Anisotropy,
+}
+
+/// Filtrage anisotrope : nombre max de sondes le long de l'empreinte d'un pixel (sol
+/// vu en rasant).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub enum Anisotropy {
+    /// Limite du GPU (16 en général).
+    #[default]
+    Max,
+    /// Valeur fixe ≥ 1 (1 = désactivé), ramenée à la limite du GPU.
+    Fixed(f32),
+}
+
+impl Anisotropy {
+    /// Valeur effective, sur un GPU de limite `device_max`.
+    pub fn resolve(self, device_max: f32) -> f32 {
+        match self {
+            Anisotropy::Max => device_max,
+            Anisotropy::Fixed(a) => a.min(device_max),
+        }
+    }
 }
 
 /// Tone mapping (Khronos PBR Neutral) appliqué en fin de chaque fragment shader
@@ -58,6 +87,9 @@ impl ConfigFile for RenderConfig {
         );
 
         ensure!(self.tonemap.exposure > 0.0, "tonemap.exposure doit être > 0");
+        if let Anisotropy::Fixed(a) = self.textures.anisotropy {
+            ensure!(a >= 1.0, "textures.anisotropy : Fixed(a) exige a ≥ 1");
+        }
 
         let s = &self.shadow;
         ensure!(s.map_resolution > 0, "shadow.map_resolution doit être > 0");
@@ -163,6 +195,9 @@ const MIN_WATER_MORPH_MARGIN: f32 = 2.0 * std::f32::consts::SQRT_2;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WaterRenderParams {
+    /// Dessine la surface de la mer. `false` : passe sautée (mesures de performance) ;
+    /// le fond reste teinté par l'eau (terrain.slang).
+    pub enabled: bool,
     /// Côté des nœuds les plus fins (niveau 0), en unités monde.
     pub leaf_size: f32,
     /// Portée d'un niveau ÷ côté de ses nœuds : un nœud est découpé si la caméra est à
@@ -176,6 +211,7 @@ pub struct WaterRenderParams {
 impl Default for WaterRenderParams {
     fn default() -> Self {
         WaterRenderParams {
+            enabled: true,
             leaf_size: 64.0,
             range_factor: 4.0,
             morph_start_ratio: 0.75,

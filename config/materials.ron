@@ -2,7 +2,9 @@
 // L'ID d'un matériau = sa position + 1 (0 = air, réservé) ; le code les désigne par
 // leur `name` : l'ordre est libre. Une propriété absente prend sa valeur par défaut.
 //
-// albedo : couleur de base LINÉAIRE (pas sRGB), composantes dans [0, 1].
+// albedo : couleur de base LINÉAIRE (pas sRGB), composantes dans [0, 1]. Matériau
+//   texturé : c'est la couleur d'ensemble, la texture n'apporte que le détail
+//   (texel / moyenne de la texture × albedo) ; albedo = moyenne → photo inchangée.
 // humidity_tint : Some((dry_albedo, dry, wet)) — couleur fondue de dry_albedo (pluie
 //   ≤ dry) vers albedo (pluie ≥ wet). Pluie normalisée sur les terres : 18 % sous
 //   0,05, médiane ~0,32, 1 = côte humide de référence. Le sable des déserts apparaît
@@ -12,11 +14,15 @@
 // texture_size : côté d'une répétition de la texture, en voxels (défaut 10).
 (
     materials: [
-        (name: "rock",  albedo: (0.40, 0.38, 0.35), texture: Some("rock"), texture_size: 20.0),
+        // Albédo : milieu entre la moyenne de la texture (0.12, 0.11, 0.10) et
+        // l'ancienne couleur unie (0.40, 0.38, 0.35).
+        (name: "rock",  albedo: (0.26, 0.24, 0.22), texture: Some("rock"), texture_size: 20.0),
         // Roche des zones arides (pluie ≲ 0,25), à la place de `rock` : ocre-rouge.
         (
             name: "sandstone",
-            albedo: (0.52, 0.34, 0.20),
+            // Milieu entre la moyenne de la texture (0.11, 0.08, 0.07) et l'ancienne
+            // couleur unie (0.52, 0.34, 0.20).
+            albedo: (0.32, 0.21, 0.13),
             texture: Some("sandstone"),
             texture_size: 20.0,
         ),
@@ -24,9 +30,9 @@
             name: "dirt",
             texture: Some("dirt"),
             texture_size: 10.0,
-            albedo: (0.30, 0.24, 0.17),     // humide : brun sombre (un sol mouillé fonce)
+            albedo: (0.21, 0.15, 0.09),     // humide : brun sombre (= moyenne de la texture)
             humidity_tint: Some((
-                dry_albedo: (0.48, 0.38, 0.26), // sec : ocre clair, poussiéreux
+                dry_albedo: (0.34, 0.24, 0.14), // sec : ocre clair, poussiéreux
                 dry: 0.10,
                 wet: 0.50,
             )),
@@ -35,9 +41,9 @@
             name: "grass",
             texture: Some("grass"),
             texture_size: 10.0,
-            albedo: (0.19, 0.40, 0.08),     // humide : vert dense, légèrement chaud
+            albedo: (0.14, 0.24, 0.035),    // humide : vert dense (= moyenne de la texture)
             humidity_tint: Some((
-                dry_albedo: (0.46, 0.47, 0.13), // sec : vert-jaune sec (≠ terre, plus brune)
+                dry_albedo: (0.34, 0.28, 0.06), // sec : vert-jaune sec (≠ terre, plus brune)
                 dry: 0.20,
                 wet: 0.70,
             )),

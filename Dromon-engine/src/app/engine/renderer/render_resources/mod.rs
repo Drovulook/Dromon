@@ -22,6 +22,7 @@ use crate::app::{
     },
     logger::Logger,
 };
+use crate::config::Anisotropy;
 use anyhow::Result;
 use ash::vk;
 pub use material_buffer::MaterialBuffer;
@@ -48,6 +49,7 @@ impl RenderResourceManager {
         context: Arc<RenderingContext>,
         logger: Arc<Logger>,
         descriptor_handler: Arc<DescriptorHandler>,
+        anisotropy: Anisotropy,
     ) -> Result<RenderResourceManager> {
         Ok(RenderResourceManager {
             logger: logger.clone(),
@@ -58,6 +60,7 @@ impl RenderResourceManager {
                 context.clone(),
                 logger.clone(),
                 descriptor_handler,
+                anisotropy,
             )?,
             mesh_handler: ObjectMeshHandler::new(context, logger),
         })

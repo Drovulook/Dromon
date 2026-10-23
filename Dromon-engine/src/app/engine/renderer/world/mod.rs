@@ -86,6 +86,7 @@ impl World {
             context.clone(),
             logger.clone(),
             descriptor_handler.clone(),
+            config.render.textures.anisotropy,
         )?;
         let env = &config.environment;
 

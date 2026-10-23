@@ -26,12 +26,12 @@ pub use material_rules::{
     NoiseLayer, OutcropParams, ShoreParams, SlopeAngle, SlopeParams, SnowDryness, StrataParams,
 };
 pub use materials::{
-    HumidityTint, MaterialDef, MaterialsConfig, TEXTURE_COLOR, TEXTURE_HEIGHT,
-    terrain_texture_path,
+    HumidityTint, MaterialDef, MaterialsConfig, TEXTURE_AO, TEXTURE_COLOR, TEXTURE_HEIGHT,
+    TEXTURE_NORMAL, terrain_texture_path,
 };
 pub use render::{
-    CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig, ShadowSettings,
-    TerrainRenderParams, TonemapParams, WaterRenderParams,
+    Anisotropy, CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig,
+    ShadowSettings, TerrainRenderParams, TextureParams, TonemapParams, WaterRenderParams,
 };
 pub use world_gen::{
     BaseNoise, ClimateParams, CoastProfile, ContinentParams, HeightParams, MountainParams,

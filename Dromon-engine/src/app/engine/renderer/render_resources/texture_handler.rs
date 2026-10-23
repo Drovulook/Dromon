@@ -8,6 +8,7 @@ use crate::app::{
     },
     logger::Logger,
 };
+use crate::config::Anisotropy;
 use anyhow::Result;
 use ash::vk;
 use image::ImageReader;
@@ -17,7 +18,7 @@ pub struct TextureHandler {
     pub context: Arc<RenderingContext>,
     pub logger: Arc<Logger>,
     /// Sampler des textures de surface (objets, terrain) : répétition, trilinéaire,
-    /// anisotropie max.
+    /// anisotropie réglable (`render.ron` → `textures.anisotropy`).
     pub base_texture_sampler: vk::Sampler,
     descriptor_handler: Arc<DescriptorHandler>,
 }
@@ -27,8 +28,14 @@ impl TextureHandler {
         context: Arc<RenderingContext>,
         logger: Arc<Logger>,
         descriptor_handler: Arc<DescriptorHandler>,
+        anisotropy: Anisotropy,
     ) -> Result<TextureHandler> {
-        let base_texture_sampler = Self::create_base_texture_sampler(&context)?;
+        let device_max = context.physical_device.properties.limits.max_sampler_anisotropy;
+        let anisotropy = anisotropy.resolve(device_max);
+        logger.info(&format!(
+            "Anisotropie des textures : {anisotropy} (max GPU {device_max})"
+        ));
+        let base_texture_sampler = Self::create_base_texture_sampler(&context, anisotropy)?;
         Ok(TextureHandler {
             context,
             logger,
@@ -37,16 +44,19 @@ impl TextureHandler {
         })
     }
 
-    fn create_base_texture_sampler(context: &RenderingContext) -> Result<vk::Sampler> {
-        let properties = context.physical_device.properties;
+    fn create_base_texture_sampler(
+        context: &RenderingContext,
+        anisotropy: f32,
+    ) -> Result<vk::Sampler> {
         let sampler_info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)
             .address_mode_u(vk::SamplerAddressMode::REPEAT)
             .address_mode_v(vk::SamplerAddressMode::REPEAT)
             .address_mode_w(vk::SamplerAddressMode::REPEAT)
-            .anisotropy_enable(true)
-            .max_anisotropy(properties.limits.max_sampler_anisotropy)
+            // 1 = filtrage trilinéaire seul.
+            .anisotropy_enable(anisotropy > 1.0)
+            .max_anisotropy(anisotropy)
             .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
             .unnormalized_coordinates(false)
             .compare_enable(false)

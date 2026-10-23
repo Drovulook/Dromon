@@ -150,7 +150,7 @@ pub fn render(frame: &mut Frame, state: &mut ProfilingState, area: Rect) {
     }
 
     let [init_area, bottom_area] =
-        Layout::vertical([Constraint::Fill(2), Constraint::Fill(2)]).areas(area);
+        Layout::vertical([Constraint::Fill(2), Constraint::Fill(3)]).areas(area);
     let [frame_area, gpu_area] =
         Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(bottom_area);
 

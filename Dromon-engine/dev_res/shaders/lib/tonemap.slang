@@ -5,21 +5,25 @@
 
 #include "bindings.slang"
 
+// Pied de PBR Neutral : retire le ~4 % de reflet spéculaire du PBR (F₀ = 0,04) ;
+// parabole sous 0,08 pour rester ≥ 0, raccordée sans cassure (valeur 0,04, pente nulle
+// en 0,08). Toujours ≤ au plus faible canal. Écrase les tons très sombres (nuit) :
+// 0,02 → 0,0025.
+float toeOffset(float3 color) {
+  float x = min(color.r, min(color.g, color.b));
+  return x < 0.08 ? x - 6.25 * x * x : 0.04;
+}
+
 // Khronos PBR Neutral (2024) : identité sous ~0,76, puis compression du canal le plus
 // fort appliquée aux trois (teinte préservée), désaturation des très hautes lumières.
 // Réf. : github.com/KhronosGroup/ToneMapping/tree/main/PBR_Neutral
-// `toe` : applique le pied (cf. `tonemapAdditive` pour s'en passer).
+// `toe` : applique le pied (cf. `tonemapBlended` pour l'appliquer à part).
 float3 pbrNeutral(float3 color, bool toe) {
   const float startCompression = 0.8 - 0.04;
   const float desaturation = 0.15;
 
-  // Pied : retire le ~4 % de reflet spéculaire du PBR (F₀ = 0,04) ; parabole sous 0,08
-  // pour rester ≥ 0, raccordée sans cassure (valeur 0,04, pente nulle en 0,08).
-  if (toe) {
-    float x = min(color.r, min(color.g, color.b));
-    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-    color -= offset;
-  }
+  if (toe)
+    color -= toeOffset(color);
 
   float peak = max(color.r, max(color.g, color.b));
   if (peak < startCompression) return color;
@@ -41,11 +45,13 @@ float3 tonemap(float3 color) {
   return pbrNeutral(color * ubo.tonemapParams.y, true);
 }
 
-// Pour une couleur **ajoutée** à un fond par mélange (eau, alpha prémultiplié) : à
-// appliquer à la contribution déjà pondérée (`F · reflet`), et sans le pied, qui
-// retirerait 0,04 à un terme faible (reflet du ciel ≈ 0,03 → effacé). Seule l'épaule
-// agit : les forts reflets (soleil) sont compressés vers le blanc.
-float3 tonemapAdditive(float3 color) {
-  if (ubo.tonemapParams.x == 0.0) return color;
-  return pbrNeutral(color * ubo.tonemapParams.y, false);
+// Contribution `weight · color` **ajoutée** à un fond par mélange (eau, alpha
+// prémultiplié, weight = F). Pied appliqué à `color` avant pondération, comme sur le
+// ciel et le terrain : sur `F · reflet`, il effacerait un reflet faible ; sans pied, le
+// reflet du ciel nocturne ressortirait plus clair que le ciel lui-même. Épaule sur la
+// contribution pondérée : les forts reflets (soleil) ne sont pas plafonnés à F.
+float3 tonemapBlended(float3 color, float weight) {
+  if (ubo.tonemapParams.x == 0.0) return weight * color;
+  color *= ubo.tonemapParams.y;
+  return pbrNeutral(weight * (color - toeOffset(color)), false);
 }

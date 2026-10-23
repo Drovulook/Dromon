@@ -78,11 +78,11 @@ impl DescriptorHandler {
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(frame_count),
-            // + la shadow map + les cartes du monde + les textures du terrain, aussi des
+            // + la shadow map + les cartes du monde + les 2 arrays du terrain, aussi des
             // combined image samplers.
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(MAX_TEXTURES + 1 + WORLD_MAP_COUNT + 1),
+                .descriptor_count(MAX_TEXTURES + 1 + WORLD_MAP_COUNT + 2),
             // La table des matériaux.
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::STORAGE_BUFFER)
@@ -188,9 +188,15 @@ impl DescriptorHandler {
                 .descriptor_count(1)
                 // Lue par le mélange des matériaux au pixel.
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-            // Textures du terrain (texture array).
+            // Textures du terrain (texture arrays) : albédo + hauteur.
             vk::DescriptorSetLayoutBinding::default()
                 .binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+            // Normales + AO.
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(2)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT),
@@ -356,11 +362,12 @@ impl DescriptorHandler {
     }
 
     /// Alloue et écrit le set de la table des matériaux (set 4) : `buffer` entier au
-    /// binding 0.
+    /// binding 0, textures du terrain aux bindings 1 (albédo) et 2 (normales).
     pub fn create_materials_descriptor_set(
         &self,
         buffer: vk::Buffer,
-        textures: vk::ImageView,
+        albedo: vk::ImageView,
+        normal: vk::ImageView,
         sampler: vk::Sampler,
     ) -> Result<vk::DescriptorSet> {
         let descriptor_set = unsafe {
@@ -375,10 +382,13 @@ impl DescriptorHandler {
             .buffer(buffer)
             .offset(0)
             .range(vk::WHOLE_SIZE)];
-        let image_info = [vk::DescriptorImageInfo::default()
-            .sampler(sampler)
-            .image_view(textures)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let image_info = |view| {
+            [vk::DescriptorImageInfo::default()
+                .sampler(sampler)
+                .image_view(view)
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
+        };
+        let (albedo_info, normal_info) = (image_info(albedo), image_info(normal));
         let writes = [
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor_set)
@@ -391,7 +401,13 @@ impl DescriptorHandler {
                 .dst_binding(1)
                 .dst_array_element(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&image_info),
+                .image_info(&albedo_info),
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor_set)
+                .dst_binding(2)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&normal_info),
         ];
 
         unsafe { self.context.device.update_descriptor_sets(&writes, &[]) };

@@ -81,7 +81,7 @@ float4 waterFragMain(WaterVSOutput vertIn) : SV_Target {
   // Vu d'en dessous (provisoire, sans fenêtre de Snell) : reflet des profondeurs, pas
   // d'air traversé.
   if (fromBelow)
-    return float4(tonemapAdditive(F * deepWaterColor(vertIn.worldPos.xy)), F);
+    return float4(tonemapBlended(deepWaterColor(vertIn.worldPos.xy), F), F);
 
   float3 R = reflect(V, N);
   R.z = max(R.z, 0.0); // une pente forte peut réfléchir vers le bas : horizon au plus bas
@@ -96,9 +96,8 @@ float4 waterFragMain(WaterVSOutput vertIn) : SV_Target {
   // α = F. Le brouillard s'applique au tout, factorisé par F : le fond (déjà dans le
   // framebuffer) l'a reçu jusqu'à ce même point, le mélange reste cohérent.
   float3 reflection = applyFog(sky + glint / F, vertIn.worldPos, L, lightCol);
-  // Tone mapping de la contribution de la surface (`F · reflet` = F·ciel + reflet du
-  // soleil), pas du reflet brut : tonaliser `reflet` puis × F plafonnerait le soleil à
-  // F (quelques %). Le fond, déjà dans le framebuffer, est tonalisé à part : mélange
-  // approché, exact là où la courbe est linéaire (tout sauf les forts reflets).
-  return float4(tonemapAdditive(F * reflection), F);
+  // Tone mapping de la contribution `F · reflet` (cf. `tonemapBlended`). Le fond, déjà
+  // dans le framebuffer, est tonalisé à part : mélange approché, exact hors des forts
+  // reflets.
+  return float4(tonemapBlended(reflection, F), F);
 }

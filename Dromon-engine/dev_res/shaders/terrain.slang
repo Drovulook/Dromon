@@ -14,9 +14,6 @@ struct VSInput {
   float4 inWeights;   // location 3 — poids associés, somme 1 (w inutilisé)
 }
 
-// Matériaux portés par un sommet (3, cf. `VOXEL_MATERIALS`).
-static const int VERTEX_MATERIALS = 3;
-
 // Humidité côtière ajoutée aux précipitations pour la **teinte** des matériaux (sable
 // de plage beige, frange côtière plus verte) : pleine sur la côte, nulle à `range`
 // voxels dans les terres (material_rules.ron → `coast_moisture`).
@@ -53,85 +50,9 @@ VSOutput terrainVertMain(VSInput input) {
   return output;
 }
 
-// Matériaux distincts au plus dans un triangle : 3 sommets × 3.
-static const int PIXEL_MATERIALS = 3 * VERTEX_MATERIALS;
-// Poids sous lequel un matériau n'est pas lu (3 lectures de texture épargnées).
-static const float MIN_PIXEL_WEIGHT = 0.02;
-// Matériaux lus au plus par pixel (les plus lourds) : leurs lectures sont gardées en
-// registres le temps du mélange par hauteur.
-static const int BLEND_MATERIALS = 4;
-// Profondeur du mélange par hauteur : écart de score sous le meilleur en deçà duquel
-// un matériau contribue encore. → 0 : frontière découpée ; grand : moyenne pondérée.
-static const float HEIGHT_BLEND_DEPTH = 0.2;
-
-// Albédo du mélange de matériaux au pixel. Poids du matériau m :
-//   Σ_sommets λ_v · w_v(m)   (λ = barycentriques, w_v(m) = 0 si v ne porte pas m),
-// soit l'interpolation de ses poids à travers le triangle — ce que faisait le
-// Gouraud par sommet, mais matériau par matériau. `vIds` / `vWeights` : matériaux des
-// 3 sommets (lus dans le point d'entrée : Slang n'accepte `GetAttributeAtVertex` que
-// sur ses entrées directes).
-float3 blendedAlbedo(uint4 vIds[3], float4 vWeights[3], float3 bary, float rain,
-                     SurfacePoint s, float3 w) {
-  uint ids[PIXEL_MATERIALS];
-  float weights[PIXEL_MATERIALS];
-  int count = 0;
-  for (int v = 0; v < 3; v++) {
-    for (int i = 0; i < VERTEX_MATERIALS; i++) {
-      float wi = bary[v] * vWeights[v][i];
-      if (wi <= 0.0)
-        continue;
-      // Fusion des doublons (un matériau porté par plusieurs sommets).
-      int j = 0;
-      while (j < count && ids[j] != vIds[v][i])
-        j++;
-      if (j == count) {
-        ids[count] = vIds[v][i];
-        weights[count] = 0.0;
-        count++;
-      }
-      weights[j] += wi;
-    }
-  }
-
-  // Les BLEND_MATERIALS plus lourds, hors négligeables (tri par insertion).
-  // utilisé pour raison de performance (4*4 registres au lieu de 9 * 4)
-  uint topIds[BLEND_MATERIALS];
-  float topWeights[BLEND_MATERIALS];
-  int n = 0;
-  for (int j = 0; j < count; j++) {
-    if (weights[j] < MIN_PIXEL_WEIGHT)
-      continue;
-    int k = min(n, BLEND_MATERIALS - 1);
-    if (n == BLEND_MATERIALS && weights[j] <= topWeights[k])
-      continue; // liste pleine, plus léger que le dernier
-    while (k > 0 && topWeights[k - 1] < weights[j]) {
-      topIds[k] = topIds[k - 1];
-      topWeights[k] = topWeights[k - 1];
-      k--;
-    }
-    topIds[k] = ids[j];
-    topWeights[k] = weights[j];
-    n = min(n + 1, BLEND_MATERIALS);
-  }
-
-  // Mélange par hauteur : score = hauteur du relief + poids. Seuls les matériaux à
-  // moins de HEIGHT_BLEND_DEPTH du meilleur score contribuent : le relief le plus
-  // haut l'emporte au pixel (frontière irrégulière, pas de surimpression).
-  float4 surfaces[BLEND_MATERIALS];
-  float best = -1.0;
-  for (int j = 0; j < n; j++) {
-    surfaces[j] = surfaceSample(topIds[j], s, w, rain);
-    best = max(best, surfaces[j].a + topWeights[j]);
-  }
-  float3 albedo = 0.0;
-  float total = 0.0;
-  for (int j = 0; j < n; j++) {
-    float b = max(surfaces[j].a + topWeights[j] - best + HEIGHT_BLEND_DEPTH, 0.0);
-    albedo += b * surfaces[j].rgb;
-    total += b;
-  }
-  return total > 0.0 ? albedo / total : 0.0;
-}
+// Transmission de l'eau sous laquelle le fond marin n'est plus ombré : invisible en
+// 8 bits (1/255 ≈ 4e-3), marge pour l'exposition du tone mapping.
+static const float MIN_SEABED_VISIBILITY = 1e-3;
 
 // Vertex shader « depth-only » de la passe d'ombre. Entrée minimale (position
 // seule) → la pipeline d'ombre du terrain n'exige que la location 0.
@@ -150,9 +71,12 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   // ombrage doux sur la surface Surface Nets, contrairement au flat shading.
   // La renormaliser : l'interpolation linéaire raccourcit le vecteur.
   float3 N = normalize(vertIn.worldNormal);
+  float3 L = normalize(-ubo.lightDirection.xyz);
+  float NdotL = max(dot(N, L), 0.0);
+  float3 lightCol = ubo.lightColor.rgb * ubo.lightColor.w;
+  float3 skyAmbient = ubo.ambient.rgb; // varie avec l'heure (day_night.rs)
 
-  // Albédo du mélange de matériaux, texturé (triplanaire) ou couleur de table. Pas
-  // de teinte d'humidité sur les textures pour l'instant.
+  // Hors branche : dérivées et attributs des sommets (cf. `SurfacePoint`).
   SurfacePoint s = { vertIn.worldPos, ddx(vertIn.worldPos), ddy(vertIn.worldPos) };
   uint4 vIds[3];
   float4 vWeights[3];
@@ -160,22 +84,28 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
     vIds[v] = GetAttributeAtVertex(vertIn.materialIds, v);
     vWeights[v] = GetAttributeAtVertex(vertIn.materialWeights, v);
   }
-  float3 material = blendedAlbedo(vIds, vWeights, bary, vertIn.rain, s, triplanarWeights(N));
 
-  float3 L = normalize(-ubo.lightDirection.xyz);
-  float NdotL = max(dot(N, L), 0.0);
-
-  float shadow = computeShadow(vertIn.worldPos, N, NdotL);
-  float3 lightCol = ubo.lightColor.rgb * ubo.lightColor.w;
-  // Ambiant = lumière indirecte du ciel, légèrement bleutée. MULTIPLIÉ par la
-  // couleur du matériau (et non ajouté) : les zones à l'ombre gardent leur teinte
-  // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
-  // Ambiant hémisphérique : une face voit d'autant plus de ciel qu'elle est tournée
-  // vers le haut ; le reste de son hémisphère voit le sol, plus sombre.
-  float skyFactor = saturate(N.z); // 1 = face au ciel, 0 = face au sol; on peut aussi utiliser N.z * 0.5 + 0.5
-  float3 skyAmbient = ubo.ambient.rgb; // varie avec l'heure (day_night.rs)
-  float3 ambient = lerp(skyAmbient * ubo.ambient.w, skyAmbient, skyFactor);
-  float3 color = material * (ambient + lightCol * NdotL * shadow);
+  // Fond marin noyé (transmission sous MIN_SEABED_VISIBILITY) : sa couleur n'atteint
+  // plus l'œil, ni matériaux ni éclairage ; `underwater` n'en garde que l'eau diffusée.
+  float3 color = 0.0;
+  float shadow = 1.0;
+  bool shadowDone = false;
+  float3 seabed = seabedTransmittance(vertIn.worldPos);
+  if (max(seabed.r, max(seabed.g, seabed.b)) >= MIN_SEABED_VISIBILITY) {
+    // Albédo du mélange de matériaux, texturé (triplanaire) ou couleur de table. Pas
+    // de teinte d'humidité sur les textures pour l'instant.
+    float3 material = blendedAlbedo(vIds, vWeights, bary, vertIn.rain, s, triplanarWeights(N));
+    shadow = computeShadow(vertIn.worldPos, N, NdotL);
+    shadowDone = true;
+    // Ambiant = lumière indirecte du ciel, légèrement bleutée. MULTIPLIÉ par la
+    // couleur du matériau (et non ajouté) : les zones à l'ombre gardent leur teinte
+    // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
+    // Ambiant hémisphérique : une face voit d'autant plus de ciel qu'elle est tournée
+    // vers le haut ; le reste de son hémisphère voit le sol, plus sombre.
+    float skyFactor = saturate(N.z); // 1 = face au ciel, 0 = face au sol; on peut aussi utiliser N.z * 0.5 + 0.5
+    float3 ambient = lerp(skyAmbient * ubo.ambient.w, skyAmbient, skyFactor);
+    color = material * (ambient + lightCol * NdotL * shadow);
+  }
 
   // Sous la mer : absorbé et noyé dans la couleur de l'eau.
   color = underwater(color, vertIn.worldPos);
@@ -183,8 +113,12 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   // Écume du rivage : flotte à la surface, donc ni absorbée ni teintée par l'eau.
   // Éclairée comme une face horizontale (ombre du fond, proche en eau peu profonde).
   float foam = shoreFoam(vertIn.worldPos);
-  float3 foamColor = foamAlbedo() * (skyAmbient + lightCol * max(L.z, 0.0) * shadow);
-  color = lerp(color, foamColor, foam);
+  if (foam > 0.0) {
+    if (!shadowDone)
+      shadow = computeShadow(vertIn.worldPos, N, NdotL);
+    float3 foamColor = foamAlbedo() * (skyAmbient + lightCol * max(L.z, 0.0) * shadow);
+    color = lerp(color, foamColor, foam);
+  }
 
   // Brouillard sur la partie aérienne du regard seulement. Caméra et fragment sous
   // l'eau : aucun air traversé.

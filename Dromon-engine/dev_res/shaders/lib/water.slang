@@ -205,11 +205,16 @@ float shoreFoam(float3 worldPos) {
   if (depth <= 0.0 || cameraUnderSea() || !seenThroughSea(worldPos)) return 0.0;
 
   float zoneDepth = ubo.foam[0].y;
+  float calmZone = ubo.foam[2].x;
+  // Au-delà de la zone la plus large possible, densité nulle : le seuil final
+  // (n + density − 1, avec n ≤ 1) ne passe jamais. Sortie avant les bruits (Worley
+  // surtout), sinon calculés sur toute la pleine mer pour rien.
+  if (depth >= zoneDepth * max(calmZone, 1.0)) return 0.0;
+
   float patchSize = ubo.foam[0].z;
   float bubbleSize = ubo.foam[0].w;
   float bubbleSpeed = ubo.foam[1].x;
   float drift = ubo.foam[1].y;
-  float calmZone = ubo.foam[2].x;
   float calmDensity = ubo.foam[2].y;
 
   float t = ubo.time.x;
@@ -236,21 +241,33 @@ float shoreFoam(float3 worldPos) {
 // Début du fondu du fond vers l'eau profonde, en fraction de la portée horizontale.
 static const float FLOOR_FADE_START = 0.8;
 
+// Trajet du regard sous l'eau jusqu'au fond `worldPos` (de profondeur `depth`) : de la
+// surface au fond, ou tout le trajet si la caméra est elle-même sous l'eau.
+float seaViewPath(float3 worldPos, float depth) {
+  float3 camPos = ubo.cameraPosition.xyz;
+  float3 V = normalize(worldPos - camPos);
+  return camPos.z > seaLevel() ? depth / max(-V.z, 1e-4) : distance(camPos, worldPos);
+}
+
+// Part de la couleur du fond `worldPos` qui atteint l'œil, par canal : descente de la
+// lumière jusqu'au fond (≈ verticale, profondeur), puis remontée vers l'œil. 1 hors
+// de la mer.
+float3 seabedTransmittance(float3 worldPos) {
+  if (!seenThroughSea(worldPos)) return 1.0;
+  float depth = seaLevel() - worldPos.z;
+  return exp(-ubo.waterAbsorption.xyz * (depth + seaViewPath(worldPos, depth)));
+}
+
 // Fond marin vu à travers l'eau (Beer-Lambert). `color` : fond déjà éclairé. Surface
 // supposée plane (vagues ignorées).
 float3 underwater(float3 color, float3 worldPos) {
   if (!seenThroughSea(worldPos)) return color;
   float depth = seaLevel() - worldPos.z;
-
+  float viewPath = seaViewPath(worldPos, depth);
   float3 camPos = ubo.cameraPosition.xyz;
-  float3 V = normalize(worldPos - camPos);
-  // Trajet du regard sous l'eau : de la surface au fond, ou tout le trajet si la
-  // caméra est elle-même sous l'eau.
-  float viewPath = camPos.z > seaLevel() ? depth / max(-V.z, 1e-4) : distance(camPos, worldPos);
 
   float3 k = ubo.waterAbsorption.xyz;
-  // Descente de la lumière jusqu'au fond (≈ verticale, profondeur), puis remontée
-  // vers l'œil : la couleur du fond est atténuée sur les deux trajets.
+  // Atténuée sur les deux trajets (cf. `seabedTransmittance`).
   float3 bottom = color * exp(-k * (depth + viewPath));
   // Lumière diffusée par l'eau le long du regard : remplace ce qui a été absorbé.
   float3 deep = deepWaterColor(worldPos.xy);

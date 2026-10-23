@@ -24,6 +24,10 @@ pub const TERRAIN_TEXTURE_DIR: &str =
 pub const TEXTURE_COLOR: &str = "color.png";
 /// Hauteur du relief (blanc = haut), pour le mélange par hauteur.
 pub const TEXTURE_HEIGHT: &str = "height.png";
+/// Normal map en espace tangent, convention OpenGL (vert = +Y).
+pub const TEXTURE_NORMAL: &str = "normal.png";
+/// Occlusion ambiante (blanc = non occulté).
+pub const TEXTURE_AO: &str = "ao.png";
 
 /// Chemin de la carte `file` de la texture `texture`.
 pub fn terrain_texture_path(texture: &str, file: &str) -> PathBuf {
@@ -167,7 +171,7 @@ impl ConfigFile for MaterialsConfig {
                 m.name
             );
             if let Some(t) = &m.texture {
-                for file in [TEXTURE_COLOR, TEXTURE_HEIGHT] {
+                for file in [TEXTURE_COLOR, TEXTURE_HEIGHT, TEXTURE_NORMAL, TEXTURE_AO] {
                     let path = terrain_texture_path(t, file);
                     ensure!(
                         path.is_file(),

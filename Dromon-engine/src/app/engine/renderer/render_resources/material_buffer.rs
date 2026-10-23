@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
-use glam::Vec4;
+use glam::{Vec3, Vec4};
 use std::sync::Arc;
 
 use crate::app::engine::renderer::buffer::Buffer;
@@ -26,26 +26,37 @@ struct GpuMaterial {
     /// x = couche du texture array (−1 : pas de texture), y = 1 / `texture_size` ; zw
     /// inutilisés.
     texture_params: Vec4,
+    /// rgb = 1 / albédo moyen de la texture : `texel / moyenne` ne garde que le
+    /// **détail** de la texture, la couleur d'ensemble vient de la table. w inutilisé.
+    texture_inv_mean: Vec4,
 }
 
 /// Pas de texture : couche −1 (le shader garde la couleur unie).
 const NO_TEXTURE: Vec4 = Vec4::new(-1.0, 0.0, 0.0, 0.0);
 
+/// Plancher de la moyenne avant inversion (texture noire sur un canal).
+const MIN_TEXTURE_MEAN: f32 = 1e-3;
+
 impl GpuMaterial {
-    fn new(def: &MaterialDef, layer: Option<u32>) -> GpuMaterial {
+    /// `texture` : couche du texture array et albédo moyen de cette couche.
+    fn new(def: &MaterialDef, texture: Option<(u32, Vec3)>) -> GpuMaterial {
         let (dry_albedo, dry, wet) = match def.humidity_tint {
             Some(t) => (t.dry_albedo, t.dry, t.wet),
             None => (def.albedo, 0.0, 1.0),
         };
-        let texture_params = match layer {
-            Some(layer) => Vec4::new(layer as f32, 1.0 / def.texture_size, 0.0, 0.0),
-            None => NO_TEXTURE,
+        let (texture_params, texture_inv_mean) = match texture {
+            Some((layer, mean)) => (
+                Vec4::new(layer as f32, 1.0 / def.texture_size, 0.0, 0.0),
+                mean.max(Vec3::splat(MIN_TEXTURE_MEAN)).recip().extend(0.0),
+            ),
+            None => (NO_TEXTURE, Vec4::ONE),
         };
         GpuMaterial {
             albedo: def.albedo.extend(0.0),
             dry_albedo: dry_albedo.extend(0.0),
             humidity: Vec4::new(dry, wet, 0.0, 0.0),
             texture_params,
+            texture_inv_mean,
         }
     }
 
@@ -56,6 +67,7 @@ impl GpuMaterial {
             dry_albedo: albedo,
             humidity: Vec4::new(0.0, 1.0, 0.0, 0.0),
             texture_params: NO_TEXTURE,
+            texture_inv_mean: Vec4::ONE,
         }
     }
 }
@@ -64,7 +76,7 @@ impl GpuMaterial {
 /// puis `materials.ron` dans l'ordre — même convention que `MaterialTable` —, puis le
 /// matériau de debug (magenta, cf. `MaterialsConfig::debug_id`).
 ///
-/// Porte aussi les textures du terrain (binding 1 du même set).
+/// Porte aussi les textures du terrain (bindings 1 = albédo, 2 = normales du même set).
 ///
 /// Statique : construite avec le terrain, envoyée dans la passe de transfert du
 /// démarrage.
@@ -83,15 +95,15 @@ impl MaterialBuffer {
         descriptor_handler: &DescriptorHandler,
         config: &MaterialsConfig,
     ) -> Result<MaterialBuffer> {
+        // D'abord les textures : la table a besoin de leurs albédos moyens.
+        let textures = TerrainTextures::new(texture_handler, config)?;
         let air = GpuMaterial::plain(Vec4::ZERO);
         let debug = GpuMaterial::plain(Vec4::new(1.0, 0.0, 1.0, 0.0));
         let materials: Vec<GpuMaterial> = std::iter::once(air)
-            .chain(
-                config
-                    .materials
-                    .iter()
-                    .map(|m| GpuMaterial::new(m, config.texture_layer(m))),
-            )
+            .chain(config.materials.iter().map(|m| {
+                let texture = config.texture_layer(m).map(|l| (l, textures.mean(l)));
+                GpuMaterial::new(m, texture)
+            }))
             .chain(std::iter::once(debug))
             .collect();
         debug_assert_eq!(materials.len() - 1, config.debug_id() as usize);
@@ -111,10 +123,10 @@ impl MaterialBuffer {
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
-        let textures = TerrainTextures::new(texture_handler, config)?;
         let descriptor_set = descriptor_handler.create_materials_descriptor_set(
             buffer.buffer,
-            textures.image_view(),
+            textures.albedo_view(),
+            textures.normal_view(),
             texture_handler.base_texture_sampler,
         )?;
 

@@ -176,9 +176,11 @@ impl Renderer {
             );
 
             // Transparente : en dernier, une fois le fond (terrain + ciel) dessiné.
-            if let (Some(water), Some(world_maps)) =
-                (self.world.water.as_ref(), self.world.world_maps.as_ref())
-            {
+            if let (Some(water), Some(world_maps), true) = (
+                self.world.water.as_ref(),
+                self.world.world_maps.as_ref(),
+                self.world.config.render.water.enabled,
+            ) {
                 self.water_render_system.record_render_water(
                     frame.command_buffer,
                     self.frame_index,

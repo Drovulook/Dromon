@@ -48,7 +48,8 @@
 
     // Mer : quadtree CDLOD (cf. vault, Architecture/Rendu-Eau.md).
     water: (
-        leaf_size: 64.0,   // côté des nœuds les plus fins (grille 32 × 32 → cellules de 2)
+        enabled: true,     // false : surface non dessinée (mesures) ; le fond reste teinté
+        leaf_size: 64.0,  // côté des nœuds les plus fins (grille 32 × 32 → cellules de 2)
         range_factor: 8.0, // portée d'un niveau ÷ côté de ses nœuds
         // Début du geomorphing dans la zone [portée/2, portée] d'un niveau (0 = dès le
         // début). range_factor · morph_start_ratio doit atteindre 2√2 ≈ 2,83.
@@ -91,5 +92,12 @@
     tonemap: (
         enabled: true,  // false : coupure à 1 comme avant (comparaison)
         exposure: 1.0,  // multiplicateur avant la courbe ; > 1 éclaircit
+    ),
+
+    // Filtrage des textures (objets, terrain).
+    textures: (
+        // Anisotrope : sondes max le long d'un sol vu en rasant. Max = limite du GPU
+        // (16 en général) ; Fixed(a) = valeur fixe, 1 = désactivé.
+        anisotropy: Fixed(8),
     ),
 )

@@ -54,11 +54,14 @@ float computeShadow(float3 worldPos, float3 N, float NdotL) {
   // PCF 5×5 : on moyenne 25 texels voisins. Chaque tap est déjà filtré 2×2 par le
   // hardware (sampler LINEAR) → bord lissé sans escalier.
   float sum = 0.0;
-  for (int x = -2; x <= 2; x++) {
-    for (int y = -2; y <= 2; y++) {
+  for (int x = -1; x <= 1; x++) {
+    for (int y = -1; y <= 1; y++) {
       float2 offset = float2(x, y) * SHADOW_MAP_TEXEL_SIZE;
-      sum += shadowMap.SampleCmp(uv + offset, proj.z - bias);
+      // LevelZero : la shadow map n'a qu'un niveau ; sans dérivées implicites, la
+      // lecture reste valide dans une branche (terrain sous la mer).
+      // résultat identique à SampleCmp
+      sum += shadowMap.SampleCmpLevelZero(uv + offset, proj.z - bias);
     }
   }
-  return sum / 25; // moyenne des 25 échantillons
+  return sum / 9; // moyenne des 25 échantillons
 }
