@@ -1,0 +1,3 @@
+# Règles markdownlint désactivées pour le projet.
+MD013: false # longueur de ligne : inutile pour du texte en prose
+MD033: false # HTML inline : utilisé pour les images du README (largeur, légendes)
