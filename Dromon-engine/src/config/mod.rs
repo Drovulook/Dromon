@@ -12,6 +12,7 @@
 mod debug;
 mod environment;
 mod material_rules;
+mod material_textures;
 mod materials;
 mod render;
 mod world_gen;
@@ -25,6 +26,7 @@ pub use material_rules::{
     ClimateEdge, CoastMoisture, DirtPatchParams, MaterialNoiseParams, MaterialRulesConfig,
     NoiseLayer, OutcropParams, ShoreParams, SlopeAngle, SlopeParams, SnowDryness, StrataParams,
 };
+pub use material_textures::MaterialTexturesConfig;
 pub use materials::{
     HumidityTint, MaterialDef, MaterialsConfig, TEXTURE_AO, TEXTURE_COLOR, TEXTURE_HEIGHT,
     TEXTURE_NORMAL, terrain_texture_path,
@@ -48,7 +50,7 @@ pub const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../config");
 
 /// Configs lues par le **moteur** au démarrage, avant la création du renderer
 /// (`render.ron`, `environment.ron`, `debug.ron`, `materials.ron`,
-/// `material_rules.ron`). Les configs propres à une scène (ex. [`WorldGenConfig`]) sont
+/// `material_rules.ron`, `material_textures.ron`). Les configs propres à une scène (ex. [`WorldGenConfig`]) sont
 /// chargées par la scène.
 #[derive(Clone, Debug)]
 pub(crate) struct EngineConfig {
@@ -59,6 +61,8 @@ pub(crate) struct EngineConfig {
     pub materials: MaterialsConfig,
     /// Lue par la génération (règles de placement) et par le rendu (humidité côtière).
     pub material_rules: MaterialRulesConfig,
+    /// Rendu des textures du terrain (shader).
+    pub material_textures: MaterialTexturesConfig,
 }
 
 impl EngineConfig {
@@ -69,6 +73,7 @@ impl EngineConfig {
             debug: DebugConfig::load()?,
             materials: MaterialsConfig::load()?,
             material_rules: MaterialRulesConfig::load()?,
+            material_textures: MaterialTexturesConfig::load()?,
         })
     }
 }

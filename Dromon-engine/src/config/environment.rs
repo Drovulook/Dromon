@@ -57,6 +57,8 @@ impl ConfigFile for EnvironmentConfig {
             "sun.edge_softness doit être dans [0, 1]"
         );
 
+        ensure!(self.stars.radius_px > 0.0, "stars.radius_px doit être > 0");
+
         let d = &self.day_night;
         ensure!(!d.keyframes.is_empty(), "day_night.keyframes est vide");
         ensure!(
@@ -284,6 +286,8 @@ pub struct StarsParams {
     pub density: f32,
     /// Amplitude de la scintillation ∈ [0, 1] (doublée près de l'horizon).
     pub twinkle: f32,
+    /// Rayon d'une étoile moyenne, en pixels (les plus brillantes sont plus grosses).
+    pub radius_px: f32,
 }
 
 impl Default for StarsParams {
@@ -292,6 +296,7 @@ impl Default for StarsParams {
             brightness: 1.0,
             density: 0.03,
             twinkle: 0.25,
+            radius_px: 1.2,
         }
     }
 }

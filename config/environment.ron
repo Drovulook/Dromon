@@ -8,7 +8,7 @@
     clock: (
         day_length_secs: 60000, // durée d'un jour de jeu en secondes réelles
         time_scale: 1.0,       // 0 = pause, 60 = accéléré
-        start_hour: 9.0,       // heure de départ, dans [0, 24[
+        start_hour: 9.0,       // heure de départ, dans [0, 24[ (6.7 : soleil à ~8°)
     ),
 
     // Disque solaire dessiné dans le ciel (n'influe pas sur l'éclairage).
@@ -87,6 +87,7 @@
         brightness: 1.0, // luminosité des plus brillantes
         density: 0.03,   // fraction des cases du ciel occupées
         twinkle: 0.25,   // amplitude de la scintillation
+        radius_px: 1.2,  // rayon d'une étoile moyenne, en pixels
     ),
 
     water: (

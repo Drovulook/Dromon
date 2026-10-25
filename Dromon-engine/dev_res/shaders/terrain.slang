@@ -77,7 +77,7 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   float3 skyAmbient = ubo.ambient.rgb; // varie avec l'heure (day_night.rs)
 
   // Hors branche : dérivées et attributs des sommets (cf. `SurfacePoint`).
-  SurfacePoint s = { vertIn.worldPos, ddx(vertIn.worldPos), ddy(vertIn.worldPos) };
+  SurfacePoint s = surfacePoint(vertIn.worldPos, ddx(vertIn.worldPos), ddy(vertIn.worldPos));
   uint4 vIds[3];
   float4 vWeights[3];
   for (int v = 0; v < 3; v++) {
@@ -92,19 +92,24 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   bool shadowDone = false;
   float3 seabed = seabedTransmittance(vertIn.worldPos);
   if (max(seabed.r, max(seabed.g, seabed.b)) >= MIN_SEABED_VISIBILITY) {
-    // Albédo du mélange de matériaux, texturé (triplanaire) ou couleur de table. Pas
-    // de teinte d'humidité sur les textures pour l'instant.
-    float3 material = blendedAlbedo(vIds, vWeights, bary, vertIn.rain, s, triplanarWeights(N));
+    // Mélange de matériaux, texturé (triplanaire) ou couleur de table.
+    Surface surface =
+        blendedSurface(vIds, vWeights, bary, vertIn.rain, s, N, triplanarWeights(N));
+    // Ombre : normale géométrique (biais de pente) ; éclairage : normale de détail.
     shadow = computeShadow(vertIn.worldPos, N, NdotL);
     shadowDone = true;
+    float3 Nd = surface.normal;
     // Ambiant = lumière indirecte du ciel, légèrement bleutée. MULTIPLIÉ par la
     // couleur du matériau (et non ajouté) : les zones à l'ombre gardent leur teinte
     // (vert foncé naturel) au lieu d'être délavées vers un gris blanchâtre.
     // Ambiant hémisphérique : une face voit d'autant plus de ciel qu'elle est tournée
     // vers le haut ; le reste de son hémisphère voit le sol, plus sombre.
-    float skyFactor = saturate(N.z); // 1 = face au ciel, 0 = face au sol; on peut aussi utiliser N.z * 0.5 + 0.5
+    float skyFactor = saturate(Nd.z); // 1 = face au ciel, 0 = face au sol; on peut aussi utiliser N.z * 0.5 + 0.5
     float3 ambient = lerp(skyAmbient * ubo.ambient.w, skyAmbient, skyFactor);
-    color = material * (ambient + lightCol * NdotL * shadow);
+    // AO des textures : sur l'ambiant seul (ciel caché au fond des creux) ; le direct
+    // est déjà modulé par la normale de détail et l'ombre.
+    ambient *= lerp(1.0, surface.ao, textureAoStrength());
+    color = surface.albedo * (ambient + lightCol * max(dot(Nd, L), 0.0) * shadow);
   }
 
   // Sous la mer : absorbé et noyé dans la couleur de l'eau.

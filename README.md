@@ -28,7 +28,9 @@ Dromon is a long-term personal project aimed at learning low-level graphics prog
 
 ### Procedural terrain
 
-![Procedurally generated terrain](screenshots/terrain_generation.jpg)
+![Procedurally generated terrain](screenshots/terrain_generation_1.jpg)
+
+![Procedurally generated terrain](screenshots/terrain_generation_2.jpg)
 
 ### 3D models
 

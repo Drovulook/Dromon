@@ -336,8 +336,7 @@ impl Renderer {
                     .as_ref()
                     .map_or(glam::Vec4::ZERO, |maps| maps.uv_transform),
                 self.world.water.as_ref(),
-                &self.world.config.material_rules.coast_moisture,
-                &self.world.config.render.tonemap,
+                &self.world.config,
                 self.world.real_time_secs,
             );
 

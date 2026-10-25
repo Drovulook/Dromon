@@ -61,6 +61,12 @@
         // 2 · half_size / map_resolution unités monde par texel.
         map_resolution: 2048,
 
+        // Anti-acné, en texels de shadow map. Taches d'ombre sur les surfaces éclairées
+        // (« acné », surtout soleil bas) → augmenter ; ombres décollées des objets →
+        // diminuer. Le normal offset doit couvrir l'étalement du PCF (±1,5 texel).
+        normal_offset_texels: 2.5, // décalage le long de la normale, ∝ sin(angle N/L)
+        depth_bias_texels: 1.0,    // biais de profondeur constant
+
         // Petite scène d'objets fixes : boîte centrée sur l'origine.
         static_scene: (
             half_size: 15.0,

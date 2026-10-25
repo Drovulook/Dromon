@@ -12,6 +12,9 @@ pub struct DebugConfig {
     pub log_batch_stats: bool,
     /// Occupation et fragmentation de l'allocateur GPU, à chaque lot installé.
     pub log_gpu_usage: bool,
+    /// `false` : tout est éclairé (la passe d'ombre tourne quand même, seul son résultat
+    /// est ignoré).
+    pub shadows: bool,
     pub mesh: MeshDebug,
 }
 
@@ -20,6 +23,7 @@ impl Default for DebugConfig {
         DebugConfig {
             log_batch_stats: true,
             log_gpu_usage: true,
+            shadows: true,
             mesh: MeshDebug::default(),
         }
     }

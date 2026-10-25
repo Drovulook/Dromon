@@ -6,8 +6,7 @@
 #include "bindings.slang"
 #include "noise.slang"
 
-static const float STAR_CELLS = 256.0;   // cases par côté de face
-static const float STAR_RADIUS_PX = 1.2; // rayon d'une étoile moyenne, en pixels
+static const float STAR_CELLS = 256.0; // cases par côté de face
 
 // Lumière des étoiles dans la direction V (monde, normalisée).
 float3 stars(float3 V) {
@@ -44,7 +43,7 @@ float3 stars(float3 V) {
   // quand la caméra tourne (elle tombe ou non sur le centre d'un pixel).
   // `STAR_CELLS / 2 / amax` convertit des radians en unités de grille (1er ordre).
   // Plafonné à 0.25 case : l'étoile ne déborde jamais de sa case.
-  float radius = STAR_RADIUS_PX * (0.8 + 0.6 * brightness) * pixelAngle * STAR_CELLS * 0.5 / amax;
+  float radius = ubo.stars.y * (0.8 + 0.6 * brightness) * pixelAngle * STAR_CELLS * 0.5 / amax;
   radius = min(radius, 0.25);
   float2 center = cell + 0.25 + 0.5 * h.yz;
   float shape = smoothstep(radius, 0.0, length(grid - center));

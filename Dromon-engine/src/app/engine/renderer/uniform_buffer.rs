@@ -4,7 +4,7 @@ use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::stars::Stars;
 use crate::app::engine::renderer::world::water::{LAND_MARGIN, WAVE_COUNT, Water};
 use crate::app::engine::{renderer::camera::Camera, rendering_context::RenderingContext};
-use crate::config::{CoastMoisture, TonemapParams};
+use crate::config::EngineConfig;
 use crate::profile;
 use anyhow::Result;
 use ash::vk;
@@ -27,14 +27,15 @@ struct UniformBufferObject {
     light_color: Vec4,
     fog: Vec4,           // xyz = couleur de l'horizon, w =  σ₀
     fog_params: Vec4,    // x = H, y = fog_anisotropy, z = halo_strength, w inutilisé
-    shadow_params: Vec4, // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
+    shadow_params: Vec4, // x = épaisseur de la boîte d'ombre, y = texel (unités monde), z = texel (uv), w = 1 si ombres actives
+    shadow_bias: Vec4,   // x = normal_offset_texels, y = depth_bias_texels, zw inutilisés
     sun_disk: Vec4,      // x = rayon angulaire (rad), y = edge_softness, z = intensité, w inutilisé
     sky_zenith: Vec4,    // xyz = couleur du zénith, w = exposant du dégradé
     ambient: Vec4,       // xyz = lumière ambiante du ciel, w = ground_bounce
     // Rotation monde → ciel fixe (3x3 dans une Mat4 : un mat3 std140 a des colonnes
     // paddées à 16 octets, que glam::Mat3 n'a pas).
     sky_rotation: Mat4,
-    stars: Vec4, // x = luminosité × visibilité, y inutilisé, z = densité, w = scintillation
+    stars: Vec4, // x = luminosité × visibilité, y = rayon (px), z = densité, w = scintillation
     world_maps: Vec4, // monde → UV : grille fine uv = (xy − x) · y, climat uv = (xy − z) · w
     water: Vec4, // x = sea_level, y = portée horizontale, z = marge terre, w = 1 si mer
     water_absorption: Vec4, // xyz = k par canal, w = 1 si caméra sous la mer
@@ -50,6 +51,11 @@ struct UniformBufferObject {
     foam: [Vec4; 3],
     material_tint: Vec4, // x = humidité côtière (ajout), y = sa portée (voxels), zw inutilisés
     tonemap: Vec4,       // x = 1 si actif, y = exposition, zw inutilisés
+    // Textures du terrain (`MaterialTexturesConfig`).
+    texture_blend: Vec4,  // x = triplanar_sharpness, y = projection_blend_depth, z = material_blend_depth, w inutilisé
+    texture_detail: Vec4, // x = normal_strength, y = ao_strength, z = flat_material_height, w inutilisé
+    texture_warp: Vec4,   // x = warp_amplitude, y = warp_wavelength, zw inutilisés
+    texture_tint: Vec4,   // x = tint_wavelength, y = brightness_variation, z = hue_variation, w inutilisé
 }
 
 pub struct UniformBuffer {
@@ -87,11 +93,14 @@ impl UniformBuffer {
         stars: &Stars,
         world_maps_uv: Vec4,
         water: Option<&Water>,
-        coast_moisture: &CoastMoisture,
-        tonemap: &TonemapParams,
+        config: &EngineConfig,
         real_time_secs: f32,
     ) {
         profile!();
+        let coast_moisture = &config.material_rules.coast_moisture;
+        let tonemap = &config.render.tonemap;
+        let textures = &config.material_textures;
+        let shadow = &config.render.shadow;
         let atmo = &atmosphere.params;
         // Sans mer, w = 0 : les shaders ne testent rien d'autre.
         let (water_params, water_absorption, water_deep_color) = match water {
@@ -133,7 +142,19 @@ impl UniformBuffer {
             light_direction: sun.direction.extend(0.0),
             light_color: sun.color.extend(sun.intensity),
             fog: atmosphere.horizon_color.extend(atmo.fog_density),
-            shadow_params: Vec4::new(sun.shadow.depth_range(), sun.shadow_texel_size(), 0.0, 0.0),
+            shadow_params: Vec4::new(
+                sun.shadow.depth_range(),
+                sun.shadow_texel_size(),
+                // Résolution réelle de la shadow map (celle de sa création).
+                1.0 / sun.shadow_map_resolution as f32,
+                if config.debug.shadows { 1.0 } else { 0.0 },
+            ),
+            shadow_bias: Vec4::new(
+                shadow.normal_offset_texels,
+                shadow.depth_bias_texels,
+                0.0,
+                0.0,
+            ),
             fog_params: Vec4::new(
                 atmo.fog_scale_height,
                 atmo.fog_anisotropy,
@@ -151,7 +172,7 @@ impl UniformBuffer {
             sky_rotation: Mat4::from_mat3(stars.world_to_sky),
             stars: Vec4::new(
                 stars.params.brightness * stars.visibility,
-                0.0,
+                stars.params.radius_px,
                 stars.params.density,
                 stars.params.twinkle,
             ),
@@ -170,6 +191,25 @@ impl UniformBuffer {
                 if tonemap.enabled { 1.0 } else { 0.0 },
                 tonemap.exposure,
                 0.0,
+                0.0,
+            ),
+            texture_blend: Vec4::new(
+                textures.triplanar_sharpness,
+                textures.projection_blend_depth,
+                textures.material_blend_depth,
+                0.0,
+            ),
+            texture_detail: Vec4::new(
+                textures.normal_strength,
+                textures.ao_strength,
+                textures.flat_material_height,
+                0.0,
+            ),
+            texture_warp: Vec4::new(textures.warp_amplitude, textures.warp_wavelength, 0.0, 0.0),
+            texture_tint: Vec4::new(
+                textures.tint_wavelength,
+                textures.brightness_variation,
+                textures.hue_variation,
                 0.0,
             ),
         };

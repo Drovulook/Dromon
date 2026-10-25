@@ -16,12 +16,13 @@ struct UniformBuffer {
     float4 lightColor;      // rgb = couleur, w = intensité
     float4 fog;             // rgb = couleur de l'horizon, w = σ₀
     float4 fogParams;       // x = H, y = anisotropie du halo, z = intensité du halo
-    float4 shadowParams;    // x = épaisseur de la boîte d'ombre, y = texel (unités monde)
+    float4 shadowParams;    // x = épaisseur de la boîte d'ombre, y = texel (unités monde), z = texel (uv), w = 1 si ombres actives
+    float4 shadowBias;      // x = normal offset, y = biais de profondeur (en texels)
     float4 sunDisk;         // x = rayon angulaire (rad), y = fraction du rayon où commence le fondu, z = intensité
     float4 skyZenith;       // rgb = couleur du zénith, w = exposant du dégradé horizon → zénith
     float4 ambient;         // rgb = lumière ambiante du ciel, w = part renvoyée par le sol
     float4x4 skyRotation;   // rotation monde → ciel fixe (partie 3x3)
-    float4 stars;           // x = luminosité × visibilité, y inutilisé, z = densité, w = scintillation
+    float4 stars;           // x = luminosité × visibilité, y = rayon (px), z = densité, w = scintillation
     float4 worldMaps;       // monde → UV : grille fine uv = (xy − x) · y, climat uv = (xy − z) · w
     float4 water;           // x = sea_level, y = portée horizontale, z = marge terre, w = 1 si mer
     float4 waterAbsorption; // xyz = k par canal (par unité), w = 1 si caméra sous la mer
@@ -36,6 +37,11 @@ struct UniformBuffer {
     float4 foam[3];
     float4 materialTint;    // x = humidité côtière (ajout), y = sa portée (voxels)
     float4 tonemapParams;   // x = 1 si actif, y = exposition
+    // Textures du terrain (material_textures.ron)
+    float4 textureBlend;    // x = triplanar_sharpness, y = projection_blend_depth, z = material_blend_depth
+    float4 textureDetail;   // x = normal_strength, y = ao_strength, z = flat_material_height
+    float4 textureWarp;     // x = warp_amplitude, y = warp_wavelength
+    float4 textureTint;     // x = tint_wavelength, y = brightness_variation, z = hue_variation
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

@@ -8,23 +8,17 @@
 [[vk::binding(0, 2)]]
 Sampler2DShadow shadowMap;
 
-// Taille d'un texel de la shadow map en coordonnées uv (= 1 / résolution).
-// ⚠ doit rester synchronisé avec SHADOW_MAP_RESOLUTION (shadow_map.rs).
-static const float SHADOW_MAP_TEXEL_SIZE = 1.0 / 2048.0;
-
-// Interrupteur de debug : `false` = tout est éclairé (la passe d'ombre tourne quand
-// même, seul son résultat est ignoré).
-static const bool SHADOWS_ENABLED = true;
-
-// Anti-acné, en texels de shadow map (donc valable quelle que soit la taille de
-// la boîte d'ombre). Le normal offset doit couvrir l'étalement du PCF (±2 texels).
-static const float NORMAL_OFFSET_TEXELS = 2.5;
-static const float DEPTH_BIAS_TEXELS = 1.0;
+// Réglages (render.ron → shadow, debug.ron → shadows).
+float shadowMapTexelUv() { return ubo.shadowParams.z; } // 1 / résolution réelle
+bool shadowsEnabled() { return ubo.shadowParams.w > 0.5; }
+// Anti-acné, en texels de shadow map (valables quelle que soit la boîte d'ombre).
+float normalOffsetTexels() { return ubo.shadowBias.x; }
+float depthBiasTexels() { return ubo.shadowBias.y; }
 
 // Renvoie un facteur d'éclairement ∈ [0,1] : 1 = pleinement éclairé, 0 = ombré.
 // `N` normalisée, `NdotL` = max(dot(N, L), 0).
 float computeShadow(float3 worldPos, float3 N, float NdotL) {
-  if (!SHADOWS_ENABLED) {
+  if (!shadowsEnabled()) {
     return 1.0;
   }
 
@@ -33,7 +27,7 @@ float computeShadow(float3 worldPos, float3 N, float NdotL) {
   // Décalage ∝ sin(angle N/L) : nul face à la lumière, maximal en rasant.
   float texel = ubo.shadowParams.y;
   float sinNL = sqrt(1.0 - NdotL * NdotL);
-  float3 samplePos = worldPos + N * (texel * NORMAL_OFFSET_TEXELS * sinNL);
+  float3 samplePos = worldPos + N * (texel * normalOffsetTexels() * sinNL);
   float4 shadowCoord = mul(ubo.lightViewProj, float4(samplePos, 1.0));
 
   // Division perspective (triviale en orthographique, où w = 1).
@@ -49,19 +43,20 @@ float computeShadow(float3 worldPos, float3 N, float NdotL) {
 
   // Petit biais de profondeur constant (la pente est gérée par le normal offset),
   // unités monde → profondeur normalisée via l'épaisseur de la boîte.
-  float bias = texel * DEPTH_BIAS_TEXELS / ubo.shadowParams.x;
+  float bias = texel * depthBiasTexels() / ubo.shadowParams.x;
 
-  // PCF 5×5 : on moyenne 25 texels voisins. Chaque tap est déjà filtré 2×2 par le
+  // PCF 3×3 : on moyenne 9 texels voisins. Chaque tap est déjà filtré 2×2 par le
   // hardware (sampler LINEAR) → bord lissé sans escalier.
   float sum = 0.0;
+  float texelUv = shadowMapTexelUv();
   for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
-      float2 offset = float2(x, y) * SHADOW_MAP_TEXEL_SIZE;
+      float2 offset = float2(x, y) * texelUv;
       // LevelZero : la shadow map n'a qu'un niveau ; sans dérivées implicites, la
       // lecture reste valide dans une branche (terrain sous la mer).
       // résultat identique à SampleCmp
       sum += shadowMap.SampleCmpLevelZero(uv + offset, proj.z - bias);
     }
   }
-  return sum / 9; // moyenne des 25 échantillons
+  return sum / 9; // moyenne des 9 échantillons
 }

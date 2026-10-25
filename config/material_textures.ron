@@ -1,0 +1,21 @@
+// Rendu des textures du terrain (cf. `MaterialTexturesConfig`), lu au démarrage du
+// moteur. Les textures elles-mêmes : materials.ron. Un champ absent prend sa valeur par
+// défaut ; un champ inconnu est une erreur.
+(
+    triplanar_sharpness: 4.0,     // exposant des poids |N|^k : grand = fondu étroit entre projections
+    projection_blend_depth: 0.2,  // mélange par hauteur entre projections : → 0 découpé, grand = surimpression
+    material_blend_depth: 0.2,    // idem entre matériaux
+    normal_strength: 1.0,         // multiplie les pentes des normal maps (0 = sans relief)
+    ao_strength: 1.0,             // AO des textures sur l'ambiant, dans [0, 1]
+    flat_material_height: 0.5,    // relief prêté aux matériaux sans texture, dans [0, 1] (haut = ils l'emportent)
+
+    // Anti-répétition. Warp : décale les lectures de texture d'un bruit lisse, les
+    // lignes des copies alignées ondulent. Étirement de la texture ≲ 6·A/λ au pire :
+    // garder λ ≳ 25·A, sinon la texture paraît coulée.
+    warp_amplitude: 12.0,          // voxels (0 = désactivé)
+    warp_wavelength: 300.0,       // voxels
+    // Variation de couleur à grande échelle : les copies ne sont plus identiques.
+    tint_wavelength: 300.0,       // voxels
+    brightness_variation: 0.10,   // ± fraction de luminosité, dans [0, 1[
+    hue_variation: 0.03,          // ± fraction chaud/froid (rouge vs bleu), dans [0, 1[
+)

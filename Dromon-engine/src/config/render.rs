@@ -93,6 +93,10 @@ impl ConfigFile for RenderConfig {
 
         let s = &self.shadow;
         ensure!(s.map_resolution > 0, "shadow.map_resolution doit être > 0");
+        ensure!(
+            s.normal_offset_texels >= 0.0 && s.depth_bias_texels >= 0.0,
+            "shadow : normal_offset_texels et depth_bias_texels doivent être ≥ 0"
+        );
         for (name, b) in [("static_scene", &s.static_scene), ("terrain", &s.terrain)] {
             ensure!(b.half_size > 0.0, "shadow.{name}.half_size doit être > 0");
             ensure!(
@@ -338,6 +342,12 @@ pub struct ShadowSettings {
     /// Côté de la shadow map (carrée), en texels. Plus grand = ombres plus fines, mais
     /// plus de mémoire et de remplissage.
     pub map_resolution: u32,
+    /// Anti-acné, en texels de shadow map (valable quelle que soit la boîte) : décalage
+    /// du point lu le long de la normale, ∝ sin(angle N/L). Doit couvrir l'étalement du
+    /// PCF (±1,5 texel). Trop grand : ombres décollées des objets (« peter-panning »).
+    pub normal_offset_texels: f32,
+    /// Biais de profondeur constant (la pente est gérée par le normal offset).
+    pub depth_bias_texels: f32,
     /// Boîte d'une petite scène d'objets fixes (défaut de toute scène).
     pub static_scene: ShadowConfig,
     /// Boîte appliquée par `generate_terrain` : grande, et qui suit la caméra.
@@ -348,6 +358,8 @@ impl Default for ShadowSettings {
     fn default() -> Self {
         ShadowSettings {
             map_resolution: 2048,
+            normal_offset_texels: 2.5,
+            depth_bias_texels: 1.0,
             static_scene: ShadowConfig::default(),
             terrain: ShadowConfig {
                 half_size: 2000.0,

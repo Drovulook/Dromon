@@ -27,6 +27,21 @@ float valueNoise(float2 p) {
   return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
 
+// Bruit de valeur 3D, 3 canaux indépendants dans [0, 1] (les 3 sorties du hash) : hash
+// aux 8 coins de la cellule entière, interpolation trilinéaire lissée. `seed` décale le
+// réseau en z → bruits indépendants pour des usages différents.
+float3 valueNoise3(float3 p, uint seed) {
+  int3 i = int3(floor(p));
+  float3 f = frac(p);
+  float3 u = f * f * (3.0 - 2.0 * f);
+  uint3 c = uint3(i) + uint3(0u, 0u, seed * 7919u);
+  float3 x00 = lerp(hash33(c), hash33(c + uint3(1, 0, 0)), u.x);
+  float3 x10 = lerp(hash33(c + uint3(0, 1, 0)), hash33(c + uint3(1, 1, 0)), u.x);
+  float3 x01 = lerp(hash33(c + uint3(0, 0, 1)), hash33(c + uint3(1, 0, 1)), u.x);
+  float3 x11 = lerp(hash33(c + uint3(0, 1, 1)), hash33(c + uint3(1, 1, 1)), u.x);
+  return lerp(lerp(x00, x10, u.y), lerp(x01, x11, u.y), u.z);
+}
+
 // Bruit cellulaire (Worley) : distances F1, F2 aux deux points caractéristiques les plus
 // proches, un point par cellule unité. Les points oscillent avec `t` (cellules vivantes).
 // F2 − F1 ≈ 0 sur les frontières entre cellules.
