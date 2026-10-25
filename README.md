@@ -41,37 +41,37 @@ with png export,
 ### Procedural terrain and world map
 
 <p align="center">
+  Coastline with mountains
+  <br>
   <img src="screenshots/terrain_generation_1.jpg" width="100%" alt="Coastline with mountains">
-  <br>
-  <em>Coastline with mountains</em>
 </p>
 
 <p align="center">
+  Sunset over desert mountains
+  <br>
   <img src="screenshots/terrain_generation_2.jpg" width="100%" alt="Sunset over desert mountains">
-  <br>
-  <em>Sunset over desert mountains</em>
 </p>
 
 <p align="center">
-  <img src="screenshots/precipitation.png" width="60%" alt="Macro world map: relief and precipitation">
+  Macro world map: relief and precipitation; rain shadows create deserts behind mountain ranges
   <br>
-  <em>Macro world map: relief and precipitation; rain shadows create deserts behind mountain ranges</em>
+  <img src="screenshots/precipitation.png" width="60%" alt="Macro world map: relief and precipitation">
 </p>
 
 ### 3D models
 
 <p align="center">
-  <img src="screenshots/3d_models.jpg" width="100%" alt="3D models">
+  glTF models with textures
   <br>
-  <em>glTF models with textures</em>
+  <img src="screenshots/3d_models.jpg" width="100%" alt="3D models">
 </p>
 
 ### Profiling CLI
 
 <p align="center">
-  <img src="screenshots/cli_profiling.jpg" width="100%" alt="Profiling terminal UI">
+  Profiling terminal UI
   <br>
-  <em>Profiling terminal UI</em>
+  <img src="screenshots/cli_profiling.jpg" width="100%" alt="Profiling terminal UI">
 </p>
 
 ## Status
