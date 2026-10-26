@@ -8,7 +8,7 @@
     clock: (
         day_length_secs: 60000, // durée d'un jour de jeu en secondes réelles
         time_scale: 1.0,       // 0 = pause, 60 = accéléré
-        start_hour: 9.0,       // heure de départ, dans [0, 24[ (6.7 : soleil à ~8°)
+        start_hour: 8.5,       // heure de départ, dans [0, 24[ (6.7 : soleil à ~8°)
     ),
 
     // Disque solaire dessiné dans le ciel (n'influe pas sur l'éclairage).

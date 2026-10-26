@@ -1,12 +1,15 @@
 mod debug_messenger;
-mod inputs;
+mod events;
+mod hot_reload;
 pub mod renderer;
 mod rendering_context;
 pub mod terrain_generation;
 pub mod timer;
 
 use crate::Scene;
-use crate::app::engine::inputs::base_event_subscriber;
+use crate::app::engine::events::input::{self, base_event_subscriber};
+use crate::app::engine::events::{FileChange, FileWatcher};
+use crate::app::engine::hot_reload::ConfigReload;
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
 };
@@ -30,7 +33,9 @@ pub struct Engine {
     windows: HashMap<WindowId, Arc<Window>>,
     primary_window_id: WindowId,
     rendering_context: Arc<RenderingContext>,
-    input_manager: inputs::InputManager,
+    input_manager: input::InputManager,
+    /// `None` si la surveillance n'a pas pu démarrer : le moteur tourne sans hot reload.
+    file_watcher: Option<FileWatcher>,
     logger: Arc<Logger>,
     timer: Timer,
     config: Arc<EngineConfig>,
@@ -60,8 +65,12 @@ impl Engine {
             },
         )?);
 
-        let mut input_manager = inputs::InputManager::new();
+        let mut input_manager = input::InputManager::new();
         base_event_subscriber(&mut input_manager, logger.clone());
+
+        let file_watcher = FileWatcher::new(logger.clone())
+            .inspect_err(|e| logger.warn(&format!("hot reload désactivé : {e:#}")))
+            .ok();
 
         let windows = HashMap::from([(primary_window_id, primary_window.clone())]);
 
@@ -89,6 +98,7 @@ impl Engine {
             primary_window_id,
             rendering_context,
             input_manager,
+            file_watcher,
             logger,
             timer: Timer::new(),
             config,
@@ -125,6 +135,7 @@ impl Engine {
                 crate::profiling::frame::begin();
                 {
                     profile!();
+                    self.handle_file_changes();
                     if let Some(renderer) = self.renderers.get_mut(&window_id) {
                         renderer.render(&self.timer, self.input_manager.input_state(), scene)?;
                     }
@@ -150,6 +161,50 @@ impl Engine {
             _ => {}
         }
         Ok(())
+    }
+
+    fn handle_file_changes(&mut self) {
+        let Some(watcher) = &mut self.file_watcher else {
+            return;
+        };
+        for change in watcher.poll() {
+            match change {
+                FileChange::Config(file) => self.reload_config(&file),
+                FileChange::TerrainTexture(texture) => self.logger.info(&format!(
+                    "texture {texture} modifiée : hot reload pas encore géré"
+                )),
+            }
+        }
+    }
+
+    /// Une config invalide ou non applicable à chaud laisse l'ancienne en place.
+    fn reload_config(&mut self, file: &str) {
+        match hot_reload::reload(&self.config, file) {
+            Err(e) => self
+                .logger
+                .error(&format!("{e:#} : ancienne config conservée")),
+            Ok(ConfigReload::NotEngine) => self.logger.info(&format!(
+                "{file} : config de scène, hot reload pas encore géré"
+            )),
+            Ok(ConfigReload::Unchanged) => {}
+            Ok(ConfigReload::Unsupported(reloads)) => self.logger.warn(&format!(
+                "{file} ignoré, rechargement pas encore géré : {}",
+                reloads.join(", ")
+            )),
+            Ok(ConfigReload::Apply(config, reloads)) => {
+                self.config = Arc::from(config);
+                let mut result = Ok(());
+                for renderer in self.renderers.values_mut() {
+                    result = result.and(renderer.hot_reload(self.config.clone(), &reloads));
+                }
+                match result {
+                    Ok(()) => self.logger.info(&format!("{file} rechargé")),
+                    Err(e) => self
+                        .logger
+                        .error(&format!("{file} rechargé en partie : {e:#}")),
+                }
+            }
+        }
     }
 
     pub fn device_event(

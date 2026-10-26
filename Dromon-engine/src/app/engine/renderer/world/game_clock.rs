@@ -21,6 +21,16 @@ impl GameClock {
         }
     }
 
+    /// Hot reload : durée du jour et vitesse prises telles quelles ; une heure de départ
+    /// modifiée fait sauter l'horloge à cette heure.
+    pub fn hot_reload(&mut self, old: &ClockParams, new: &ClockParams) {
+        self.day_length_secs = new.day_length_secs;
+        self.time_scale = new.time_scale;
+        if new.start_hour != old.start_hour {
+            self.time_of_day = new.start_hour / 24.0;
+        }
+    }
+
     pub fn advance(&mut self, dt_real: f64) {
         self.time_of_day += dt_real * self.time_scale / self.day_length_secs;
         let whole_days = self.time_of_day.floor();

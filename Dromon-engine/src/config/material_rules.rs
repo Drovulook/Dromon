@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigFile;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MaterialRulesConfig {
     pub strata: StrataParams,
@@ -26,7 +26,7 @@ pub struct MaterialRulesConfig {
 /// Moins de neige là où il pleut peu : la limite des neiges est testée sur
 /// `T + warming × sécheresse`, avec `sécheresse = 1 − smoothstep(dry, wet, pluie)`. La
 /// frontière se **déplace** (plus haut en montagne sèche) au lieu de se diluer.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SnowDryness {
     /// Précipitations en dessous desquelles le décalage est plein.
@@ -50,7 +50,7 @@ impl Default for SnowDryness {
 /// Humidité côtière ajoutée aux précipitations pour la **teinte** des matériaux
 /// (`humidity_tint` : sable de plage beige, frange côtière plus verte). Ne change pas
 /// leur placement. Envoyée au shader du terrain par l'UBO.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CoastMoisture {
     /// Ajout aux précipitations (normalisées) sur la côte.
@@ -139,7 +139,7 @@ impl ConfigFile for MaterialRulesConfig {
 
 /// Bruits des règles de matériaux (cf. `generation::material::noise`) : chacun = une
 /// octave de forme + une octave de détail.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MaterialNoiseParams {
     /// Ondulation des frontières (neige, désert, plages…). Non normalisé : ~[−1,35 ; 1,35]
@@ -174,7 +174,7 @@ impl Default for MaterialNoiseParams {
 }
 
 /// Un bruit à deux octaves.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NoiseLayer {
     /// Fréquence de l'octave de forme (longueur d'onde ≈ 1 / fréquence voxels).
@@ -198,7 +198,7 @@ impl Default for NoiseLayer {
 /// Frontière douce sur une grandeur climatique (température, pluie). Jitter et
 /// transition sont donnés dans l'unité de la grandeur **et** bornés en voxels au sol
 /// (cf. `rules::ClimateEdge::above`).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ClimateEdge {
     /// Valeur de la frontière.
@@ -226,7 +226,7 @@ impl Default for ClimateEdge {
 }
 
 /// Couches sous la surface (voxels de profondeur) : couverture, terre, puis roche.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StrataParams {
     pub surface_depth: f64,
@@ -243,7 +243,7 @@ impl Default for StrataParams {
 }
 
 /// Massifs de roche normale en zone aride, choisis par le bruit de géologie.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OutcropParams {
     /// Seuil du bruit (∈ [-1, 1]) au-dessus duquel la roche reste normale.
@@ -262,7 +262,7 @@ impl Default for OutcropParams {
 }
 
 /// Littoral et fonds marins (voxels).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ShoreParams {
     /// Largeur des plages (distance à la côte).
@@ -293,7 +293,7 @@ impl Default for ShoreParams {
 }
 
 /// Plaques de terre dans l'herbe, en approchant de la limite des neiges.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DirtPatchParams {
     /// Écart (°C) au-dessus de la limite des neiges où apparaissent les premières.
@@ -316,7 +316,7 @@ impl Default for DirtPatchParams {
 
 /// Seuils de pente. Macro : moyenne sur `macro_radius`, donc plus douce que la pente
 /// locale (normale), d'où des seuils plus bas.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SlopeParams {
     /// Rayon (voxels) de la mesure de pente macro : les reliefs plus étroits que
@@ -353,7 +353,7 @@ impl Default for SlopeParams {
 /// Angle de pente, écrit **en degrés** dans le fichier, lu en **cosinus** par les
 /// règles (comparé à `normal.z`). Converti une fois au chargement : pas de `cos()`
 /// par sommet.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(from = "f64", into = "f64")]
 pub struct SlopeAngle {
     degrees: f64,

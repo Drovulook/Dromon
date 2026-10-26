@@ -1,7 +1,7 @@
 use glam::{Mat4, Vec3};
 use winit::keyboard::KeyCode;
 
-use crate::app::engine::inputs::InputState;
+use crate::app::engine::events::input::InputState;
 use crate::app::engine::timer::Timer;
 use crate::config::CameraParams;
 use crate::profile;
@@ -38,6 +38,24 @@ impl Camera {
             proj: Mat4::IDENTITY,
             is_primary: true,
         }
+    }
+
+    /// Hot reload : nouveaux réglages. Une pose de départ modifiée téléporte la caméra
+    /// (pratique pour régler un point de vue), un FOV modifié remplace le zoom courant.
+    pub fn hot_reload(&mut self, params: &CameraParams) {
+        let old = &self.params;
+        if params.start_position != old.start_position
+            || params.start_yaw_deg != old.start_yaw_deg
+            || params.start_pitch_deg != old.start_pitch_deg
+        {
+            self.position = params.start_position;
+            self.yaw = params.start_yaw_deg.to_radians();
+            self.pitch = params.start_pitch_deg.to_radians();
+        }
+        if params.fov_deg != old.fov_deg {
+            self.fov_y = params.fov_deg.to_radians();
+        }
+        self.params = params.clone();
     }
 
     /// Vecteur « avant » (direction du regard), reconstruit depuis yaw/pitch.

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigFile;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RenderConfig {
     pub present_mode: PresentMode,
@@ -20,7 +20,7 @@ pub struct RenderConfig {
 }
 
 /// Filtrage des textures de surface (objets, terrain : `base_texture_sampler`).
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TextureParams {
     pub anisotropy: Anisotropy,
@@ -28,7 +28,7 @@ pub struct TextureParams {
 
 /// Filtrage anisotrope : nombre max de sondes le long de l'empreinte d'un pixel (sol
 /// vu en rasant).
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Anisotropy {
     /// Limite du GPU (16 en général).
     #[default]
@@ -49,7 +49,7 @@ impl Anisotropy {
 
 /// Tone mapping (Khronos PBR Neutral) appliqué en fin de chaque fragment shader
 /// (`lib/tonemap.slang`) : compresse les hautes lumières au lieu de les couper à 1.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TonemapParams {
     /// `false` : coupure à 1 comme avant (comparaison).
@@ -153,7 +153,7 @@ const MAX_PITCH_DEG: f32 = 88.0;
 const MAX_LOD_LEVELS: usize = 6;
 
 /// Terrain : portée de chargement, niveaux de détail, budgets.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TerrainRenderParams {
     /// Portée de chargement autour de la caméra, en chunks. Sans rapport avec la taille
@@ -196,7 +196,7 @@ impl Default for TerrainRenderParams {
 const MIN_WATER_MORPH_MARGIN: f32 = 2.0 * std::f32::consts::SQRT_2;
 
 /// Surface de la mer : quadtree CDLOD (cf. `Architecture/Rendu-Eau.md`).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WaterRenderParams {
     /// Dessine la surface de la mer. `false` : passe sautée (mesures de performance) ;
@@ -224,7 +224,7 @@ impl Default for WaterRenderParams {
 }
 
 /// Politique de LOD : distance œil → chunk ⇒ niveau de détail.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LodParams {
     /// Rayons (unités monde) des anneaux. `radii[k]` est la distance à partir de
@@ -285,7 +285,7 @@ pub enum DisplayMode {
 }
 
 /// Caméra libre : pose de départ, projection et contrôles.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CameraParams {
     /// Position de départ (monde, Z-up).
@@ -336,7 +336,7 @@ impl Default for CameraParams {
 }
 
 /// Ombres : résolution de la shadow map et boîte de la lumière selon le type de scène.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ShadowSettings {
     /// Côté de la shadow map (carrée), en texels. Plus grand = ombres plus fines, mais
@@ -376,7 +376,7 @@ impl Default for ShadowSettings {
 /// « Frustum » orthographique de la shadow map. Étalée sur `2 * half_size` unités, la
 /// shadow map donne `2 * half_size / map_resolution` u/texel : plus la boîte est
 /// grande, plus on couvre de monde mais plus les ombres deviennent grossières.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ShadowConfig {
     /// Demi-largeur/hauteur de la boîte orthographique, en unités monde.

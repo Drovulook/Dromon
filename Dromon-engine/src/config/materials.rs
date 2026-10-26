@@ -34,7 +34,7 @@ pub fn terrain_texture_path(texture: &str, file: &str) -> PathBuf {
     Path::new(TERRAIN_TEXTURE_DIR).join(texture).join(file)
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MaterialsConfig {
     pub materials: Vec<MaterialDef>,
@@ -42,7 +42,7 @@ pub struct MaterialsConfig {
 
 /// Un matériau. Chaque propriété a une valeur par défaut : en ajouter une (rugosité,
 /// texture…) ne casse pas les entrées existantes.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MaterialDef {
     /// Identifiant utilisé par le code (règles de placement), unique.
@@ -75,7 +75,7 @@ impl Default for MaterialDef {
 
 /// Fondu `dry_albedo` → `albedo` quand les précipitations (normalisées, 1 = côte
 /// humide de référence) passent de `dry` à `wet`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HumidityTint {
     /// Couleur en zone sèche, linéaire.

@@ -14,7 +14,8 @@ mod swapchain;
 mod uniform_buffer;
 pub(crate) mod world;
 
-use crate::app::engine::inputs::InputState;
+use crate::app::engine::events::input::InputState;
+use crate::app::engine::hot_reload::{Reload, Reloads};
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::render_systems::{
     SkyRenderSystem, TerrainRenderSystem, WaterRenderSystem,
@@ -123,13 +124,8 @@ impl Renderer {
                 shadow_map.sampler,
             )?);
 
-            // Figé dans les pipelines : changer de mode = relancer. Lu avant que
-            // `config` parte dans `World`.
-            let polygon_mode = match config.render.display_mode {
-                DisplayMode::Fill => vk::PolygonMode::FILL,
-                DisplayMode::Edges => vk::PolygonMode::LINE,
-                DisplayMode::Vertices => vk::PolygonMode::POINT,
-            };
+            // Lu avant que `config` parte dans `World`.
+            let polygon_mode = polygon_mode(config.render.display_mode);
 
             let mut world = World::new(
                 logger.clone(),
@@ -246,6 +242,81 @@ impl Renderer {
 
     pub fn resize(&mut self) {
         self.swapchain.is_dirty = true;
+    }
+
+    /// Hot reload : un traitement par [`Reload`] géré (cf. `Reload::is_supported`).
+    pub(crate) fn hot_reload(&mut self, config: Arc<EngineConfig>, reloads: &Reloads) -> Result<()> {
+        if reloads.contains(Reload::Swapchain) {
+            self.swapchain.hot_reload(config.render.present_mode);
+        }
+        if reloads.contains(Reload::MeshPipelines) {
+            self.rebuild_mesh_pipelines(config.render.display_mode)?;
+        }
+        if reloads.contains(Reload::ShadowMap) {
+            self.rebuild_shadow_map(config.render.shadow.map_resolution)?;
+        }
+        if reloads.contains(Reload::Sampler) {
+            self.world
+                .hot_reload_sampler(config.render.textures.anisotropy)?;
+        }
+        if reloads.contains(Reload::Live) {
+            self.world.hot_reload_live(&config);
+        }
+        // Toujours : `World` porte la config de référence (UBO, passes, génération), qui
+        // doit rester celle de l'`Engine` quel que soit le rechargement.
+        self.world.config = config;
+        Ok(())
+    }
+
+    /// Nouvelle résolution de shadow map. Les pipelines d'ombre restent valides (viewport
+    /// dynamique, même format) et l'image repart de `UNDEFINED` à chaque frame : seul le
+    /// set 2 qui la référence est à réécrire.
+    fn rebuild_shadow_map(&mut self, resolution: u32) -> Result<()> {
+        let shadow_map = ShadowMap::new(self.context.clone(), resolution)?;
+        // Les frames en vol lisent peut-être encore le set 2 et l'ancienne image.
+        unsafe { self.context.device.device_wait_idle()? };
+        self.descriptor_handler.write_image_sampler(
+            self.descriptor_handler.shadow_descriptor_set,
+            0,
+            shadow_map.image_view,
+            shadow_map.sampler,
+        );
+        self.shadow_map = shadow_map;
+        // Taille d'un texel pour l'UBO (biais, PCF).
+        self.world.light.shadow_map_resolution = resolution;
+        Ok(())
+    }
+
+    /// Les pipelines figent le `polygon_mode` : on recrée celles des meshes (objets,
+    /// terrain). Si la création échoue, les anciennes restent en place.
+    fn rebuild_mesh_pipelines(&mut self, display_mode: DisplayMode) -> Result<()> {
+        let polygon_mode = polygon_mode(display_mode);
+        let object_render_system = ObjectRenderSystem::new(
+            self.context.clone(),
+            self.descriptor_handler.clone(),
+            self.swapchain.color_format,
+            self.swapchain.depth_format,
+            self.swapchain.msaa_samples,
+            self.swapchain.extent,
+            self.shadow_map.format,
+            polygon_mode,
+        )?;
+        let terrain_render_sytem = TerrainRenderSystem::new(
+            self.context.clone(),
+            self.descriptor_handler.clone(),
+            self.swapchain.color_format,
+            self.swapchain.depth_format,
+            self.swapchain.msaa_samples,
+            self.swapchain.extent,
+            self.shadow_map.format,
+            polygon_mode,
+        )?;
+        // Les frames en vol utilisent peut-être encore les anciennes pipelines, détruites
+        // par le remplacement (Drop).
+        unsafe { self.context.device.device_wait_idle()? };
+        self.object_render_system = object_render_system;
+        self.terrain_render_sytem = terrain_render_sytem;
+        Ok(())
     }
 
     pub fn render(
@@ -385,6 +456,15 @@ impl Renderer {
         }
 
         Ok(())
+    }
+}
+
+/// Mode de rastérisation des meshes, figé dans leurs pipelines.
+fn polygon_mode(display_mode: DisplayMode) -> vk::PolygonMode {
+    match display_mode {
+        DisplayMode::Fill => vk::PolygonMode::FILL,
+        DisplayMode::Edges => vk::PolygonMode::LINE,
+        DisplayMode::Vertices => vk::PolygonMode::POINT,
     }
 }
 

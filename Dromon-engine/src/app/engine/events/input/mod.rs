@@ -2,7 +2,7 @@ mod base_event_subscriber;
 mod input_event;
 mod input_state;
 
-pub use crate::app::engine::inputs::input_state::InputState;
+pub use crate::app::engine::events::input::input_state::InputState;
 pub use base_event_subscriber::base_event_subscriber;
 pub use input_event::InputEvent;
 use winit::event::{DeviceEvent, ElementState, MouseScrollDelta, WindowEvent};

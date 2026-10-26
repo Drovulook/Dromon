@@ -28,8 +28,8 @@ pub use material_rules::{
 };
 pub use material_textures::MaterialTexturesConfig;
 pub use materials::{
-    HumidityTint, MaterialDef, MaterialsConfig, TEXTURE_AO, TEXTURE_COLOR, TEXTURE_HEIGHT,
-    TEXTURE_NORMAL, terrain_texture_path,
+    HumidityTint, MaterialDef, MaterialsConfig, TERRAIN_TEXTURE_DIR, TEXTURE_AO, TEXTURE_COLOR,
+    TEXTURE_HEIGHT, TEXTURE_NORMAL, terrain_texture_path,
 };
 pub use render::{
     Anisotropy, CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig,

@@ -10,7 +10,7 @@ use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
-use crate::app::engine::inputs::InputState;
+use crate::app::engine::events::input::InputState;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::{DirectionalLight, sun_direction};
 use crate::app::engine::renderer::world::stars::{Stars, world_to_sky};
@@ -28,7 +28,7 @@ use crate::app::{
     },
     logger::Logger,
 };
-use crate::config::EngineConfig;
+use crate::config::{Anisotropy, EngineConfig};
 use crate::profile;
 use game_clock::GameClock;
 
@@ -126,6 +126,69 @@ impl World {
             &mut self.atmosphere,
             &mut self.stars,
         );
+    }
+
+    /// Hot reload `Live` : l'UBO relit la config à chaque frame ; seules les copies faites
+    /// à la création sont à mettre à jour, section par section pour ne pas écraser ce que
+    /// la scène a réglé sur une section inchangée. À appeler AVANT de remplacer
+    /// `self.config`, qui sert de référence pour la comparaison.
+    pub(crate) fn hot_reload_live(&mut self, config: &EngineConfig) {
+        let (old, new) = (&self.config.environment, &config.environment);
+        if new.atmosphere != old.atmosphere {
+            self.atmosphere.params = new.atmosphere;
+        }
+        if new.stars != old.stars {
+            self.stars.params = new.stars;
+        }
+        if new.sun != old.sun {
+            self.light.disk = new.sun;
+        }
+        if new.latitude_deg != old.latitude_deg {
+            self.latitude = new.latitude_deg.to_radians();
+        }
+        if new.clock != old.clock {
+            self.game_clock.hot_reload(&old.clock, &new.clock);
+        }
+        if new.water != old.water
+            && let Some(water) = self.water.as_mut()
+        {
+            water.hot_reload(new.water);
+        }
+
+        let (old, new) = (&self.config.render, &config.render);
+        // Boîte d'ombre active : celle du terrain s'il y en a un (cf. `generate_terrain`).
+        let (old_box, new_box) = if self.terrain.is_some() {
+            (&old.shadow.terrain, &new.shadow.terrain)
+        } else {
+            (&old.shadow.static_scene, &new.shadow.static_scene)
+        };
+        if new_box != old_box {
+            self.light.shadow = new_box.clone();
+        }
+        if new.camera != old.camera {
+            self.camera.hot_reload(&new.camera);
+        }
+        if let Some(terrain) = self.terrain.as_mut() {
+            terrain.hot_reload(&config.debug);
+        }
+    }
+
+    /// Hot reload `Sampler` : nouveau sampler des textures de surface, réécrit dans tous
+    /// les sets qui le référencent (un par texture d'objet, celui des matériaux).
+    pub(crate) fn hot_reload_sampler(&mut self, anisotropy: Anisotropy) -> Result<()> {
+        let textures = &self.rrm.textures;
+        let materials = &self.materials;
+        let descriptor_handler = &self.descriptor_handler;
+        self.rrm.texture_handler.hot_reload(anisotropy, |sampler| {
+            for texture in textures.values() {
+                if let Some(set) = texture.descriptor_set {
+                    descriptor_handler.write_image_sampler(set, 0, texture.texture_image_view, sampler);
+                }
+            }
+            if let Some(materials) = materials {
+                materials.hot_reload_sampler(descriptor_handler, sampler);
+            }
+        })
     }
 
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {

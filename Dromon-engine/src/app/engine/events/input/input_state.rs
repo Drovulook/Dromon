@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use winit::keyboard::KeyCode;
 
-use crate::app::engine::inputs::InputEvent;
+use crate::app::engine::events::input::InputEvent;
 
 #[derive(Default)]
 pub struct InputState {

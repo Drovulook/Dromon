@@ -260,6 +260,13 @@ impl Terrain {
     /// Donne aussi le découpage en groupes de bascule : leur taille est la latence
     /// d'affichage (un groupe attend son membre le plus lent).
     ///
+    /// Hot reload : seules les traces changent à chaud, les options de maillage
+    /// (`debug.mesh`) demandent de regénérer le terrain.
+    pub(crate) fn hot_reload(&mut self, debug: &DebugConfig) {
+        self.debug.log_batch_stats = debug.log_batch_stats;
+        self.debug.log_gpu_usage = debug.log_gpu_usage;
+    }
+
     /// Une ligne par lot peut noyer le reste des logs : `log_batch_stats` de `debug.ron`.
     fn log_batch_stats(&self, job: &MeshJob) {
         if !self.debug.log_batch_stats {

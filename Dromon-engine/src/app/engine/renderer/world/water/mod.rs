@@ -92,6 +92,12 @@ impl Water {
         })
     }
 
+    /// Hot reload : aspect et houle (`environment.ron`).
+    pub fn hot_reload(&mut self, params: WaterParams) {
+        self.params = params;
+        self.waves = Waves::new(&params.waves);
+    }
+
     /// Choisit les nœuds de la frame d'après la caméra (déjà mise à jour).
     pub fn update(&mut self, camera: &Camera) {
         let frustum = Frustum::from_view_proj(camera.proj * camera.view);

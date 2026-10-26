@@ -42,3 +42,4 @@ rayon = "1"
 # Configuration du monde : `WorldGenConfig` (serde) lue depuis un fichier RON.
 serde = { version = "1.0.229", features = ["derive"] }
 ron = "0.12.2"
+notify = "8.2.1"

@@ -220,6 +220,13 @@ impl Swapchain {
         Ok(())
     }
 
+    /// Hot reload : nouveau mode de présentation, appliqué par la recréation de la
+    /// swapchain au début de la frame suivante (comme un redimensionnement).
+    pub fn hot_reload(&mut self, present_mode: PresentMode) {
+        self.present_mode = Self::pick_present_mode(&self.surface, present_mode, &self.logger);
+        self.is_dirty = true;
+    }
+
     /// Mode de présentation demandé s'il est supporté par la surface, sinon `FIFO` — le
     /// seul que Vulkan garantit partout.
     fn pick_present_mode(

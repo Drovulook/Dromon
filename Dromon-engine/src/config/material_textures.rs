@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigFile;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MaterialTexturesConfig {
     /// Exposant des poids triplanaires `|N|^k` : grand = fondu étroit entre projections.

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigFile;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EnvironmentConfig {
     /// Latitude, en degrés : le soleil culmine à `90° − latitude`, plein sud.
@@ -129,7 +129,7 @@ impl ConfigFile for EnvironmentConfig {
 }
 
 /// Écoulement du temps de jeu.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ClockParams {
     /// Durée d'un jour de jeu, en secondes réelles (ex. 20 min = 1200).
@@ -152,7 +152,7 @@ impl Default for ClockParams {
 
 /// Apparence du disque solaire dessiné dans le ciel (sky.slang). N'influe pas sur
 /// l'éclairage de la scène.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SunDisk {
     /// Rayon angulaire, en degrés. Le vrai soleil fait ~0.27° ; en jeu on prend plus
@@ -178,7 +178,7 @@ impl Default for SunDisk {
 /// Cycle jour/nuit : couleurs du ciel et de la lumière en fonction de l'**élévation**
 /// du soleil (pas de l'heure : reste juste si on change la latitude ou ajoute les
 /// saisons).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DayNightParams {
     /// Triées par élévation croissante ; interpolées linéairement entre deux voisines,
@@ -228,7 +228,7 @@ impl Default for DayNightParams {
 }
 
 /// État du ciel pour une élévation solaire donnée. Couleurs linéaires.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkyKeyframe {
     pub elevation_deg: f32,
@@ -241,7 +241,7 @@ pub struct SkyKeyframe {
 }
 
 /// Réglages fixes de l'atmosphère. Ses couleurs viennent des keyframes jour/nuit.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AtmosphereParams {
     /// Part de l'ambiant renvoyée par le sol (∈ [0, 1]) : une face tournée vers le bas
@@ -276,7 +276,7 @@ impl Default for AtmosphereParams {
 }
 
 /// Étoiles procédurales (sky.slang).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StarsParams {
     /// Luminosité (linéaire) des étoiles les plus brillantes.
@@ -302,7 +302,7 @@ impl Default for StarsParams {
 }
 
 /// Aspect de l'eau de mer (cf. `Architecture/Rendu-Eau.md`).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WaterParams {
     /// Coefficients d'absorption (par unité monde, par canal) : la lumière qui traverse
@@ -340,7 +340,7 @@ impl Default for WaterParams {
 
 /// Écume du rivage : bruit (taches + bulles) seuillé par la profondeur du fond, qui
 /// pulse à l'arrivée de chaque vague (`shoreFoam`, lib/water.slang).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FoamParams {
     /// Albédo de l'écume, dans [0, 1].
@@ -384,7 +384,7 @@ impl Default for FoamParams {
 
 /// Houle géométrique : somme de vagues de Gerstner, longueurs d'onde en progression
 /// géométrique, directions dispersées autour du vent.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WaveParams {
     /// Direction vers laquelle avancent les vagues, en degrés (0 = +X, 90 = +Y).

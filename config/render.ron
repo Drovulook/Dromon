@@ -59,7 +59,7 @@
     shadow: (
         // Côté de la shadow map, en texels. Résolution des ombres :
         // 2 · half_size / map_resolution unités monde par texel.
-        map_resolution: 2048,
+        map_resolution: 4096,
 
         // Anti-acné, en texels de shadow map. Taches d'ombre sur les surfaces éclairées
         // (« acné », surtout soleil bas) → augmenter ; ombres décollées des objets →

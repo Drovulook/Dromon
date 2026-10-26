@@ -319,6 +319,28 @@ impl DescriptorHandler {
         Ok(descriptor_set)
     }
 
+    /// Réécrit un binding image + sampler d'un set existant (hot reload du sampler). Le
+    /// set ne doit être utilisé par aucune frame en vol.
+    pub fn write_image_sampler(
+        &self,
+        descriptor_set: vk::DescriptorSet,
+        binding: u32,
+        image_view: vk::ImageView,
+        sampler: vk::Sampler,
+    ) {
+        let image_info = [vk::DescriptorImageInfo::default()
+            .sampler(sampler)
+            .image_view(image_view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let write = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor_set)
+            .dst_binding(binding)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .image_info(&image_info);
+        unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
+    }
+
     /// Alloue et écrit le set des cartes du monde (set 3) : `views[i]` va au binding
     /// `i`, toutes avec le même `sampler`.
     pub fn create_world_maps_descriptor_set(

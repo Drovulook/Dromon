@@ -30,12 +30,7 @@ impl TextureHandler {
         descriptor_handler: Arc<DescriptorHandler>,
         anisotropy: Anisotropy,
     ) -> Result<TextureHandler> {
-        let device_max = context.physical_device.properties.limits.max_sampler_anisotropy;
-        let anisotropy = anisotropy.resolve(device_max);
-        logger.info(&format!(
-            "Anisotropie des textures : {anisotropy} (max GPU {device_max})"
-        ));
-        let base_texture_sampler = Self::create_base_texture_sampler(&context, anisotropy)?;
+        let base_texture_sampler = Self::create_base_texture_sampler(&context, &logger, anisotropy)?;
         Ok(TextureHandler {
             context,
             logger,
@@ -44,10 +39,32 @@ impl TextureHandler {
         })
     }
 
+    /// Hot reload : remplace le sampler. `rewrite_sets` doit réécrire tous les descriptor
+    /// sets qui référencent l'ancien : il est appelé GPU au repos (un set utilisé par une
+    /// frame en vol ne peut pas être modifié), puis l'ancien sampler est détruit.
+    pub fn hot_reload(
+        &mut self,
+        anisotropy: Anisotropy,
+        rewrite_sets: impl FnOnce(vk::Sampler),
+    ) -> Result<()> {
+        let sampler = Self::create_base_texture_sampler(&self.context, &self.logger, anisotropy)?;
+        unsafe { self.context.device.device_wait_idle()? };
+        rewrite_sets(sampler);
+        let old = std::mem::replace(&mut self.base_texture_sampler, sampler);
+        unsafe { self.context.device.destroy_sampler(old, None) };
+        Ok(())
+    }
+
     fn create_base_texture_sampler(
         context: &RenderingContext,
-        anisotropy: f32,
+        logger: &Logger,
+        anisotropy: Anisotropy,
     ) -> Result<vk::Sampler> {
+        let device_max = context.physical_device.properties.limits.max_sampler_anisotropy;
+        let anisotropy = anisotropy.resolve(device_max);
+        logger.info(&format!(
+            "Anisotropie des textures : {anisotropy} (max GPU {device_max})"
+        ));
         let sampler_info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)

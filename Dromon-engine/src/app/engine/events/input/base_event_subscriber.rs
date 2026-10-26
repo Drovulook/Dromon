@@ -1,4 +1,4 @@
-use crate::app::{engine::inputs::InputManager, logger::Logger};
+use crate::app::{engine::events::input::InputManager, logger::Logger};
 use std::sync::Arc;
 
 pub fn base_event_subscriber(input_manager: &mut InputManager, logger_for_callback: Arc<Logger>) {

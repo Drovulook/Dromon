@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigFile;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DebugConfig {
     /// Une ligne par lot de re-maillage : chunks installés, part du cache, coût par LOD.
@@ -34,7 +34,7 @@ impl ConfigFile for DebugConfig {
 }
 
 /// Options du mailleur de terrain.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MeshDebug {
     /// Parois verticales au bord du monde.
