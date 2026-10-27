@@ -26,7 +26,7 @@ use crate::app::engine::terrain_generation::{
     TerrainSource, chunk_distance,
 };
 use crate::app::logger::Logger;
-use crate::config::DebugConfig;
+use crate::config::{DebugConfig, WorldGenConfig};
 use crate::profile;
 
 /// **Le terrain vivant** : le relief, ce que le joueur en a modifié, les meshes GPU
@@ -37,6 +37,8 @@ use crate::profile;
 /// ces champs rend l'invariant structurel : il n'y avait aucun moyen d'avoir un
 /// streamer sans relief quand les deux étaient deux `Option` séparées sur `World`.
 pub struct Terrain {
+    /// Config de génération reçue de la scène : référence du hot reload.
+    pub(crate) world_gen: WorldGenConfig,
     /// Le relief procédural. Immuable, partagé en `Arc` avec les threads de maillage.
     source: Arc<TerrainSource>,
     /// Les édits du joueur : la seule donnée du monde qui ne se recalcule pas. Chaque lot

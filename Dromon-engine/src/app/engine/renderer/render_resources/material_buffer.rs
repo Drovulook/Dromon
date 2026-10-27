@@ -161,12 +161,14 @@ impl MaterialBuffer {
         self.textures.record_upload(texture_handler, command_buffer)
     }
 
-    /// Hot reload du sampler des textures (bindings 1 et 2, cf.
-    /// `create_materials_descriptor_set`).
+    /// Hot reload du sampler des textures.
     pub fn hot_reload_sampler(&self, descriptor_handler: &DescriptorHandler, sampler: vk::Sampler) {
-        let set = self.descriptor_set;
-        descriptor_handler.write_image_sampler(set, 1, self.textures.albedo_view(), sampler);
-        descriptor_handler.write_image_sampler(set, 2, self.textures.normal_view(), sampler);
+        descriptor_handler.write_materials_textures(
+            self.descriptor_set,
+            self.textures.albedo_view(),
+            self.textures.normal_view(),
+            sampler,
+        );
     }
 
     /// Libère le staging des textures, une fois la passe de transfert exécutée.

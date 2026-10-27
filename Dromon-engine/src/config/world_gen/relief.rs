@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
 /// Altitude de base selon la distance à la côte `d` (voxels, > 0 terre).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CoastProfile {
     /// Points `(d, altitude relative à sea_level)`, `d` strictement croissant, reliés
@@ -40,7 +40,7 @@ impl CoastProfile {
 
 /// Chaînes de montagnes : où (axes), sur quelle largeur (piémont) et à quelle hauteur.
 /// La **forme** du relief montagneux est côté détail.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MountainParams {
     /// Fréquence du bruit ridged dont les crêtes dessinent les axes des chaînes.

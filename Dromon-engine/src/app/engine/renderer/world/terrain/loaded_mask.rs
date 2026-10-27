@@ -47,6 +47,12 @@ impl LoadedMask {
         }
     }
 
+    /// Force l'envoi au prochain `take_changes`, même sans modification : la texture
+    /// porte encore le masque d'un terrain précédent (hot reload).
+    pub fn force_upload(&mut self) {
+        self.dirty = true;
+    }
+
     /// Texels à envoyer au GPU, s'ils ont changé depuis le dernier appel.
     pub fn take_changes(&mut self) -> Option<&[u8]> {
         std::mem::take(&mut self.dirty).then_some(self.texels.as_slice())

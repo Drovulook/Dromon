@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// compactes ; la somme d'octaves découpe les côtes. Le détail déplace la côte
 /// d'environ `detail.amplitude / pente de base` : plus il est faible devant la base,
 /// plus les continents restent massifs (moins de bras et de presqu'îles).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ContinentParams {
     /// Forme des continents : un seul bruit, de longueur d'onde ≈ taille d'un continent.
@@ -39,7 +39,7 @@ pub struct ContinentParams {
 }
 
 /// Un bruit simple : valeur dans ~`[-amplitude, amplitude]`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BaseNoise {
     /// Longueur d'onde `1/f`, en voxels.
@@ -58,7 +58,7 @@ impl Default for BaseNoise {
 
 /// Somme d'octaves (fBm), normalisée par la somme des poids puis multipliée par
 /// `amplitude` : valeur dans ~`[-amplitude, amplitude]`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OctaveNoise {
     /// Fréquence de la première octave.

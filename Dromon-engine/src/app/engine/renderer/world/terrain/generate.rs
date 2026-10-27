@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use glam::{IVec2, Vec3};
 use std::path::Path;
 use std::sync::Arc;
@@ -20,13 +20,15 @@ use crate::{
             },
             rendering_context::RenderingContext,
             terrain_generation::{
-                CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE, MacroMap,
-                MeshCache, TerrainSnapshot, TerrainSource, chunk_distance,
+                CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE,
+                MacroMap, MeshCache, TerrainSnapshot, TerrainSource, chunk_distance,
             },
         },
         logger::Logger,
     },
-    config::{DebugConfig, MaterialRulesConfig, MaterialsConfig, TerrainRenderParams, WorldGenConfig},
+    config::{
+        DebugConfig, MaterialRulesConfig, MaterialsConfig, TerrainRenderParams, WorldGenConfig,
+    },
     profile,
 };
 
@@ -37,31 +39,13 @@ impl World {
         // Terrain survolé : grande boîte d'ombre qui suit la caméra (`render.ron`).
         self.light.shadow = self.config.render.shadow.terrain.clone();
 
-        let terrain = Terrain::new(
-            config,
-            &self.config.materials,
-            &self.config.material_rules,
-            &self.config.render.terrain,
-            &self.config.debug,
-            self.camera.position,
-            self.context.clone(),
-            self.logger.clone(),
-            self.frames_in_flight,
-        )?;
-
-        let world = &config.macro_.world;
-        let world_radius = (world.radius_chunks as usize * CHUNK_SIZE) as f32;
-        // Au-delà, plus aucun chunk chargé : nœuds d'eau rejetés d'office. La coupure fine
-        // suit le masque des chunks installés (`Terrain::take_loaded_mask`).
-        let params = &self.config.render.terrain;
-        let water_distance = (params.load_radius_chunks as f32 + params.unload_margin_chunks)
-            * CHUNK_SIZE as f32;
+        let terrain = self.new_terrain(config)?;
         self.water = Some(Water::new(
             self.context.clone(),
             terrain.source.clone(),
-            world.sea_level as f32,
-            world_radius,
-            water_distance,
+            config.macro_.world.sea_level as f32,
+            world_radius(config),
+            self.water_distance(),
             &self.config.render.water,
             self.config.environment.water,
         )?);
@@ -82,6 +66,67 @@ impl World {
         self.terrain = Some(terrain);
         Ok(())
     }
+
+    /// Hot reload `Terrain` : un terrain neuf, sur la même carte macro (relue depuis son
+    /// cache), remplace l'ancien. Il repart de zéro, cache de meshes compris : les clés
+    /// du cache ne contiennent pas les réglages, un mesh de l'ancien terrain y passerait
+    /// pour valide. Cartes du monde et table des matériaux ne dépendent pas des réglages
+    /// concernés : gardées.
+    pub(crate) fn regenerate_terrain(&mut self, config: &WorldGenConfig) -> Result<()> {
+        let mut terrain = self.new_terrain(config)?;
+        if let Some(world_maps) = self.world_maps.as_ref() {
+            ensure!(
+                terrain.loaded_mask_size() == world_maps.loaded_mask_size(),
+                "la nouvelle portée de chargement change la taille du masque des chunks : \
+                 relancer le moteur"
+            );
+        }
+        // Les frames en vol dessinent peut-être encore l'ancien terrain, dont les buffers
+        // sont libérés par son remplacement.
+        unsafe { self.context.device.device_wait_idle()? };
+        let water_distance = self.water_distance();
+        if let Some(water) = self.water.as_mut() {
+            water.hot_reload_terrain(
+                terrain.source.clone(),
+                config.macro_.world.sea_level as f32,
+                world_radius(config),
+                water_distance,
+                &self.config.render.water,
+            );
+        }
+        // Le GPU garde le masque de l'ancien terrain : on envoie celui, vide, du nouveau.
+        terrain.loaded_mask.force_upload();
+        // L'ancien terrain est détruit ici ; ses workers encore en vol s'arrêtent au
+        // premier envoi vers son canal fermé.
+        self.terrain = Some(terrain);
+        Ok(())
+    }
+
+    fn new_terrain(&self, config: &WorldGenConfig) -> Result<Terrain> {
+        Terrain::new(
+            config,
+            &self.config.materials,
+            &self.config.material_rules,
+            &self.config.render.terrain,
+            &self.config.debug,
+            self.camera.position,
+            self.context.clone(),
+            self.logger.clone(),
+            self.frames_in_flight,
+        )
+    }
+
+    /// Au-delà, plus aucun chunk chargé : nœuds d'eau rejetés d'office. La coupure fine
+    /// suit le masque des chunks installés (`Terrain::take_loaded_mask`).
+    fn water_distance(&self) -> f32 {
+        let params = &self.config.render.terrain;
+        (params.load_radius_chunks as f32 + params.unload_margin_chunks) * CHUNK_SIZE as f32
+    }
+}
+
+/// Rayon du monde, en unités monde.
+fn world_radius(config: &WorldGenConfig) -> f32 {
+    (config.macro_.world.radius_chunks as usize * CHUNK_SIZE) as f32
 }
 
 impl Terrain {
@@ -102,7 +147,12 @@ impl Terrain {
 
         // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
         let macro_map = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
-        let source = Arc::new(TerrainSource::new(config, materials, material_rules, macro_map)?);
+        let source = Arc::new(TerrainSource::new(
+            config,
+            materials,
+            material_rules,
+            macro_map,
+        )?);
 
         // Altitude moyenne du relief : plan de référence de la composante verticale du
         //    LOD. Mesurée une seule fois — le relief ne bouge pas.
@@ -138,6 +188,7 @@ impl Terrain {
         );
 
         Ok(Terrain {
+            world_gen: config.clone(),
             source,
             store,
             chunks: InstalledChunks::new(),
@@ -193,8 +244,7 @@ pub(super) fn log_terrain_stats(
     let mut records = vec![format!(
         "Terrain : {total_chunks} chunks, {total_verts} sommets"
     )];
-    records.extend(
-        (0..levels).map(|l| format!("{l}\u{1f}{}\u{1f}{}", chunks_per[l], verts_per[l])),
-    );
+    records
+        .extend((0..levels).map(|l| format!("{l}\u{1f}{}\u{1f}{}", chunks_per[l], verts_per[l])));
     logger.world(&records.join("\u{1e}"));
 }

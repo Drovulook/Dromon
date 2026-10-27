@@ -7,7 +7,7 @@ use super::{ClimateParams, CoastProfile, ContinentParams, MountainParams};
 use crate::config::ConfigFile;
 
 /// `world_macro.ron` : entrées de la carte macro.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldMacroConfig {
     pub seed: u32,
@@ -48,7 +48,7 @@ impl ConfigFile for WorldMacroConfig {
 }
 
 /// Étendue du monde.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldShape {
     /// Rayon du monde, en chunks (cf. `WorldDisc`).

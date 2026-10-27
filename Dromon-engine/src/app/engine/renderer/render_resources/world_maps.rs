@@ -150,6 +150,11 @@ impl WorldMaps {
         Ok(unsafe { context.device.create_sampler(&sampler_info, None) }?)
     }
 
+    /// Côté (texels) du masque des chunks installés.
+    pub fn loaded_mask_size(&self) -> u32 {
+        self.loaded_chunks.image_width
+    }
+
     /// Copie staging → device des cartes. Passe de transfert du démarrage uniquement.
     pub fn record_upload(
         &self,

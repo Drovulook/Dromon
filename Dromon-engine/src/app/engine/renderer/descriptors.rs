@@ -48,15 +48,7 @@ impl DescriptorHandler {
             world_descriptor_set_layout,
             uniform_buffer_handles,
         )?;
-        let shadow_descriptor_set = DescriptorHandler::create_shadow_descriptor_set(
-            &context,
-            descriptor_pool,
-            shadow_descriptor_set_layout,
-            shadow_map_view,
-            shadow_map_sampler,
-        )?;
-
-        Ok(Self {
+        let mut handler = Self {
             context,
             descriptor_pool,
             world_descriptor_set_layout,
@@ -65,8 +57,17 @@ impl DescriptorHandler {
             world_maps_descriptor_set_layout,
             materials_descriptor_set_layout,
             world_descriptor_sets,
-            shadow_descriptor_set,
-        })
+            // Alloué juste après, avec les méthodes communes.
+            shadow_descriptor_set: vk::DescriptorSet::null(),
+        };
+        handler.shadow_descriptor_set = handler.allocate_set(shadow_descriptor_set_layout)?;
+        handler.write_image_sampler(
+            handler.shadow_descriptor_set,
+            0,
+            shadow_map_view,
+            shadow_map_sampler,
+        );
+        Ok(handler)
     }
 
     fn create_descriptor_pool(
@@ -256,38 +257,16 @@ impl DescriptorHandler {
         Ok(descriptor_sets)
     }
 
-    /// Alloue et écrit l'unique descriptor set de la shadow map (set 2). L'image
-    /// est déclarée en SHADER_READ_ONLY_OPTIMAL : c'est l'état dans lequel on la
-    /// transitionne après la passe d'ombre, juste avant de l'échantillonner.
-    fn create_shadow_descriptor_set(
-        context: &RenderingContext,
-        descriptor_pool: vk::DescriptorPool,
-        shadow_descriptor_set_layout: vk::DescriptorSetLayout,
-        shadow_map_view: vk::ImageView,
-        shadow_map_sampler: vk::Sampler,
-    ) -> Result<vk::DescriptorSet> {
-        let descriptor_set = unsafe {
-            context.device.allocate_descriptor_sets(
+    /// Alloue un set de `layout` dans le pool commun.
+    fn allocate_set(&self, layout: vk::DescriptorSetLayout) -> Result<vk::DescriptorSet> {
+        let sets = unsafe {
+            self.context.device.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::default()
-                    .descriptor_pool(descriptor_pool)
-                    .set_layouts(&[shadow_descriptor_set_layout]),
+                    .descriptor_pool(self.descriptor_pool)
+                    .set_layouts(&[layout]),
             )?
-        }[0];
-
-        let image_info = [vk::DescriptorImageInfo::default()
-            .sampler(shadow_map_sampler)
-            .image_view(shadow_map_view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
-        let write = vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_set)
-            .dst_binding(0)
-            .dst_array_element(0)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .image_info(&image_info);
-
-        unsafe { context.device.update_descriptor_sets(&[write], &[]) };
-
-        Ok(descriptor_set)
+        };
+        Ok(sets[0])
     }
 
     // called in texture_handler
@@ -296,31 +275,15 @@ impl DescriptorHandler {
         texture_image_view: &vk::ImageView,
         texture_sampler: &vk::Sampler,
     ) -> Result<vk::DescriptorSet> {
-        let descriptor_set = unsafe {
-            self.context.device.allocate_descriptor_sets(
-                &vk::DescriptorSetAllocateInfo::default()
-                    .descriptor_pool(self.descriptor_pool)
-                    .set_layouts(&[self.texture_descriptor_set_layout]),
-            )?
-        }[0];
-        let image_info = [vk::DescriptorImageInfo::default()
-            .sampler(*texture_sampler)
-            .image_view(*texture_image_view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
-        let write = vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_set)
-            .dst_binding(0)
-            .dst_array_element(0)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .image_info(&image_info);
-
-        unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
-
+        let descriptor_set = self.allocate_set(self.texture_descriptor_set_layout)?;
+        self.write_image_sampler(descriptor_set, 0, *texture_image_view, *texture_sampler);
         Ok(descriptor_set)
     }
 
-    /// Réécrit un binding image + sampler d'un set existant (hot reload du sampler). Le
-    /// set ne doit être utilisé par aucune frame en vol.
+    /// Écrit un binding image + sampler, à la création d'un set comme au hot reload. Le
+    /// set ne doit être utilisé par aucune frame en vol. L'image est déclarée en
+    /// SHADER_READ_ONLY_OPTIMAL : son état quand les shaders la lisent (pour la shadow
+    /// map, après la transition qui suit la passe d'ombre).
     pub fn write_image_sampler(
         &self,
         descriptor_set: vk::DescriptorSet,
@@ -349,37 +312,10 @@ impl DescriptorHandler {
         sampler: vk::Sampler,
     ) -> Result<vk::DescriptorSet> {
         debug_assert_eq!(views.len(), WORLD_MAP_COUNT as usize);
-        let descriptor_set = unsafe {
-            self.context.device.allocate_descriptor_sets(
-                &vk::DescriptorSetAllocateInfo::default()
-                    .descriptor_pool(self.descriptor_pool)
-                    .set_layouts(&[self.world_maps_descriptor_set_layout]),
-            )?
-        }[0];
-
-        let image_infos: Vec<[vk::DescriptorImageInfo; 1]> = views
-            .iter()
-            .map(|&view| {
-                [vk::DescriptorImageInfo::default()
-                    .sampler(sampler)
-                    .image_view(view)
-                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
-            })
-            .collect();
-        let writes: Vec<vk::WriteDescriptorSet> = image_infos
-            .iter()
-            .enumerate()
-            .map(|(binding, info)| {
-                vk::WriteDescriptorSet::default()
-                    .dst_set(descriptor_set)
-                    .dst_binding(binding as u32)
-                    .dst_array_element(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(info)
-            })
-            .collect();
-
-        unsafe { self.context.device.update_descriptor_sets(&writes, &[]) };
+        let descriptor_set = self.allocate_set(self.world_maps_descriptor_set_layout)?;
+        for (binding, &view) in views.iter().enumerate() {
+            self.write_image_sampler(descriptor_set, binding as u32, view, sampler);
+        }
         Ok(descriptor_set)
     }
 
@@ -392,48 +328,33 @@ impl DescriptorHandler {
         normal: vk::ImageView,
         sampler: vk::Sampler,
     ) -> Result<vk::DescriptorSet> {
-        let descriptor_set = unsafe {
-            self.context.device.allocate_descriptor_sets(
-                &vk::DescriptorSetAllocateInfo::default()
-                    .descriptor_pool(self.descriptor_pool)
-                    .set_layouts(&[self.materials_descriptor_set_layout]),
-            )?
-        }[0];
-
+        let descriptor_set = self.allocate_set(self.materials_descriptor_set_layout)?;
         let buffer_info = [vk::DescriptorBufferInfo::default()
             .buffer(buffer)
             .offset(0)
             .range(vk::WHOLE_SIZE)];
-        let image_info = |view| {
-            [vk::DescriptorImageInfo::default()
-                .sampler(sampler)
-                .image_view(view)
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
-        };
-        let (albedo_info, normal_info) = (image_info(albedo), image_info(normal));
-        let writes = [
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor_set)
-                .dst_binding(0)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&buffer_info),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor_set)
-                .dst_binding(1)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&albedo_info),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor_set)
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&normal_info),
-        ];
-
-        unsafe { self.context.device.update_descriptor_sets(&writes, &[]) };
+        let write = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor_set)
+            .dst_binding(0)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .buffer_info(&buffer_info);
+        unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
+        self.write_materials_textures(descriptor_set, albedo, normal, sampler);
         Ok(descriptor_set)
+    }
+
+    /// Textures du terrain du set 4 : albédo au binding 1, normales au binding 2. À la
+    /// création comme au hot reload du sampler.
+    pub fn write_materials_textures(
+        &self,
+        descriptor_set: vk::DescriptorSet,
+        albedo: vk::ImageView,
+        normal: vk::ImageView,
+        sampler: vk::Sampler,
+    ) {
+        self.write_image_sampler(descriptor_set, 1, albedo, sampler);
+        self.write_image_sampler(descriptor_set, 2, normal, sampler);
     }
 }
 

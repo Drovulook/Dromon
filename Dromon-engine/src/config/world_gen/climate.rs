@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Climat, calculé sur une grille plus grossière que la carte macro (il varie à
 /// l'échelle du km, et l'humidité demande des centaines d'itérations).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ClimateParams {
     /// Côté d'une cellule climatique (voxels), multiple de `cell_size`.

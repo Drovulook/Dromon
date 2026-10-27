@@ -6,16 +6,14 @@ use crate::app::engine::terrain_generation::lod::grid::LodGrid;
 use crate::app::engine::terrain_generation::lod::transition_cells::add_transition_cells;
 use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
 use crate::app::engine::terrain_generation::marching_cubes::mc_gen::edge_vertex;
-use crate::app::engine::terrain_generation::marching_cubes::mc_tables::{
-    CORNERS, EDGE_CORNERS, TRI_TABLE,
-};
+use crate::app::engine::terrain_generation::marching_cubes::mc_tables::{CORNERS, TRI_TABLE};
 use crate::app::engine::terrain_generation::mesh::vertex::{EdgeKey, MaterialCache, NormalCache};
 use crate::app::engine::{
     renderer::render_resources::{MeshData, TerrainVertex},
     terrain_generation::mesh::world_borders::add_mesh_borders,
 };
 use crate::profile;
-use glam::{IVec2, IVec3, Vec3};
+use glam::IVec2;
 use rustc_hash::FxHashMap;
 
 // ─── Mailleur volumétrique (Marching Cubes) ──────────────────────────────────
@@ -150,11 +148,9 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
                     continue; // cube entièrement plein ou entièrement vide.
                 }
 
-                // `edge(e)` = sommet mutualisé de l'arête `e` du cube courant. La
+                // `edge(e)` = index du sommet mutualisé de l'arête `e` du cube courant. La
                 // clôture referme les 6 arguments d'état (buffers + caches) communs aux
-                // 3 appels. `edge_vertex` renvoie des valeurs possédées → aucun emprunt
-                // de `vertices` ne fuit hors de l'appel (sinon le test d'orientation, qui
-                // lit `vertices`, entrerait en conflit avec l'emprunt `&mut`).
+                // 3 appels.
                 let mut edge = |e: usize| {
                     edge_vertex(
                         e,
@@ -170,32 +166,17 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
                     )
                 };
 
-                // Référence d'enroulement : `−∇d` du champ trilinéaire du cube, lu sur ses
-                // 8 densités (à un facteur > 0 près, car `Σ (coin − centre) = 0`). Donc
-                // À L'ÉCHELLE DU CUBE — surtout pas les normales de sommet, dont le stencil
-                // reste à 5 unités quel que soit le LOD : à pas grossier elles décrivent un
-                // relief plus fin que la géométrie et peuvent s'écarter de plus de 90° du
-                // triangle, ce qui retournait des triangles (trous noirs à LOD élevé).
-                let mut winding_ref = Vec3::ZERO;
-                for (i, off) in CORNERS.iter().enumerate() {
-                    let c = Vec3::new(off[0] as f32, off[1] as f32, off[2] as f32) - 0.5;
-                    winding_ref -= c * corner_d[i];
-                }
-
+                // Ordre de la table tel quel : ses triangles ont tous leur face avant vers
+                // le vide (vérifié sur les 256 cas). Ne pas réorienter d'après une
+                // référence unique par cube (gradient au centre) : quand le cube contient
+                // deux nappes opposées (crête plus fine qu'un cube, en diagonale), cette
+                // référence s'annule et retourne l'une des deux → trous sur les crêtes.
                 let mut t = 0;
                 while t + 2 < 16 && tris[t] >= 0 {
-                    let (i0, p0, _) = edge(tris[t] as usize);
-                    let (i1, p1, _) = edge(tris[t + 1] as usize);
-                    let (i2, p2, _) = edge(tris[t + 2] as usize);
-
-                    // Oriente l'enroulement vers le vide : on permute les INDEX.
-                    let geo = (p1 - p0).cross(p2 - p0);
-                    if geo.dot(winding_ref) < 0.0 {
-                        indices.extend_from_slice(&[i0, i2, i1]);
-                    } else {
-                        indices.extend_from_slice(&[i0, i1, i2]);
-                    }
-
+                    let i0 = edge(tris[t] as usize);
+                    let i1 = edge(tris[t + 1] as usize);
+                    let i2 = edge(tris[t + 2] as usize);
+                    indices.extend_from_slice(&[i0, i1, i2]);
                     t += 3;
                 }
             }
@@ -278,6 +259,7 @@ mod tests {
     use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
     use crate::app::engine::terrain_generation::lod::Face;
     use crate::app::engine::terrain_generation::lod::transition_shrink::HalfStepShrink;
+    use glam::Vec3;
     use std::sync::Arc;
 
     use super::*;

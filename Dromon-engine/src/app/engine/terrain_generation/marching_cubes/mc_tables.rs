@@ -20,9 +20,9 @@
 //! triangles, terminé par `-1`. Le sommet d'un triangle est posé sur l'arête, à
 //! l'endroit exact où la densité croise l'iso-niveau (interpolation linéaire).
 //!
-//! Le sens d'enroulement des triangles de la table n'est **pas** utilisé tel
-//! quel : le mailleur réoriente chaque triangle d'après le gradient de densité
-//! (cf. `mesher.rs`), ce qui rend le résultat robuste au choix de convention.
+//! L'enroulement des triangles de la table est **utilisé tel quel** : avec cette
+//! convention (bit posé = coin vide), tous ont leur face avant vers le vide, sur les
+//! 256 cas. C'est une propriété de chaque cas, indépendante des densités.
 
 /// Décalages `(dx, dy, dz)` des 8 coins du cube unité, dans l'ordre de Bourke.
 pub const CORNERS: [[i32; 3]; 8] = [

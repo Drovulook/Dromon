@@ -26,7 +26,7 @@ use crate::app::engine::renderer::world::World;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
-use crate::config::{DisplayMode, EngineConfig};
+use crate::config::{DisplayMode, EngineConfig, WorldGenConfig};
 use crate::profile;
 use crate::profiling::render::GpuProfiler;
 use crate::{Scene, app::engine::renderer::render_systems::ObjectRenderSystem};
@@ -244,8 +244,19 @@ impl Renderer {
         self.swapchain.is_dirty = true;
     }
 
+    /// Config de génération du terrain, s'il y en a un.
+    pub(crate) fn world_gen(&self) -> Option<&WorldGenConfig> {
+        self.world.terrain.as_ref().map(|terrain| &terrain.world_gen)
+    }
+
     /// Hot reload : un traitement par [`Reload`] géré (cf. `Reload::is_supported`).
-    pub(crate) fn hot_reload(&mut self, config: Arc<EngineConfig>, reloads: &Reloads) -> Result<()> {
+    /// `world_gen` : config de génération à jour, `None` sans terrain.
+    pub(crate) fn hot_reload(
+        &mut self,
+        config: Arc<EngineConfig>,
+        world_gen: Option<&WorldGenConfig>,
+        reloads: &Reloads,
+    ) -> Result<()> {
         if reloads.contains(Reload::Swapchain) {
             self.swapchain.hot_reload(config.render.present_mode);
         }
@@ -265,6 +276,12 @@ impl Renderer {
         // Toujours : `World` porte la config de référence (UBO, passes, génération), qui
         // doit rester celle de l'`Engine` quel que soit le rechargement.
         self.world.config = config;
+        // Après le remplacement : la génération lit `world.config`.
+        if reloads.contains(Reload::Terrain)
+            && let Some(world_gen) = world_gen
+        {
+            self.world.regenerate_terrain(world_gen)?;
+        }
         Ok(())
     }
 

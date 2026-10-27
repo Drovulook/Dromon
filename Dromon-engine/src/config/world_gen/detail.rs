@@ -7,7 +7,7 @@ use crate::config::ConfigFile;
 
 /// `world_detail.ron` : paramètres du détail calculé à la demande. Hauteur d'une
 /// colonne : `sea_level + profil(d) + w(2 − w) · mountain + (1 − w) · fondu(d) · hills`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldDetailConfig {
     /// Relief des chaînes, pondéré par le masque macro `w`.
@@ -44,7 +44,7 @@ impl ConfigFile for WorldDetailConfig {
 
 /// Paramètres d'un champ d'altitude (`HeightField`) : contrôle du fBm et de l'érosion.
 /// Hauteur **relative** au relief macro : `base_height + amplitude · fBm`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HeightParams {
     /// Décalage du relief, en voxels (le bruit oscille autour).

@@ -16,8 +16,7 @@ use crate::app::engine::{
 /// par ses deux coins entiers triés ([`EdgeKey`]) : la 1re fois on interpole la
 /// position (là où la densité vaut ISO_LEVEL), on calcule normale+matériaux et on pousse
 /// le sommet ; les fois suivantes (cube voisin, autre triangle) on réutilise l'index.
-/// Renvoie `(index, position, normale)` — la position/normale servent au test
-/// d'orientation de l'appelant sans re-lire le buffer.
+/// Renvoie l'index du sommet.
 #[allow(clippy::too_many_arguments)]
 pub fn edge_vertex(
     e: usize,
@@ -30,7 +29,7 @@ pub fn edge_vertex(
     vertex_map: &mut FxHashMap<EdgeKey, u32>,
     normal_cache: &mut NormalCache,
     surface_materials: &mut MaterialCache,
-) -> (u32, Vec3, Vec3) {
+) -> u32 {
     let [a, b] = EDGE_CORNERS[e];
     let ca = CORNERS[a];
     let cb = CORNERS[b];
@@ -53,8 +52,7 @@ pub fn edge_vertex(
         (ib[0], ib[1], ib[2], ia[0], ia[1], ia[2])
     };
     if let Some(&idx) = vertex_map.get(&key) {
-        let v = vertices[idx as usize];
-        return (idx, v.pos, v.normal);
+        return idx;
     }
 
     // Interpolation linéaire sur l'arête (identique à l'ancien `interp`).
@@ -85,5 +83,5 @@ pub fn edge_vertex(
     let idx = vertices.len() as u32;
     vertices.push(TerrainVertex::new(p, normal, material));
     vertex_map.insert(key, idx);
-    (idx, p, normal)
+    idx
 }

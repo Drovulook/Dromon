@@ -432,7 +432,11 @@ fn dispatch(
             let Some(&coord) = todo.get(i) else { return };
             let t = Instant::now();
             let data = mesh_chunk(&snapshot, &grid, coord);
-            let _ = sender.send((coord, data, t.elapsed()));
+            // Récepteur détruit (terrain régénéré entre-temps) : le reste du lot ne
+            // servirait plus à rien.
+            if sender.send((coord, data, t.elapsed())).is_err() {
+                return;
+            }
         }
     });
 }

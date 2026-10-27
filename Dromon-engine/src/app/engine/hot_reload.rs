@@ -1,11 +1,13 @@
-//! Hot reload des configs moteur. Chaque champ de chaque config est associé à **un**
-//! type de rechargement ([`Reload`]) ; les fonctions `*_reloads` le font par
-//! déstructuration exhaustive (sans `..`) : ajouter un champ à une config est une erreur
-//! de compilation ici tant qu'on ne l'a pas classé.
+//! Hot reload des configs : celles du moteur, et celles de la génération du monde quand
+//! la scène a créé un terrain. Chaque champ de chaque config est associé à **un** type
+//! de rechargement ([`Reload`]) ; les fonctions `*_reloads` le font par déstructuration
+//! exhaustive (sans `..`) : ajouter un champ à une config est une erreur de compilation
+//! ici tant qu'on ne l'a pas classé.
 
 use crate::config::{
     ConfigFile, DebugConfig, EngineConfig, EnvironmentConfig, MaterialRulesConfig,
-    MaterialTexturesConfig, MaterialsConfig, RenderConfig, ShadowSettings,
+    MaterialTexturesConfig, MaterialsConfig, RenderConfig, ShadowSettings, WorldDetailConfig,
+    WorldGenConfig, WorldMacroConfig,
 };
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -21,8 +23,10 @@ pub(crate) enum Reload {
     /// Sampler des textures, et les descriptor sets qui le référencent.
     Sampler,
     ShadowMap,
-    /// Régénération du terrain (et de l'eau, créée avec lui).
+    /// Régénération du terrain sur la même carte macro (et de l'eau, créée avec lui).
     Terrain,
+    /// Nouvelle carte macro, puis régénération du terrain.
+    MacroMap,
     /// Table GPU des matériaux et IDs de la génération.
     Materials,
 }
@@ -35,8 +39,9 @@ impl Reload {
             | Reload::Swapchain
             | Reload::MeshPipelines
             | Reload::Sampler
-            | Reload::ShadowMap => true,
-            Reload::Terrain | Reload::Materials => false,
+            | Reload::ShadowMap
+            | Reload::Terrain => true,
+            Reload::MacroMap | Reload::Materials => false,
         }
     }
 }
@@ -66,53 +71,84 @@ impl Reloads {
     }
 }
 
+/// Configs rechargées : celle du moteur, et celle de la génération du monde s'il y a un
+/// terrain.
+pub(crate) struct Configs {
+    pub engine: EngineConfig,
+    pub world_gen: Option<WorldGenConfig>,
+}
+
 pub(crate) enum ConfigReload {
-    /// Pas une config moteur (ex. config de scène).
-    NotEngine,
+    /// Fichier non géré : inconnu, ou config de génération alors qu'il n'y a pas de
+    /// terrain.
+    Unhandled,
     /// Contenu identique : sauvegarde sans modification.
     Unchanged,
-    /// Nouvelle config et rechargements à faire, tous gérés.
-    Apply(Box<EngineConfig>, Reloads),
+    /// Nouvelles configs et rechargements à faire, tous gérés.
+    Apply(Box<Configs>, Reloads),
     /// Rechargements pas encore gérés : rien n'est appliqué, pour ne pas laisser le
     /// moteur à moitié à jour.
     Unsupported(Vec<String>),
 }
 
-/// Relit `file_name` et le compare à `current`. `Err` : fichier illisible ou invalide.
-pub(crate) fn reload(current: &EngineConfig, file_name: &str) -> Result<ConfigReload> {
-    let mut next = current.clone();
+/// Relit `file_name` et le compare aux configs en place. `world_gen` : celle du terrain,
+/// `None` sans terrain. `Err` : fichier illisible ou invalide.
+pub(crate) fn reload(
+    engine: &EngineConfig,
+    world_gen: Option<&WorldGenConfig>,
+    file_name: &str,
+) -> Result<ConfigReload> {
+    let mut next = Configs {
+        engine: engine.clone(),
+        world_gen: world_gen.cloned(),
+    };
     let mut reloads = Reloads::default();
     match file_name {
         EnvironmentConfig::FILE_NAME => {
-            next.environment = EnvironmentConfig::load()?;
-            environment_reloads(&current.environment, &next.environment, &mut reloads);
+            next.engine.environment = EnvironmentConfig::load()?;
+            environment_reloads(&engine.environment, &next.engine.environment, &mut reloads);
         }
         RenderConfig::FILE_NAME => {
-            next.render = RenderConfig::load()?;
-            render_reloads(&current.render, &next.render, &mut reloads);
+            next.engine.render = RenderConfig::load()?;
+            render_reloads(&engine.render, &next.engine.render, &mut reloads);
         }
         DebugConfig::FILE_NAME => {
-            next.debug = DebugConfig::load()?;
-            debug_reloads(&current.debug, &next.debug, &mut reloads);
+            next.engine.debug = DebugConfig::load()?;
+            debug_reloads(&engine.debug, &next.engine.debug, &mut reloads);
         }
         MaterialsConfig::FILE_NAME => {
-            next.materials = MaterialsConfig::load()?;
-            let MaterialsConfig { materials } = &current.materials;
-            reloads.check("materials", materials, &next.materials.materials, Reload::Materials);
+            next.engine.materials = MaterialsConfig::load()?;
+            let MaterialsConfig { materials } = &engine.materials;
+            let new = &next.engine.materials.materials;
+            reloads.check("materials", materials, new, Reload::Materials);
         }
         MaterialRulesConfig::FILE_NAME => {
-            next.material_rules = MaterialRulesConfig::load()?;
-            material_rules_reloads(&current.material_rules, &next.material_rules, &mut reloads);
+            next.engine.material_rules = MaterialRulesConfig::load()?;
+            let new = &next.engine.material_rules;
+            material_rules_reloads(&engine.material_rules, new, &mut reloads);
         }
         MaterialTexturesConfig::FILE_NAME => {
-            next.material_textures = MaterialTexturesConfig::load()?;
-            material_textures_reloads(
-                &current.material_textures,
-                &next.material_textures,
-                &mut reloads,
-            );
+            next.engine.material_textures = MaterialTexturesConfig::load()?;
+            let new = &next.engine.material_textures;
+            material_textures_reloads(&engine.material_textures, new, &mut reloads);
         }
-        _ => return Ok(ConfigReload::NotEngine),
+        // Configs de génération : relues aux chemins par défaut, ceux de
+        // `WorldGenConfig::load` (la scène peut en principe en passer d'autres).
+        WorldDetailConfig::FILE_NAME => {
+            let (Some(old), Some(new)) = (world_gen, next.world_gen.as_mut()) else {
+                return Ok(ConfigReload::Unhandled);
+            };
+            new.detail = WorldDetailConfig::load()?;
+            detail_reloads(&old.detail, &new.detail, &mut reloads);
+        }
+        WorldMacroConfig::FILE_NAME => {
+            let (Some(old), Some(new)) = (world_gen, next.world_gen.as_mut()) else {
+                return Ok(ConfigReload::Unhandled);
+            };
+            new.macro_ = WorldMacroConfig::load()?;
+            macro_reloads(&old.macro_, &new.macro_, &mut reloads);
+        }
+        _ => return Ok(ConfigReload::Unhandled),
     }
 
     let unsupported = reloads.unsupported();
@@ -123,6 +159,36 @@ pub(crate) fn reload(current: &EngineConfig, file_name: &str) -> Result<ConfigRe
     } else {
         ConfigReload::Unsupported(unsupported)
     })
+}
+
+fn detail_reloads(old: &WorldDetailConfig, new: &WorldDetailConfig, out: &mut Reloads) {
+    let WorldDetailConfig {
+        mountain,
+        hills,
+        hills_coast_fade,
+    } = old;
+    out.check("mountain", mountain, &new.mountain, Reload::Terrain);
+    out.check("hills", hills, &new.hills, Reload::Terrain);
+    out.check("hills_coast_fade", hills_coast_fade, &new.hills_coast_fade, Reload::Terrain);
+}
+
+fn macro_reloads(old: &WorldMacroConfig, new: &WorldMacroConfig, out: &mut Reloads) {
+    let WorldMacroConfig {
+        seed,
+        world,
+        cell_size,
+        continents,
+        coast,
+        mountains,
+        climate,
+    } = old;
+    out.check("seed", seed, &new.seed, Reload::MacroMap);
+    out.check("world", world, &new.world, Reload::MacroMap);
+    out.check("cell_size", cell_size, &new.cell_size, Reload::MacroMap);
+    out.check("continents", continents, &new.continents, Reload::MacroMap);
+    out.check("coast", coast, &new.coast, Reload::MacroMap);
+    out.check("mountains", mountains, &new.mountains, Reload::MacroMap);
+    out.check("climate", climate, &new.climate, Reload::MacroMap);
 }
 
 fn environment_reloads(old: &EnvironmentConfig, new: &EnvironmentConfig, out: &mut Reloads) {

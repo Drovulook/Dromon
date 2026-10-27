@@ -92,6 +92,23 @@ impl Water {
         })
     }
 
+    /// Hot reload du terrain : nouveau relief et nouvelle portée. La grille, envoyée au
+    /// GPU au démarrage, ne dépend ni de l'un ni de l'autre : on la garde.
+    pub fn hot_reload_terrain(
+        &mut self,
+        source: Arc<TerrainSource>,
+        sea_level: f32,
+        world_radius: f32,
+        max_distance: f32,
+        render_params: &WaterRenderParams,
+    ) {
+        self.sea_level = sea_level;
+        self.max_distance = max_distance;
+        self.quadtree = Quadtree::new(render_params, world_radius, max_distance, source.clone());
+        self.source = source;
+        self.nodes.clear();
+    }
+
     /// Hot reload : aspect et houle (`environment.ron`).
     pub fn hot_reload(&mut self, params: WaterParams) {
         self.params = params;
