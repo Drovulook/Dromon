@@ -8,3 +8,5 @@ links.md
 /Dromon-engine/res/shaders/*.spv
 /Dromon-engine/res/models/
 /Dromon-engine/res/textures/
+# Cache de la carte macro (~100 Mo), recalculé en une seconde.
+/Dromon-engine/res/world/

@@ -5,7 +5,7 @@
 //! ici tant qu'on ne l'a pas classé.
 
 use crate::config::{
-    ConfigFile, DebugConfig, EngineConfig, EnvironmentConfig, MaterialRulesConfig,
+    ConfigFile, DebugConfig, EngineConfig, EnvironmentConfig, MaterialDef, MaterialRulesConfig,
     MaterialTexturesConfig, MaterialsConfig, RenderConfig, ShadowSettings, WorldDetailConfig,
     WorldGenConfig, WorldMacroConfig,
 };
@@ -27,8 +27,10 @@ pub(crate) enum Reload {
     Terrain,
     /// Nouvelle carte macro, puis régénération du terrain.
     MacroMap,
-    /// Table GPU des matériaux et IDs de la génération.
+    /// Table GPU des matériaux (SSBO). Les IDs, eux, relèvent de `Terrain`.
     Materials,
+    /// Texture arrays du terrain, puis la table (elle porte leurs albédos moyens).
+    TerrainTextures,
 }
 
 impl Reload {
@@ -40,8 +42,10 @@ impl Reload {
             | Reload::MeshPipelines
             | Reload::Sampler
             | Reload::ShadowMap
-            | Reload::Terrain => true,
-            Reload::MacroMap | Reload::Materials => false,
+            | Reload::Terrain
+            | Reload::MacroMap
+            | Reload::Materials
+            | Reload::TerrainTextures => true,
         }
     }
 }
@@ -55,10 +59,33 @@ impl Reloads {
         self.0.contains_key(&reload)
     }
 
-    fn check<T: PartialEq>(&mut self, field: &'static str, old: &T, new: &T, reload: Reload) {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn check<T: PartialEq>(
+        &mut self,
+        field: &'static str,
+        old: &T,
+        new: &T,
+        reload: Reload,
+    ) {
         if old != new {
-            self.0.entry(reload).or_default().push(field);
+            // Un même champ peut changer sur plusieurs éléments (matériaux) : noté une fois.
+            let fields = self.0.entry(reload).or_default();
+            if !fields.contains(&field) {
+                fields.push(field);
+            }
         }
+    }
+
+    /// Ex. `"Live (camera, tonemap), Sampler (textures)"` : ce qui est rechargé et pourquoi.
+    pub(crate) fn describe(&self) -> String {
+        self.0
+            .iter()
+            .map(|(reload, fields)| describe(*reload, fields))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Ex. `"Terrain (terrain, water)"`, une entrée par rechargement non géré.
@@ -66,9 +93,14 @@ impl Reloads {
         self.0
             .iter()
             .filter(|(reload, _)| !reload.is_supported())
-            .map(|(reload, fields)| format!("{reload:?} ({})", fields.join(", ")))
+            .map(|(reload, fields)| describe(*reload, fields))
             .collect()
     }
+}
+
+/// `"Reload (champ, champ)"`.
+fn describe(reload: Reload, fields: &[&str]) -> String {
+    format!("{reload:?} ({})", fields.join(", "))
 }
 
 /// Configs rechargées : celle du moteur, et celle de la génération du monde s'il y a un
@@ -118,9 +150,7 @@ pub(crate) fn reload(
         }
         MaterialsConfig::FILE_NAME => {
             next.engine.materials = MaterialsConfig::load()?;
-            let MaterialsConfig { materials } = &engine.materials;
-            let new = &next.engine.materials.materials;
-            reloads.check("materials", materials, new, Reload::Materials);
+            materials_reloads(&engine.materials, &next.engine.materials, &mut reloads);
         }
         MaterialRulesConfig::FILE_NAME => {
             next.engine.material_rules = MaterialRulesConfig::load()?;
@@ -159,6 +189,43 @@ pub(crate) fn reload(
     } else {
         ConfigReload::Unsupported(unsupported)
     })
+}
+
+/// Rechargements d'un fichier de texture du terrain modifié (sous-dossier `texture`) :
+/// vide si aucun matériau ne l'utilise.
+pub(crate) fn texture_reloads(engine: &EngineConfig, texture: &str) -> Reloads {
+    let mut reloads = Reloads::default();
+    if engine.materials.textures().contains(&texture) {
+        reloads.check("fichiers de texture", &false, &true, Reload::TerrainTextures);
+    }
+    reloads
+}
+
+fn materials_reloads(old: &MaterialsConfig, new: &MaterialsConfig, out: &mut Reloads) {
+    let MaterialsConfig { materials } = old;
+    // L'ID d'un matériau est sa position : la génération les résout par nom, et les
+    // meshes les portent. Liste ou ordre changés ⇒ terrain et table à refaire.
+    let names = |c: &MaterialsConfig| c.materials.iter().map(|m| m.name.clone()).collect();
+    let (old_names, new_names): (Vec<String>, Vec<String>) = (names(old), names(new));
+    out.check("noms / ordre", &old_names, &new_names, Reload::Terrain);
+    out.check("noms / ordre", &old_names, &new_names, Reload::Materials);
+    // Couche du texture array = rang de la texture dans cette liste.
+    out.check("textures", &old.textures(), &new.textures(), Reload::TerrainTextures);
+
+    for (old_def, new_def) in materials.iter().zip(&new.materials) {
+        let MaterialDef {
+            name: _,
+            albedo,
+            humidity_tint,
+            texture,
+            texture_size,
+        } = old_def;
+        out.check("albedo", albedo, &new_def.albedo, Reload::Materials);
+        out.check("humidity_tint", humidity_tint, &new_def.humidity_tint, Reload::Materials);
+        // Même liste de textures : seule la couche lue par ce matériau change.
+        out.check("texture", texture, &new_def.texture, Reload::Materials);
+        out.check("texture_size", texture_size, &new_def.texture_size, Reload::Materials);
+    }
 }
 
 fn detail_reloads(old: &WorldDetailConfig, new: &WorldDetailConfig, out: &mut Reloads) {

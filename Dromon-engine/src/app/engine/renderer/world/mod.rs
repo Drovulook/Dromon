@@ -191,6 +191,23 @@ impl World {
         })
     }
 
+    /// Hot reload `Materials` et `TerrainTextures` : table GPU des matériaux d'après
+    /// `config.materials`, et textures du terrain si `reload_textures`. Sans terrain, rien
+    /// à faire : la table naît avec lui.
+    pub(crate) fn hot_reload_materials(&mut self, reload_textures: bool) -> Result<()> {
+        let Some(materials) = self.materials.as_mut() else {
+            return Ok(());
+        };
+        // Les frames en vol lisent peut-être encore la table et les textures.
+        unsafe { self.context.device.device_wait_idle()? };
+        materials.hot_reload(
+            &self.rrm.texture_handler,
+            &self.descriptor_handler,
+            &self.config.materials,
+            reload_textures,
+        )
+    }
+
     pub fn initialize(&self, command_buffer: &vk::CommandBuffer) -> Result<()> {
         profile!();
         // Pas de terrain ici : ses meshes arrivent au fil des frames (`update_terrain`).

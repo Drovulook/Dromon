@@ -15,7 +15,7 @@ mod ocean;
 mod relief;
 mod small_regions;
 
-pub use cache::MACRO_MAP_CACHE;
+pub use cache::{MACRO_MAP_CACHE, MACRO_MAP_EXPORT_DIR};
 pub use grid::{GridShape, MacroGrid};
 pub(crate) use relief::coast_profile;
 

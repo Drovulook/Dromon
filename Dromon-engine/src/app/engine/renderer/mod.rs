@@ -276,8 +276,12 @@ impl Renderer {
         // Toujours : `World` porte la config de référence (UBO, passes, génération), qui
         // doit rester celle de l'`Engine` quel que soit le rechargement.
         self.world.config = config;
-        // Après le remplacement : la génération lit `world.config`.
-        if reloads.contains(Reload::Terrain)
+        // Après le remplacement : matériaux et génération lisent `world.config`.
+        let reload_textures = reloads.contains(Reload::TerrainTextures);
+        if reload_textures || reloads.contains(Reload::Materials) {
+            self.world.hot_reload_materials(reload_textures)?;
+        }
+        if (reloads.contains(Reload::Terrain) || reloads.contains(Reload::MacroMap))
             && let Some(world_gen) = world_gen
         {
             self.world.regenerate_terrain(world_gen)?;

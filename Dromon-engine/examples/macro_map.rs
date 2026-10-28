@@ -1,14 +1,15 @@
 //! Calcule la carte macro et l'exporte en PNG, sans lancer le moteur.
 //!
 //! `cargo run --release -p Dromon-engine --example macro_map`
-//! Sortie : `target/world_maps/` (PNG + `macro_map.bin`, relu par le jeu).
+//! Sortie : PNG dans `target/world_maps/`, cache `res/world/macro_map.bin` (relu par le
+//! jeu). Le jeu réécrit aussi les PNG chaque fois qu'il recalcule la carte.
 
 use std::path::Path;
 use std::time::Instant;
 
 use anyhow::Result;
 use dromon_engine::config::WorldGenConfig;
-use dromon_engine::{MACRO_MAP_CACHE, MacroMap};
+use dromon_engine::{MACRO_MAP_CACHE, MACRO_MAP_EXPORT_DIR, MacroMap};
 
 fn main() -> Result<()> {
     let config = WorldGenConfig::load()?;
@@ -77,8 +78,7 @@ fn main() -> Result<()> {
         );
     }
 
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/world_maps");
-    for path in map.export_pngs(&dir)? {
+    for path in map.export_pngs(Path::new(MACRO_MAP_EXPORT_DIR))? {
         println!("→ {}", path.display());
     }
     // Toujours réécrit : rafraîchit le cache même si seul le code a changé.

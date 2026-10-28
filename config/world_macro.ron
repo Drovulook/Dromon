@@ -2,7 +2,7 @@
 // Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
 // Lue aussi par le détail (`world_detail.ron`), jamais l'inverse.
 (
-    seed: 20000,
+    seed: 2001,
 
     world: (
         // Disque de 600 chunks de rayon (38 400 voxels, ~1,1 M chunks).
@@ -25,13 +25,13 @@
         // continent. Valeur dans ~[-amplitude, amplitude].
         base: (
             frequency: 0.00004,
-            amplitude: 0.6,
+            amplitude: 0.45,
         ),
         // Découpe des côtes : somme d'octaves indépendante de la base. Le détail
         // déplace la côte d'environ amplitude / pente de la base : faible devant la
         // base → continents massifs ; fort → bras, presqu'îles, archipels.
         detail: (
-            frequency: 0.000105, // première octave (λ ~9 500 voxels)
+            frequency: 0.00011, // première octave (λ ~9 500 voxels)
             octaves: 4,
             lacunarity: 2.1,     // non entière, sinon les octaves s'alignent
             gain: 0.6,           // plus grand = plus de petits détails

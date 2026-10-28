@@ -8,14 +8,16 @@ use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::image_layout_state::ImageLayoutState;
 use crate::app::engine::renderer::render_resources::texture::Texture;
 use crate::app::engine::renderer::render_resources::texture_handler::TextureHandler;
+use crate::app::engine::renderer::renderer_initialize::submit_one_time;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::MacroMap;
 
 /// **Cartes du monde** envoyées au GPU : des grilles de la carte macro, lues par les
 /// shaders (eau, plus tard terrain et ciel) via le set 3.
 ///
-/// Statiques : construites une fois depuis la `MacroMap`, envoyées dans la passe de
-/// transfert du démarrage. Seule exception : le masque des chunks installés.
+/// Statiques : construites depuis la `MacroMap`, envoyées dans la passe de transfert du
+/// démarrage, puis seulement au hot reload de la carte. Seule exception : le masque des
+/// chunks installés.
 pub struct WorldMaps {
     context: Arc<RenderingContext>,
     /// Binding 0 : distance signée à la côte (voxels, > 0 terre), `R32_SFLOAT`.
@@ -44,6 +46,8 @@ pub struct WorldMaps {
 }
 
 impl WorldMaps {
+    /// Cartes de `map`, envoyées par la passe de transfert du démarrage (cf.
+    /// [`Self::record_upload`]).
     pub fn new(
         context: Arc<RenderingContext>,
         texture_handler: &TextureHandler,
@@ -51,6 +55,60 @@ impl WorldMaps {
         map: &MacroMap,
         loaded_mask_size: u32,
         frames_in_flight: u64,
+    ) -> Result<WorldMaps> {
+        let descriptor_set = descriptor_handler.allocate_world_maps_set()?;
+        let maps = Self::create(
+            context,
+            texture_handler,
+            map,
+            loaded_mask_size,
+            frames_in_flight,
+            descriptor_set,
+        )?;
+        maps.write_descriptor_set(descriptor_handler);
+        Ok(maps)
+    }
+
+    /// Hot reload : nouvelles cartes depuis `map`, envoyées aussitôt. Le descriptor set
+    /// est gardé et réécrit (le pool ne libère pas ses sets). Aucune frame en vol ne doit
+    /// lire les cartes : à l'appelant d'attendre le GPU. En cas d'erreur, les anciennes
+    /// cartes restent en place, intactes.
+    pub fn hot_reload(
+        &mut self,
+        texture_handler: &TextureHandler,
+        descriptor_handler: &DescriptorHandler,
+        map: &MacroMap,
+        loaded_mask_size: u32,
+    ) -> Result<()> {
+        // L'anneau compte `frames_in_flight + 1` stagings (cf. `new`).
+        let frames_in_flight = self.loaded_staging.len() as u64 - 1;
+        let mut fresh = Self::create(
+            self.context.clone(),
+            texture_handler,
+            map,
+            loaded_mask_size,
+            frames_in_flight,
+            self.descriptor_set,
+        )?;
+        submit_one_time(&self.context, |command_buffer| {
+            fresh.record_upload(texture_handler, &command_buffer)
+        })?;
+        fresh.release_texture_staging();
+        fresh.write_descriptor_set(descriptor_handler);
+        // Les anciennes textures et leur sampler sont détruits ici (Drop) ; le set ne
+        // les référence plus.
+        *self = fresh;
+        Ok(())
+    }
+
+    /// Textures et stagings des cartes, sans écrire `descriptor_set`.
+    fn create(
+        context: Arc<RenderingContext>,
+        texture_handler: &TextureHandler,
+        map: &MacroMap,
+        loaded_mask_size: u32,
+        frames_in_flight: u64,
+        descriptor_set: vk::DescriptorSet,
     ) -> Result<WorldMaps> {
         let shape = map.shape();
         let n = shape.n as u32;
@@ -100,14 +158,6 @@ impl WorldMaps {
             .collect::<Result<Vec<_>>>()?;
 
         let sampler = Self::create_sampler(&context)?;
-        let descriptor_set = descriptor_handler.create_world_maps_descriptor_set(
-            &[
-                coast_distance.texture_image_view,
-                climate.texture_image_view,
-                loaded_chunks.texture_image_view,
-            ],
-            sampler,
-        )?;
 
         // Valeurs au centre des cellules, comme les texels : la conversion est exacte
         // sans correction d'un demi-texel.
@@ -148,6 +198,19 @@ impl WorldMaps {
             .min_lod(0.0)
             .max_lod(0.0);
         Ok(unsafe { context.device.create_sampler(&sampler_info, None) }?)
+    }
+
+    /// Écrit les cartes dans leur set. Aucune frame en vol ne doit l'utiliser.
+    fn write_descriptor_set(&self, descriptor_handler: &DescriptorHandler) {
+        descriptor_handler.write_world_maps(
+            self.descriptor_set,
+            &[
+                self.coast_distance.texture_image_view,
+                self.climate.texture_image_view,
+                self.loaded_chunks.texture_image_view,
+            ],
+            self.sampler,
+        );
     }
 
     /// Côté (texels) du masque des chunks installés.

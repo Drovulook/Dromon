@@ -1,8 +1,9 @@
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use glam::{IVec2, Vec3};
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::{
     World,
@@ -21,7 +22,8 @@ use crate::{
             rendering_context::RenderingContext,
             terrain_generation::{
                 CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE,
-                MacroMap, MeshCache, TerrainSnapshot, TerrainSource, chunk_distance,
+                MACRO_MAP_EXPORT_DIR, MacroMap, MeshCache, TerrainSnapshot, TerrainSource,
+                chunk_distance,
             },
         },
         logger::Logger,
@@ -67,23 +69,38 @@ impl World {
         Ok(())
     }
 
-    /// Hot reload `Terrain` : un terrain neuf, sur la même carte macro (relue depuis son
-    /// cache), remplace l'ancien. Il repart de zéro, cache de meshes compris : les clés
-    /// du cache ne contiennent pas les réglages, un mesh de l'ancien terrain y passerait
-    /// pour valide. Cartes du monde et table des matériaux ne dépendent pas des réglages
-    /// concernés : gardées.
+    /// Hot reload `Terrain` et `MacroMap` : un terrain neuf remplace l'ancien. Il repart
+    /// de zéro, cache de meshes compris : les clés du cache ne contiennent pas les
+    /// réglages, un mesh de l'ancien terrain y passerait pour valide.
+    ///
+    /// La carte macro est relue depuis son cache disque, ou recalculée (et le cache
+    /// réécrit) si la config macro a changé — **bloquant** le temps du calcul. Les cartes
+    /// du monde ne sont reconstruites que si elle a changé, ou si la portée de chargement
+    /// change la taille du masque. La table des matériaux est gardée.
     pub(crate) fn regenerate_terrain(&mut self, config: &WorldGenConfig) -> Result<()> {
+        let macro_changed = self
+            .terrain
+            .as_ref()
+            .is_none_or(|old| old.world_gen.macro_ != config.macro_);
         let mut terrain = self.new_terrain(config)?;
-        if let Some(world_maps) = self.world_maps.as_ref() {
-            ensure!(
-                terrain.loaded_mask_size() == world_maps.loaded_mask_size(),
-                "la nouvelle portée de chargement change la taille du masque des chunks : \
-                 relancer le moteur"
-            );
-        }
-        // Les frames en vol dessinent peut-être encore l'ancien terrain, dont les buffers
-        // sont libérés par son remplacement.
+        // Les frames en vol dessinent peut-être encore l'ancien terrain (buffers libérés
+        // par son remplacement) et lisent les cartes du monde.
         unsafe { self.context.device.device_wait_idle()? };
+        match self.world_maps.as_mut() {
+            Some(world_maps)
+                if macro_changed || world_maps.loaded_mask_size() != terrain.loaded_mask_size() =>
+            {
+                // Masque neuf, à zéro comme celui du nouveau terrain.
+                world_maps.hot_reload(
+                    &self.rrm.texture_handler,
+                    &self.descriptor_handler,
+                    terrain.source.macro_map(),
+                    terrain.loaded_mask_size(),
+                )?;
+            }
+            // Le GPU garde le masque de l'ancien terrain : on envoie celui, vide, du nouveau.
+            _ => terrain.loaded_mask.force_upload(),
+        }
         let water_distance = self.water_distance();
         if let Some(water) = self.water.as_mut() {
             water.hot_reload_terrain(
@@ -94,8 +111,6 @@ impl World {
                 &self.config.render.water,
             );
         }
-        // Le GPU garde le masque de l'ancien terrain : on envoie celui, vide, du nouveau.
-        terrain.loaded_mask.force_upload();
         // L'ancien terrain est détruit ici ; ses workers encore en vol s'arrêtent au
         // premier envoi vers son canal fermé.
         self.terrain = Some(terrain);
@@ -129,6 +144,38 @@ fn world_radius(config: &WorldGenConfig) -> f32 {
     (config.macro_.world.radius_chunks as usize * CHUNK_SIZE) as f32
 }
 
+/// Écrit les PNG de la carte macro dans [`MACRO_MAP_EXPORT_DIR`] sur un thread à part
+/// (~2 s en release) : le jeu continue pendant ce temps. La carte, immuable, est lue
+/// via l'`Arc` du `TerrainSource`, sans copie.
+///
+/// Rechargements rapprochés : les exports passent un par un (deux écritures du même
+/// fichier en même temps le corrompraient), et un export doublé par un plus récent
+/// avant d'avoir commencé est abandonné. Les PNG finissent donc toujours sur la
+/// dernière carte.
+fn export_macro_pngs(source: Arc<TerrainSource>, logger: Arc<Logger>) {
+    static LOCK: Mutex<()> = Mutex::new(());
+    static LATEST: AtomicU64 = AtomicU64::new(0);
+    let id = LATEST.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        // Un export précédent a paniqué : le verrou est « empoisonné », sans gravité ici.
+        let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if LATEST.load(Ordering::SeqCst) != id {
+            return;
+        }
+        let start = Instant::now();
+        match source
+            .macro_map()
+            .export_pngs(Path::new(MACRO_MAP_EXPORT_DIR))
+        {
+            Ok(_) => logger.info(&format!(
+                "PNG de la carte macro écrits dans {MACRO_MAP_EXPORT_DIR} en {:.1} s",
+                start.elapsed().as_secs_f32()
+            )),
+            Err(e) => logger.warn(&format!("export PNG de la carte macro : {e:#}")),
+        }
+    });
+}
+
 impl Terrain {
     /// Crée le monde et lance le maillage en fond de la fenêtre chargée initiale : le
     /// terrain rend la main vide, ses meshes apparaissent au fil des frames suivantes.
@@ -146,13 +193,17 @@ impl Terrain {
         profile!();
 
         // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
-        let macro_map = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
+        let (macro_map, rebuilt) = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
         let source = Arc::new(TerrainSource::new(
             config,
             materials,
             material_rules,
             macro_map,
         )?);
+        // Relue du cache, la carte est celle des PNG déjà écrits : rien à exporter.
+        if rebuilt {
+            export_macro_pngs(source.clone(), logger.clone());
+        }
 
         // Altitude moyenne du relief : plan de référence de la composante verticale du
         //    LOD. Mesurée une seule fois — le relief ne bouge pas.

@@ -8,8 +8,7 @@ pub mod timer;
 
 use crate::Scene;
 use crate::app::engine::events::input::{self, base_event_subscriber};
-use crate::app::engine::events::{FileChange, FileWatcher};
-use crate::app::engine::hot_reload::{ConfigReload, Configs};
+use crate::app::engine::events::FileWatcher;
 use crate::app::engine::rendering_context::{
     ContextAttributes, RenderingContext, queue_family_picker,
 };
@@ -161,60 +160,6 @@ impl Engine {
             _ => {}
         }
         Ok(())
-    }
-
-    fn handle_file_changes(&mut self) {
-        let Some(watcher) = &mut self.file_watcher else {
-            return;
-        };
-        for change in watcher.poll() {
-            match change {
-                FileChange::Config(file) => self.reload_config(&file),
-                FileChange::TerrainTexture(texture) => self.logger.info(&format!(
-                    "texture {texture} modifiée : hot reload pas encore géré"
-                )),
-            }
-        }
-    }
-
-    /// Une config invalide ou non applicable à chaud laisse l'ancienne en place.
-    fn reload_config(&mut self, file: &str) {
-        // Config de génération du monde : celle du terrain de la fenêtre principale.
-        let world_gen = self
-            .renderers
-            .get(&self.primary_window_id)
-            .and_then(Renderer::world_gen);
-        match hot_reload::reload(&self.config, world_gen, file) {
-            Err(e) => self
-                .logger
-                .error(&format!("{e:#} : ancienne config conservée")),
-            Ok(ConfigReload::Unhandled) => self
-                .logger
-                .info(&format!("{file} : hot reload non géré")),
-            Ok(ConfigReload::Unchanged) => {}
-            Ok(ConfigReload::Unsupported(reloads)) => self.logger.warn(&format!(
-                "{file} ignoré, rechargement pas encore géré : {}",
-                reloads.join(", ")
-            )),
-            Ok(ConfigReload::Apply(configs, reloads)) => {
-                let Configs { engine, world_gen } = *configs;
-                self.config = Arc::new(engine);
-                let mut result = Ok(());
-                for renderer in self.renderers.values_mut() {
-                    result = result.and(renderer.hot_reload(
-                        self.config.clone(),
-                        world_gen.as_ref(),
-                        &reloads,
-                    ));
-                }
-                match result {
-                    Ok(()) => self.logger.info(&format!("{file} rechargé")),
-                    Err(e) => self
-                        .logger
-                        .error(&format!("{file} rechargé en partie : {e:#}")),
-                }
-            }
-        }
     }
 
     pub fn device_event(

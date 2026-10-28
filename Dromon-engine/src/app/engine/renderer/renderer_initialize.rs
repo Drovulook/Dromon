@@ -8,59 +8,63 @@ use std::sync::Arc;
 
 impl Renderer {
     pub(super) fn initialize(context: Arc<RenderingContext>, world: &mut World) -> Result<()> {
-        //create transfer command pool and buffer
-        let transfer_command_pool = unsafe {
-            context.device.create_command_pool(
-                &vk::CommandPoolCreateInfo::default()
-                    // TODO : utiliser la famille de commandes appropriée
-                    .queue_family_index(context.queue_families.graphics)
-                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
-                None,
-            )
-        }?;
-        let transfer_command_buffer = unsafe {
+        submit_one_time(&context, |command_buffer| {
+            world.initialize(&command_buffer)
+        })?;
+        // Copies exécutées : les stagings ne servent plus.
+        world.release_texture_staging();
+        Ok(())
+    }
+}
+
+/// Enregistre `record` dans un command buffer jetable, le soumet et attend la fin de son
+/// exécution : envois GPU hors des frames (démarrage, hot reload).
+pub(super) fn submit_one_time(
+    context: &RenderingContext,
+    record: impl FnOnce(vk::CommandBuffer) -> Result<()>,
+) -> Result<()> {
+    let command_pool = unsafe {
+        context.device.create_command_pool(
+            &vk::CommandPoolCreateInfo::default()
+                // TODO : utiliser la famille de commandes appropriée
+                .queue_family_index(context.queue_families.graphics)
+                .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+            None,
+        )
+    }?;
+
+    // Le pool est détruit même en cas d'erreur (il libère son command buffer).
+    let result = (|| -> Result<()> {
+        let command_buffer = unsafe {
             context.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(transfer_command_pool)
+                    .command_pool(command_pool)
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .command_buffer_count(1),
             )
         }?[0];
-
         unsafe {
             context.device.begin_command_buffer(
-                transfer_command_buffer,
+                command_buffer,
                 &vk::CommandBufferBeginInfo::default()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )
         }?;
+        record(command_buffer)?;
+        unsafe { context.device.end_command_buffer(command_buffer) }?;
 
-        ////////// all transfer commands go here
-        world.initialize(&transfer_command_buffer)?;
-        //////////
-
-        unsafe { context.device.end_command_buffer(transfer_command_buffer) }?;
-
-        // submit
         let graphics_queue = context.queues[context.queue_families.graphics as usize];
         unsafe {
             context.device.queue_submit(
                 graphics_queue,
-                &[vk::SubmitInfo::default().command_buffers(&[transfer_command_buffer])],
+                &[vk::SubmitInfo::default().command_buffers(&[command_buffer])],
                 vk::Fence::null(),
             )
         }?;
         unsafe { context.device.queue_wait_idle(graphics_queue) }?;
-        // Copies exécutées : les stagings ne servent plus.
-        world.release_texture_staging();
-
-        // cleanup
-        unsafe {
-            context
-                .device
-                .destroy_command_pool(transfer_command_pool, None)
-        };
-
         Ok(())
-    }
+    })();
+
+    unsafe { context.device.destroy_command_pool(command_pool, None) };
+    result
 }

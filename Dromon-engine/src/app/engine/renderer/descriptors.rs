@@ -304,19 +304,24 @@ impl DescriptorHandler {
         unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
     }
 
-    /// Alloue et écrit le set des cartes du monde (set 3) : `views[i]` va au binding
-    /// `i`, toutes avec le même `sampler`.
-    pub fn create_world_maps_descriptor_set(
+    /// Alloue le set des cartes du monde (set 3), écrit par [`Self::write_world_maps`].
+    /// Alloué une seule fois : le hot reload réécrit le même (le pool ne libère pas).
+    pub fn allocate_world_maps_set(&self) -> Result<vk::DescriptorSet> {
+        self.allocate_set(self.world_maps_descriptor_set_layout)
+    }
+
+    /// Écrit le set des cartes du monde : `views[i]` va au binding `i`, toutes avec le
+    /// même `sampler`.
+    pub fn write_world_maps(
         &self,
+        descriptor_set: vk::DescriptorSet,
         views: &[vk::ImageView],
         sampler: vk::Sampler,
-    ) -> Result<vk::DescriptorSet> {
+    ) {
         debug_assert_eq!(views.len(), WORLD_MAP_COUNT as usize);
-        let descriptor_set = self.allocate_set(self.world_maps_descriptor_set_layout)?;
         for (binding, &view) in views.iter().enumerate() {
             self.write_image_sampler(descriptor_set, binding as u32, view, sampler);
         }
-        Ok(descriptor_set)
     }
 
     /// Alloue et écrit le set de la table des matériaux (set 4) : `buffer` entier au
@@ -329,6 +334,14 @@ impl DescriptorHandler {
         sampler: vk::Sampler,
     ) -> Result<vk::DescriptorSet> {
         let descriptor_set = self.allocate_set(self.materials_descriptor_set_layout)?;
+        self.write_materials_buffer(descriptor_set, buffer);
+        self.write_materials_textures(descriptor_set, albedo, normal, sampler);
+        Ok(descriptor_set)
+    }
+
+    /// Table des matériaux du set 4 (binding 0), entière. À la création comme au hot
+    /// reload. Le set ne doit être utilisé par aucune frame en vol.
+    pub fn write_materials_buffer(&self, descriptor_set: vk::DescriptorSet, buffer: vk::Buffer) {
         let buffer_info = [vk::DescriptorBufferInfo::default()
             .buffer(buffer)
             .offset(0)
@@ -340,8 +353,6 @@ impl DescriptorHandler {
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
             .buffer_info(&buffer_info);
         unsafe { self.context.device.update_descriptor_sets(&[write], &[]) };
-        self.write_materials_textures(descriptor_set, albedo, normal, sampler);
-        Ok(descriptor_set)
     }
 
     /// Textures du terrain du set 4 : albédo au binding 1, normales au binding 2. À la

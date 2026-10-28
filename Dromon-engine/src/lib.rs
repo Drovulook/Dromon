@@ -16,7 +16,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 // sans rien savoir de l'arborescence `app::engine::renderer::…`.
 pub use app::engine::renderer::render_resources::{RenderObject, Transform};
 pub use app::engine::renderer::world::World;
-pub use app::engine::terrain_generation::{GridShape, MACRO_MAP_CACHE, MacroGrid, MacroMap};
+pub use app::engine::terrain_generation::{
+    GridShape, MACRO_MAP_CACHE, MACRO_MAP_EXPORT_DIR, MacroGrid, MacroMap,
+};
 /// Banc de mesure du maillage, pour `examples/mesh_bench.rs` uniquement.
 #[doc(hidden)]
 pub use app::engine::terrain_generation::bench::mesh_bench;

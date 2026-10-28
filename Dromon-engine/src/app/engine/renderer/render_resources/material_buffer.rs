@@ -8,6 +8,7 @@ use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::render_resources::terrain_textures::TerrainTextures;
 use crate::app::engine::renderer::render_resources::texture_handler::TextureHandler;
+use crate::app::engine::renderer::renderer_initialize::submit_one_time;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::config::{MaterialDef, MaterialsConfig};
 
@@ -78,8 +79,8 @@ impl GpuMaterial {
 ///
 /// Porte aussi les textures du terrain (bindings 1 = albédo, 2 = normales du même set).
 ///
-/// Statique : construite avec le terrain, envoyée dans la passe de transfert du
-/// démarrage.
+/// Construite avec le terrain, envoyée dans la passe de transfert du démarrage ;
+/// reconstruite par le hot reload de `materials.ron` ou des fichiers de texture.
 pub struct MaterialBuffer {
     staging: Buffer,
     buffer: Buffer,
@@ -97,32 +98,7 @@ impl MaterialBuffer {
     ) -> Result<MaterialBuffer> {
         // D'abord les textures : la table a besoin de leurs albédos moyens.
         let textures = TerrainTextures::new(texture_handler, config)?;
-        let air = GpuMaterial::plain(Vec4::ZERO);
-        let debug = GpuMaterial::plain(Vec4::new(1.0, 0.0, 1.0, 0.0));
-        let materials: Vec<GpuMaterial> = std::iter::once(air)
-            .chain(config.materials.iter().map(|m| {
-                let texture = config.texture_layer(m).map(|l| (l, textures.mean(l)));
-                GpuMaterial::new(m, texture)
-            }))
-            .chain(std::iter::once(debug))
-            .collect();
-        debug_assert_eq!(materials.len() - 1, config.debug_id() as usize);
-        let size = std::mem::size_of_val(materials.as_slice()) as vk::DeviceSize;
-
-        let staging = Buffer::new(
-            context.clone(),
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        staging.upload(&materials)?;
-        // Device-local : lu par chaque fragment, il ne doit pas traverser le PCIe.
-        let buffer = Buffer::new(
-            context,
-            size,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
+        let (staging, buffer, size) = create_buffers(context, &gpu_table(config, &textures))?;
         let descriptor_set = descriptor_handler.create_materials_descriptor_set(
             buffer.buffer,
             textures.albedo_view(),
@@ -146,19 +122,49 @@ impl MaterialBuffer {
         texture_handler: &TextureHandler,
         command_buffer: &vk::CommandBuffer,
     ) -> Result<()> {
-        unsafe {
-            texture_handler.context.device.cmd_copy_buffer(
-                *command_buffer,
-                self.staging.buffer,
-                self.buffer.buffer,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 0,
-                    size: self.size,
-                }],
-            );
-        }
+        record_copy(texture_handler, *command_buffer, &self.staging, &self.buffer, self.size);
         self.textures.record_upload(texture_handler, command_buffer)
+    }
+
+    /// Hot reload : nouvelle table depuis `config`, et nouvelles textures si
+    /// `reload_textures` (liste changée ou fichiers modifiés). Envoyées aussitôt, puis le
+    /// même set est réécrit (le pool ne libère pas ses sets). Aucune frame en vol ne doit
+    /// lire la table : à l'appelant d'attendre le GPU. En cas d'erreur, l'ancien contenu
+    /// reste en place, intact.
+    pub fn hot_reload(
+        &mut self,
+        texture_handler: &TextureHandler,
+        descriptor_handler: &DescriptorHandler,
+        config: &MaterialsConfig,
+        reload_textures: bool,
+    ) -> Result<()> {
+        let mut textures = if reload_textures {
+            Some(TerrainTextures::new(texture_handler, config)?)
+        } else {
+            None
+        };
+        let table = gpu_table(config, textures.as_ref().unwrap_or(&self.textures));
+        let context = &texture_handler.context;
+        let (staging, buffer, size) = create_buffers(context.clone(), &table)?;
+        submit_one_time(context, |command_buffer| {
+            record_copy(texture_handler, command_buffer, &staging, &buffer, size);
+            match textures.as_ref() {
+                Some(textures) => textures.record_upload(texture_handler, &command_buffer),
+                None => Ok(()),
+            }
+        })?;
+
+        // Envoyé : on remplace (les anciens buffers et textures sont détruits ici).
+        self.staging = staging;
+        self.buffer = buffer;
+        self.size = size;
+        if let Some(mut textures) = textures.take() {
+            textures.release_texture_staging();
+            self.textures = textures;
+        }
+        descriptor_handler.write_materials_buffer(self.descriptor_set, self.buffer.buffer);
+        self.hot_reload_sampler(descriptor_handler, texture_handler.base_texture_sampler);
+        Ok(())
     }
 
     /// Hot reload du sampler des textures.
@@ -174,5 +180,64 @@ impl MaterialBuffer {
     /// Libère le staging des textures, une fois la passe de transfert exécutée.
     pub fn release_texture_staging(&mut self) {
         self.textures.release_texture_staging();
+    }
+}
+
+/// Table GPU, indexée par ID : air, `config` dans l'ordre, puis debug.
+fn gpu_table(config: &MaterialsConfig, textures: &TerrainTextures) -> Vec<GpuMaterial> {
+    let air = GpuMaterial::plain(Vec4::ZERO);
+    let debug = GpuMaterial::plain(Vec4::new(1.0, 0.0, 1.0, 0.0));
+    let materials: Vec<GpuMaterial> = std::iter::once(air)
+        .chain(config.materials.iter().map(|m| {
+            let texture = config.texture_layer(m).map(|l| (l, textures.mean(l)));
+            GpuMaterial::new(m, texture)
+        }))
+        .chain(std::iter::once(debug))
+        .collect();
+    debug_assert_eq!(materials.len() - 1, config.debug_id() as usize);
+    materials
+}
+
+/// Staging rempli de `table`, et buffer device de même taille.
+fn create_buffers(
+    context: Arc<RenderingContext>,
+    table: &[GpuMaterial],
+) -> Result<(Buffer, Buffer, vk::DeviceSize)> {
+    let size = std::mem::size_of_val(table) as vk::DeviceSize;
+    let staging = Buffer::new(
+        context.clone(),
+        size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    )?;
+    staging.upload(table)?;
+    // Device-local : lu par chaque fragment, il ne doit pas traverser le PCIe.
+    let buffer = Buffer::new(
+        context,
+        size,
+        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )?;
+    Ok((staging, buffer, size))
+}
+
+fn record_copy(
+    texture_handler: &TextureHandler,
+    command_buffer: vk::CommandBuffer,
+    staging: &Buffer,
+    buffer: &Buffer,
+    size: vk::DeviceSize,
+) {
+    unsafe {
+        texture_handler.context.device.cmd_copy_buffer(
+            command_buffer,
+            staging.buffer,
+            buffer.buffer,
+            &[vk::BufferCopy {
+                src_offset: 0,
+                dst_offset: 0,
+                size,
+            }],
+        );
     }
 }

@@ -12,9 +12,13 @@ use super::{GridShape, MacroGrid, MacroMap};
 use crate::app::engine::terrain_generation::CHUNK_SIZE;
 use crate::config::{WorldGenConfig, WorldMacroConfig};
 
-/// Emplacement par défaut, à côté des PNG (`cargo clean` l'efface : il sera recalculé).
+/// Emplacement par défaut, dans `res/` pour survivre à `cargo clean`. ⚠ ~100 Mo :
+/// ignoré par git (`.gitignore`), il se recalcule en une seconde.
 pub const MACRO_MAP_CACHE: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../target/world_maps/macro_map.bin");
+    concat!(env!("CARGO_MANIFEST_DIR"), "/res/world/macro_map.bin");
+
+/// Dossier des PNG de contrôle (cf. [`MacroMap::export_pngs`]) : sorties de debug.
+pub const MACRO_MAP_EXPORT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/world_maps");
 
 const MAGIC: &[u8; 8] = b"DRMACRO\0";
 /// À incrémenter quand l'algorithme change sans que la config change : la clé ne
@@ -124,14 +128,15 @@ impl MacroMap {
     }
 
     /// Relit le cache s'il correspond à `config`, sinon calcule la carte et l'écrit.
-    /// Un cache corrompu est une erreur : le supprimer pour forcer le recalcul.
-    pub fn load_or_build(config: &WorldGenConfig, path: &Path) -> Result<MacroMap> {
+    /// Rend aussi `true` si la carte vient d'être calculée. Un cache corrompu est une
+    /// erreur : le supprimer pour forcer le recalcul.
+    pub fn load_or_build(config: &WorldGenConfig, path: &Path) -> Result<(MacroMap, bool)> {
         if let Some(map) = MacroMap::load(config, path)? {
-            return Ok(map);
+            return Ok((map, false));
         }
         let map = MacroMap::build(config);
         map.save(path)?;
-        Ok(map)
+        Ok((map, true))
     }
 }
 

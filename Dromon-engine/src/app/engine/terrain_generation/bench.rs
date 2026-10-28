@@ -25,7 +25,7 @@ pub fn mesh_bench(per_lod: usize) -> Result<String> {
     let materials = MaterialsConfig::load()?;
     let rules = MaterialRulesConfig::load()?;
     let max_lod = RenderConfig::load()?.terrain.lod.max_lod();
-    let macro_map = MacroMap::load_or_build(&config, Path::new(MACRO_MAP_CACHE))?;
+    let (macro_map, _) = MacroMap::load_or_build(&config, Path::new(MACRO_MAP_CACHE))?;
     let source = Arc::new(TerrainSource::new(&config, &materials, &rules, macro_map)?);
     let snapshot = TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
 
