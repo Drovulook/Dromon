@@ -41,6 +41,8 @@ impl World {
         // Terrain survolé : grande boîte d'ombre qui suit la caméra (`render.ron`).
         self.light.shadow = self.config.render.shadow.terrain.clone();
 
+        // Avant `new_terrain`, qui part de la position de la caméra.
+        self.bound_camera(Some(world_radius(config)), self.config.debug.camera_unbounded);
         let terrain = self.new_terrain(config)?;
         self.water = Some(Water::new(
             self.context.clone(),
@@ -82,6 +84,8 @@ impl World {
             .terrain
             .as_ref()
             .is_none_or(|old| old.world_gen.macro_ != config.macro_);
+        // Le monde a pu rétrécir.
+        self.bound_camera(Some(world_radius(config)), self.config.debug.camera_unbounded);
         let mut terrain = self.new_terrain(config)?;
         // Les frames en vol dessinent peut-être encore l'ancien terrain (buffers libérés
         // par son remplacement) et lisent les cartes du monde.
@@ -115,6 +119,19 @@ impl World {
         // premier envoi vers son canal fermé.
         self.terrain = Some(terrain);
         Ok(())
+    }
+
+    /// Limites de la caméra : le disque du monde, sauf `unbounded`. Une caméra dehors
+    /// (pose de départ, monde rétréci, limites réactivées) est ramenée au bord.
+    pub(crate) fn bound_camera(&mut self, world_radius: Option<f32>, unbounded: bool) {
+        if self.camera.set_bounds(world_radius, unbounded) {
+            self.logger.warn("caméra hors du monde : ramenée au bord");
+        }
+    }
+
+    /// Rayon du monde, `None` sans terrain.
+    pub(crate) fn world_radius(&self) -> Option<f32> {
+        self.terrain.as_ref().map(|terrain| world_radius(&terrain.world_gen))
     }
 
     fn new_terrain(&self, config: &WorldGenConfig) -> Result<Terrain> {

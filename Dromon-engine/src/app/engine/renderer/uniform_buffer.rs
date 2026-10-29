@@ -42,7 +42,7 @@ struct UniformBufferObject {
     water_deep_color: Vec4, // xyz = couleur de l'eau profonde chaude, w = variance des pentes (reflet)
     water_deep_cold: Vec4, // xyz = couleur de l'eau profonde froide, w inutilisé
     water_sst: Vec4,       // x = sst_cold, y = sst_warm (°C), zw inutilisés
-    time: Vec4, // x = temps réel (s), yzw inutilisés
+    time: Vec4, // x = temps de simulation (s, `GameClock::sim_secs`), yzw inutilisés
     // Houle : 2 vec4 par vague, (direction, k, A) puis (ω, phase, –, –).
     waves: [Vec4; 2 * WAVE_COUNT],
     wave_params: Vec4, // x = coast_fade, yzw inutilisés
@@ -94,7 +94,7 @@ impl UniformBuffer {
         world_maps_uv: Vec4,
         water: Option<&Water>,
         config: &EngineConfig,
-        real_time_secs: f32,
+        sim_secs: f32,
     ) {
         profile!();
         let coast_moisture = &config.material_rules.coast_moisture;
@@ -182,7 +182,7 @@ impl UniformBuffer {
             water_deep_color,
             water_deep_cold,
             water_sst,
-            time: Vec4::new(real_time_secs, 0.0, 0.0, 0.0),
+            time: Vec4::new(sim_secs, 0.0, 0.0, 0.0),
             waves,
             wave_params,
             foam,

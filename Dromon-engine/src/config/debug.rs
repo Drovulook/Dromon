@@ -15,6 +15,8 @@ pub struct DebugConfig {
     /// `false` : tout est éclairé (la passe d'ombre tourne quand même, seul son résultat
     /// est ignoré).
     pub shadows: bool,
+    /// `true` : la caméra peut sortir du disque du monde (vue d'ensemble, bord du monde).
+    pub camera_unbounded: bool,
     pub mesh: MeshDebug,
 }
 
@@ -24,6 +26,7 @@ impl Default for DebugConfig {
             log_batch_stats: true,
             log_gpu_usage: true,
             shadows: true,
+            camera_unbounded: false,
             mesh: MeshDebug::default(),
         }
     }

@@ -5,6 +5,7 @@
     log_batch_stats: true, // une ligne par lot de re-maillage (cache, coût par LOD)
     log_gpu_usage: true,   // occupation / fragmentation de l'allocateur GPU par lot
     shadows: true,         // false : ombres ignorées (la passe d'ombre tourne quand même)
+    camera_unbounded: false, // true : la caméra peut sortir du disque du monde
 
     mesh: (
         world_walls: true,        // parois verticales au bord du monde

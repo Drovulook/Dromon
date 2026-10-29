@@ -30,7 +30,11 @@ pub use scene::Scene;
 pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
     let use_cli = std::env::args().any(|a| a == "--use-cli");
     let use_profiling = std::env::args().any(|a| a == "--use-profiling");
-    let logger = Arc::new(Logger::new(use_cli));
+    let (logger, requests) = Logger::new(use_cli);
+    let logger = Arc::new(logger);
+    if use_cli {
+        Logger::install_panic_hook(&logger);
+    }
 
     // Arme la collecte de profiling selon le flag `--use-profiling`.
     profiling::set_enabled(use_profiling);
@@ -48,7 +52,7 @@ pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
 
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::new(logger.clone(), Box::new(scene), config);
+    let mut app = App::new(logger.clone(), Box::new(scene), config, requests);
     let loop_result = event_loop.run_app(&mut app);
 
     let pending = app.pending_error.take();

@@ -1,22 +1,50 @@
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::{Arc, Weak};
 
-use super::socket_client;
+use super::socket_server::{self, Incoming, Outgoing};
 
 pub struct Logger {
-    sender: Option<SyncSender<String>>,
+    sender: Option<SyncSender<Outgoing>>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Logger {
-    pub fn new(use_cli: bool) -> Self {
-        let (sender, worker) = if use_cli {
-            let (tx, rx) = std::sync::mpsc::sync_channel(1024);
-            let handle = socket_client::spawn_worker(rx);
-            (Some(tx), Some(handle))
-        } else {
-            (None, None)
+    /// `use_cli` : attend la connexion du CLI (bloquant, 2 s max), sinon logs sur stderr.
+    /// Renvoie aussi les lignes reçues des clients (commandes), `None` sans socket.
+    pub fn new(use_cli: bool) -> (Self, Option<Receiver<Incoming>>) {
+        let mut logger = Self {
+            sender: None,
+            worker: None,
         };
-        Self { sender, worker }
+        if !use_cli {
+            return (logger, None);
+        }
+        match socket_server::spawn_worker() {
+            Ok((worker, sender, incoming)) => {
+                logger.sender = Some(sender);
+                logger.worker = Some(worker);
+                (logger, Some(incoming))
+            }
+            Err(e) => {
+                eprintln!("[WARN] socket des logs indisponible ({e}) : logs sur stderr");
+                (logger, None)
+            }
+        }
+    }
+
+    /// Les paniques (tous threads) passent par le logger au lieu de stderr, qui
+    /// écrirait par-dessus le TUI. `Weak` : un `Arc` gardé par le hook empêcherait
+    /// le `Drop` qui vide les derniers messages.
+    pub fn install_panic_hook(logger: &Arc<Logger>) {
+        let logger: Weak<Logger> = Arc::downgrade(logger);
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            let msg = format!("panic (thread {}) : {info}", thread.name().unwrap_or("?"));
+            match logger.upgrade() {
+                Some(logger) => logger.error(&msg),
+                None => eprintln!("{msg}"),
+            }
+        }));
     }
 
     pub fn info(&self, msg: &str) {
@@ -59,7 +87,7 @@ impl Logger {
     fn send(&self, msg: String) {
         match &self.sender {
             Some(tx) => {
-                let _ = tx.try_send(msg);
+                let _ = tx.try_send(Outgoing::Broadcast(msg));
             }
             None => eprintln!("{}", msg),
         }
@@ -68,9 +96,11 @@ impl Logger {
 
 impl Drop for Logger {
     fn drop(&mut self) {
-        // Déconnecte le channel pour signaler la fin au worker,
-        // puis attend qu'il ait expédié tous les messages en attente.
-        drop(self.sender.take());
+        // `Shutdown` passe après les messages en attente : le worker les expédie
+        // tous avant de s'arrêter.
+        if let Some(tx) = self.sender.take() {
+            let _ = tx.send(Outgoing::Shutdown);
+        }
         if let Some(handle) = self.worker.take() {
             let _ = handle.join();
         }

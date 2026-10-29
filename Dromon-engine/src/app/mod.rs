@@ -1,11 +1,13 @@
 pub(crate) mod engine;
 pub mod logger;
-mod socket_client;
+mod socket_server;
 
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 
 use anyhow::Error;
 use logger::Logger;
+use socket_server::Incoming;
 use winit::application::ApplicationHandler;
 
 use crate::Scene;
@@ -21,16 +23,24 @@ pub struct App {
     logger: Arc<Logger>,
     /// Lue une fois dans `run`, réutilisée à chaque recréation de l'`Engine`.
     config: Arc<EngineConfig>,
+    /// Commandes reçues du socket ; ici pour la même raison que `scene`.
+    requests: Option<Receiver<Incoming>>,
     pub pending_error: Option<Error>,
 }
 
 impl App {
-    pub fn new(logger: Arc<Logger>, scene: Box<dyn Scene>, config: Arc<EngineConfig>) -> Self {
+    pub fn new(
+        logger: Arc<Logger>,
+        scene: Box<dyn Scene>,
+        config: Arc<EngineConfig>,
+        requests: Option<Receiver<Incoming>>,
+    ) -> Self {
         Self {
             engine: None,
             scene,
             logger,
             config,
+            requests,
             pending_error: None,
         }
     }
@@ -74,7 +84,13 @@ impl ApplicationHandler for App {
         event: winit::event::WindowEvent,
     ) {
         if let Some(engine) = &mut self.engine {
-            if let Err(e) = engine.window_event(event_loop, window_id, event, self.scene.as_mut()) {
+            if let Err(e) = engine.window_event(
+                event_loop,
+                window_id,
+                event,
+                self.scene.as_mut(),
+                self.requests.as_ref(),
+            ) {
                 self.logger.error(&format!(
                     "Erreur fatale dans la boucle d'événements : {e:#}"
                 ));

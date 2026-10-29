@@ -49,5 +49,18 @@ impl VisibleSet {
                 self.shadow.push(coord);
             }
         }
+
+        {
+            profile!("tri des chunks par distance");
+            // Avant → arrière : maximise le rejet early-Z (moins d'overdraw en relief).
+            // Inutile pour l'ombre : passe depth-only, sans fragment shader coûteux.
+            let eye = camera.position.truncate();
+            let dist2 = |c: IVec2| {
+                let (min, max) = Frustum::chunk_aabb(c, max_height);
+                ((min + max) * 0.5).truncate().distance_squared(eye)
+            };
+            self.camera
+                .sort_unstable_by(|&a, &b| dist2(a).total_cmp(&dist2(b)));
+        }
     }
 }

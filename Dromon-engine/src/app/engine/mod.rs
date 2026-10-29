@@ -1,3 +1,4 @@
+mod commands;
 mod debug_messenger;
 mod events;
 mod hot_reload;
@@ -14,11 +15,12 @@ use crate::app::engine::rendering_context::{
 };
 use crate::app::engine::timer::Timer;
 use crate::app::logger::Logger;
+use crate::app::socket_server::Incoming;
 use crate::config::EngineConfig;
 use crate::profile;
 use anyhow::Result;
 use renderer::Renderer;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, sync::mpsc::Receiver};
 use winit::{
     event_loop::ActiveEventLoop,
     window::{Window, WindowAttributes, WindowId},
@@ -116,6 +118,7 @@ impl Engine {
         window_id: WindowId,
         event: winit::event::WindowEvent,
         scene: &mut dyn Scene,
+        requests: Option<&Receiver<Incoming>>,
     ) -> Result<()> {
         self.input_manager.handle_window_event(&event);
         match event {
@@ -134,6 +137,9 @@ impl Engine {
                 crate::profiling::frame::begin();
                 {
                     profile!();
+                    if let Some(requests) = requests {
+                        self.handle_commands(requests);
+                    }
                     self.handle_file_changes();
                     if let Some(renderer) = self.renderers.get_mut(&window_id) {
                         renderer.render(&self.timer, self.input_manager.input_state(), scene)?;

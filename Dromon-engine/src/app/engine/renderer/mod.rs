@@ -1,5 +1,5 @@
 mod buffer;
-mod camera;
+pub(crate) mod camera;
 mod descriptors;
 pub(crate) mod device_memory;
 mod frustum_culling;
@@ -244,6 +244,10 @@ impl Renderer {
         self.swapchain.is_dirty = true;
     }
 
+    pub(crate) fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Config de génération du terrain, s'il y en a un.
     pub(crate) fn world_gen(&self) -> Option<&WorldGenConfig> {
         self.world.terrain.as_ref().map(|terrain| &terrain.world_gen)
@@ -429,7 +433,7 @@ impl Renderer {
                     .map_or(glam::Vec4::ZERO, |maps| maps.uv_transform),
                 self.world.water.as_ref(),
                 &self.world.config,
-                self.world.real_time_secs,
+                self.world.game_clock.sim_secs as f32,
             );
 
             // Scope GPU englobant les deux passes ; les scopes internes se cumulent

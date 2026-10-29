@@ -59,10 +59,8 @@ pub struct World {
     /// Nombre de frames que le renderer garde en vol — le terrain en a besoin pour dater
     /// la destruction différée de ses meshes.
     frames_in_flight: u64,
-    game_clock: GameClock,
-    /// Temps réel écoulé (s), pour les animations (scintillation, vagues) : elles ne
-    /// suivent pas l'accélération du temps de jeu.
-    pub(crate) real_time_secs: f32,
+    /// Jour/nuit et temps des animations (cf. [`GameClock`]).
+    pub(crate) game_clock: GameClock,
     /// Latitude (radians) : fixe la hauteur du soleil à midi (`90° - latitude`).
     pub latitude: f32,
     /// Configs moteur lues au démarrage (`render.ron`, `environment.ron`).
@@ -94,7 +92,7 @@ impl World {
             logger,
             rrm,
             render_objects: Vec::new(),
-            camera: Camera::new(&config.render.camera),
+            camera: Camera::new(&config.render.camera, config.debug.camera_unbounded),
             light: DirectionalLight::new(&config),
             atmosphere: Atmosphere::new(env.atmosphere),
             stars: Stars::new(env.stars),
@@ -106,7 +104,6 @@ impl World {
             context,
             frames_in_flight: frames_in_flight as u64,
             game_clock: GameClock::new(&env.clock),
-            real_time_secs: 0.0,
             latitude: env.latitude_deg.to_radians(),
             config,
         };
@@ -165,8 +162,14 @@ impl World {
         if new_box != old_box {
             self.light.shadow = new_box.clone();
         }
-        if new.camera != old.camera {
-            self.camera.hot_reload(&new.camera);
+        if new.camera != old.camera
+            && let Err(e) = self.camera.hot_reload(&new.camera)
+        {
+            self.logger.warn(&format!("pose de départ de la caméra ignorée : {e}"));
+        }
+        let unbounded = config.debug.camera_unbounded;
+        if unbounded != self.config.debug.camera_unbounded {
+            self.bound_camera(self.world_radius(), unbounded);
         }
         if let Some(terrain) = self.terrain.as_mut() {
             terrain.hot_reload(&config.debug);
@@ -238,7 +241,6 @@ impl World {
         profile!();
         self.game_clock.advance(timer.delta_secs() as f64);
         self.sync_sky();
-        self.real_time_secs = timer.elapsed_secs();
         self.camera.update(input_state, timer, aspect);
         if let Some(terrain) = self.terrain.as_mut() {
             terrain.update_visibility(&self.camera, &self.light);

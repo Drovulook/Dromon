@@ -1,3 +1,4 @@
+use crate::command::{self, EngineLink};
 use crate::log_parser::{self, ParsedMessage};
 use crate::tabs::logs::LogsState;
 use crate::tabs::profiling::ProfilingState;
@@ -36,6 +37,10 @@ pub struct AppState {
     pub rx: mpsc::Receiver<String>,
     pub shutdown: Arc<AtomicBool>,
 
+    // Commandes vers le moteur.
+    engine: EngineLink,
+    last_request_id: u64,
+
     // Bandeau « Dromon Engine ».
     pub fps: Option<f32>,
     pub state: Option<String>,
@@ -54,10 +59,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(rx: mpsc::Receiver<String>, shutdown: Arc<AtomicBool>) -> Self {
+    pub fn new(rx: mpsc::Receiver<String>, shutdown: Arc<AtomicBool>, engine: EngineLink) -> Self {
         Self {
             rx,
             shutdown,
+            engine,
+            last_request_id: 0,
             fps: None,
             state: None,
             config_mode: None,
@@ -78,6 +85,23 @@ impl AppState {
         let i = self.active_tab.index();
         let prev = (i + Tab::ALL.len() - 1) % Tab::ALL.len();
         self.active_tab = Tab::ALL[prev];
+    }
+
+    /// Envoie la commande saisie et l'affiche dans les logs ; la réponse y arrivera
+    /// via [`AppState::push`].
+    pub fn submit_command(&mut self) {
+        let input = self.logs.input.take();
+        if input.trim().is_empty() {
+            return;
+        }
+        self.logs.go_to_bottom();
+        self.logs.push_line(log_parser::parse_log(format!("[CMD] {input}")));
+        self.last_request_id += 1;
+        let sent = command::build_request(self.last_request_id, &input)
+            .and_then(|request| self.engine.send(&request));
+        if let Err(e) = sent {
+            self.logs.push_line(log_parser::parse_log(format!("[ERROR] {e}")));
+        }
     }
 
     /// Route un message reçu de l'engine vers le bon sous-état.

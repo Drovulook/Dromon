@@ -1,8 +1,10 @@
 mod app_state;
+mod command;
 mod log_parser;
 mod tabs;
 
 use app_state::{AppState, Tab};
+use command::EngineLink;
 use color_eyre::eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
@@ -14,16 +16,23 @@ use ratatui::{
 };
 use std::{
     io::{BufRead, BufReader},
-    os::unix::net::UnixListener,
+    os::unix::net::{UnixListener, UnixStream},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
     thread,
+    time::Duration,
 };
 
-const SOCKET_PATH: &str = "/tmp/dromon.sock";
+/// Socket du CLI : le launcher y envoie la compilation et l'état du moteur.
+const SOCKET_PATH: &str = "/tmp/dromon-cli.sock";
+/// Socket du moteur, qui diffuse ses logs. Absent pendant la compilation et après l'arrêt.
+const ENGINE_SOCKET_PATH: &str = "/tmp/dromon.sock";
+/// Le moteur attend le CLI avant de démarrer : ce délai s'ajoute à son lancement.
+const ENGINE_RETRY: Duration = Duration::from_millis(50);
+const ENGINE_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -40,6 +49,9 @@ fn main() -> Result<()> {
 
     let (tx, rx) = mpsc::channel::<String>();
 
+    let engine = EngineLink::default();
+    spawn_engine_client(tx.clone(), engine.clone());
+
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let tx = tx.clone();
@@ -54,13 +66,38 @@ fn main() -> Result<()> {
         }
     });
 
-    let mut state = AppState::new(rx, shutdown);
+    let mut state = AppState::new(rx, shutdown, engine);
     let terminal = ratatui::init();
     let result = run(terminal, &mut state);
     ratatui::restore();
 
     let _ = std::fs::remove_file(SOCKET_PATH);
     result
+}
+
+/// Se connecte au moteur et relaie ses lignes ; se reconnecte à chaque arrêt du moteur.
+/// Le côté écriture (commandes) est confié à `engine` le temps de la connexion.
+fn spawn_engine_client(tx: mpsc::Sender<String>, engine: EngineLink) {
+    thread::spawn(move || {
+        loop {
+            match UnixStream::connect(ENGINE_SOCKET_PATH) {
+                Ok(stream) => {
+                    // Délai d'écriture : un moteur figé ne doit pas figer le TUI.
+                    let writer = stream
+                        .try_clone()
+                        .and_then(|w| w.set_write_timeout(Some(ENGINE_WRITE_TIMEOUT)).map(|_| w));
+                    engine.set(writer.ok());
+                    for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                        if tx.send(line).is_err() {
+                            return;
+                        }
+                    }
+                    engine.set(None);
+                }
+                Err(_) => thread::sleep(ENGINE_RETRY),
+            }
+        }
+    });
 }
 
 fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
@@ -78,6 +115,17 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                // Saisie en cours : toutes les touches vont à la barre de commande.
+                if state.logs.input.is_editing() {
+                    match key.code {
+                        KeyCode::Enter => state.submit_command(),
+                        KeyCode::Esc => state.logs.input.cancel(),
+                        KeyCode::Backspace => state.logs.input.pop(),
+                        KeyCode::Char(c) => state.logs.input.push(c),
+                        _ => (),
+                    }
+                    continue;
+                }
                 match key.code {
                     // Raccourcis globaux : quitter et changer d'onglet.
                     KeyCode::Char('q') | KeyCode::Esc => break,
@@ -90,6 +138,7 @@ fn run(mut terminal: DefaultTerminal, state: &mut AppState) -> Result<()> {
                             KeyCode::Down => state.logs.scroll_down(),
                             KeyCode::Char('g') | KeyCode::Home => state.logs.go_to_top(),
                             KeyCode::Char('G') | KeyCode::End => state.logs.go_to_bottom(),
+                            KeyCode::Char(':') => state.logs.input.start(),
                             _ => (),
                         },
                         Tab::Profiling => match key.code {

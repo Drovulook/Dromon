@@ -13,12 +13,13 @@
     camera: (
         // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
         // (world_macro.ron) : on démarre alors au-dessus des plus hauts sommets.
-        // Au large de la côte (13650, -5040), 150 au-dessus de la mer, tourné vers la
-        // plage et le sommet (~1300) au bout de la chaîne centrale, en (12400, -2310).
+        // Derrière la plage, dos à la mer, face aux montagnes (test overdraw : crêtes
+        // superposées en vue rasante).
+        // Ancienne pose (au large) : (13900, -5590, 550), yaw 115, pitch -5.
         // Ancienne pose (survol de la chaîne) : (7000, 2500, 1650), yaw -40, pitch -20.
-        start_position: (13900.0, -5590.0, 550.0),
-        start_yaw_deg: 115.0,  // 0 = vers +X (est), 90 = vers +Y (nord)
-        start_pitch_deg: -5.0, // 0 = horizontale, négatif = vers le bas
+        start_position: (13300.0, -4300.0, 700.0),
+        start_yaw_deg: 212.0,   // 0 = vers +X (est), 90 = vers +Y (nord)
+        start_pitch_deg: 3.0,  // 0 = horizontale, négatif = vers le bas
         fov_deg: 45.0,      // champ de vision vertical au démarrage
         min_fov_deg: 20.0,  // bornes du zoom (molette)
         max_fov_deg: 110.0,

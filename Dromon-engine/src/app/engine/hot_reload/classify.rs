@@ -332,11 +332,13 @@ fn debug_reloads(old: &DebugConfig, new: &DebugConfig, out: &mut Reloads) {
         log_batch_stats,
         log_gpu_usage,
         shadows,
+        camera_unbounded,
         mesh,
     } = old;
     out.check("log_batch_stats", log_batch_stats, &new.log_batch_stats, Reload::Live);
     out.check("log_gpu_usage", log_gpu_usage, &new.log_gpu_usage, Reload::Live);
     out.check("shadows", shadows, &new.shadows, Reload::Live);
+    out.check("camera_unbounded", camera_unbounded, &new.camera_unbounded, Reload::Live);
     out.check("mesh", mesh, &new.mesh, Reload::Terrain);
 }
 

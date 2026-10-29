@@ -9,6 +9,7 @@ dependencies = [
  "color-eyre",
  "ctrlc",
  "ratatui",
+ "serde_json",
 ]
 
 [[package]]
@@ -28,6 +29,7 @@ dependencies = [
  "ron",
  "rustc-hash",
  "serde",
+ "serde_json",
  "softbuffer",
  "tracing",
  "tracing-subscriber",

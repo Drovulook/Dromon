@@ -2,6 +2,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use serde_json::Value;
 
 pub enum ParsedMessage {
     Log(Line<'static>),
@@ -58,6 +59,9 @@ pub fn parse(raw: String) -> ParsedMessage {
         if let Ok(fps) = rest.trim().parse::<f32>() {
             return ParsedMessage::Fps(fps);
         }
+    }
+    if let Some(rest) = raw.strip_prefix("[REPLY] ") {
+        return ParsedMessage::Log(parse_reply(rest));
     }
     if let Some(rest) = raw.strip_prefix("[STATE] ") {
         return ParsedMessage::State(rest.trim().to_string());
@@ -133,7 +137,25 @@ fn parse_world_lod(record: &str) -> Option<WorldLod> {
     })
 }
 
-fn parse_log(raw: String) -> Line<'static> {
+/// Réponse à une commande de la barre (`{"id", "ok", "result" | "error"}`) : résultat
+/// en JSON compact sur une ligne, ou erreur.
+fn parse_reply(rest: &str) -> Line<'static> {
+    let Ok(reply) = serde_json::from_str::<Value>(rest) else {
+        return parse_log(format!("[REPLY] {rest}"));
+    };
+    if reply["ok"] == true {
+        let result = match &reply["result"] {
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        };
+        parse_log(format!("[REPLY] {result}"))
+    } else {
+        let error = reply["error"].as_str().unwrap_or("erreur inconnue");
+        parse_log(format!("[ERROR] {error}"))
+    }
+}
+
+pub fn parse_log(raw: String) -> Line<'static> {
     if let Some(rest) = raw.strip_prefix('[') {
         if let Some(end) = rest.find(']') {
             let tag = &rest[..end];
@@ -157,6 +179,8 @@ fn tag_color(tag: &str) -> Color {
         "WARN" | "WARNING" => Color::Rgb(0xFF, 0xC6, 0x6D),
         "ERROR" => Color::Rgb(0xFF, 0x45, 0x00),
         "VULKAN" => Color::Rgb(0xBD, 0x93, 0xF9),
+        "CMD" => Color::Rgb(0xE6, 0xA2, 0x4C),
+        "REPLY" => Color::Rgb(0x6A, 0xC9, 0x7E),
         _ => Color::Rgb(0xBF, 0xBD, 0xB6),
     }
 }

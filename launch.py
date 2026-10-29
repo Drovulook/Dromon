@@ -9,7 +9,8 @@ import time
 
 from launch_config import ENABLE_PROFILING, RELEASE, USE_CLI
 
-SOCKET_PATH = "/tmp/dromon.sock"
+# Socket du CLI (le moteur a le sien, /tmp/dromon.sock, auquel le CLI se connecte).
+SOCKET_PATH = "/tmp/dromon-cli.sock"
 WORKSPACE = os.path.dirname(os.path.abspath(__file__))
 PROFILE = "release" if RELEASE else "debug"
 BUILD_FLAGS = ["--release"] if RELEASE else []

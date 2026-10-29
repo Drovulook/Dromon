@@ -23,11 +23,17 @@ pub struct Camera {
     pub proj: Mat4,
 
     pub is_primary: bool,
+
+    /// Rayon du disque du monde (centré sur l'origine), `None` sans terrain. Seule la
+    /// position horizontale est bornée : la hauteur reste libre.
+    world_radius: Option<f32>,
+    /// `debug.camera_unbounded` : aucune limite, pour regarder le monde de l'extérieur.
+    unbounded: bool,
 }
 
 impl Camera {
-    /// Caméra à sa pose de départ (`render.ron`).
-    pub fn new(params: &CameraParams) -> Camera {
+    /// Caméra à sa pose de départ (`render.ron`), sans limite tant qu'il n'y a pas de terrain.
+    pub fn new(params: &CameraParams, unbounded: bool) -> Camera {
         Camera {
             params: params.clone(),
             position: params.start_position,
@@ -37,25 +43,95 @@ impl Camera {
             view: Mat4::IDENTITY,
             proj: Mat4::IDENTITY,
             is_primary: true,
+            world_radius: None,
+            unbounded,
         }
     }
 
     /// Hot reload : nouveaux réglages. Une pose de départ modifiée téléporte la caméra
     /// (pratique pour régler un point de vue), un FOV modifié remplace le zoom courant.
-    pub fn hot_reload(&mut self, params: &CameraParams) {
+    /// `Err` : pose de départ hors du monde, ignorée (le reste est appliqué).
+    pub fn hot_reload(&mut self, params: &CameraParams) -> Result<(), String> {
         let old = &self.params;
+        let mut result = Ok(());
         if params.start_position != old.start_position
             || params.start_yaw_deg != old.start_yaw_deg
             || params.start_pitch_deg != old.start_pitch_deg
         {
-            self.position = params.start_position;
-            self.yaw = params.start_yaw_deg.to_radians();
-            self.pitch = params.start_pitch_deg.to_radians();
+            result = self.check_inside(params.start_position);
+            if result.is_ok() {
+                self.position = params.start_position;
+                self.yaw = params.start_yaw_deg.to_radians();
+                self.pitch = params.start_pitch_deg.to_radians();
+            }
         }
         if params.fov_deg != old.fov_deg {
             self.fov_y = params.fov_deg.to_radians();
         }
         self.params = params.clone();
+        result
+    }
+
+    /// Nouvelles limites (terrain créé ou régénéré, `camera_unbounded` modifié). `true`
+    /// si la caméra était dehors et a été ramenée au bord.
+    pub fn set_bounds(&mut self, world_radius: Option<f32>, unbounded: bool) -> bool {
+        self.world_radius = world_radius;
+        self.unbounded = unbounded;
+        let clamped = self.clamp(self.position);
+        let moved = clamped != self.position;
+        self.position = clamped;
+        moved
+    }
+
+    /// Rayon horizontal autorisé, `None` → déplacement libre.
+    fn limit(&self) -> Option<f32> {
+        self.world_radius.filter(|_| !self.unbounded)
+    }
+
+    /// Ramène `position` sur le bord du disque si elle en sort, hauteur gardée. Projeter
+    /// plutôt que refuser le mouvement : la caméra glisse le long du bord au lieu d'y coller.
+    fn clamp(&self, position: Vec3) -> Vec3 {
+        let Some(radius) = self.limit() else {
+            return position;
+        };
+        let horizontal = position.truncate();
+        let distance = horizontal.length();
+        if distance <= radius {
+            return position;
+        }
+        (horizontal * (radius / distance)).extend(position.z)
+    }
+
+    fn check_inside(&self, position: Vec3) -> Result<(), String> {
+        match self.limit() {
+            Some(radius) if position.truncate().length() > radius => Err(format!(
+                "({:.0}, {:.0}) hors du monde : distance horizontale au centre {:.0} > rayon {radius:.0}",
+                position.x,
+                position.y,
+                position.truncate().length(),
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Déplacement instantané (commande). Angles en radians, `None` → inchangés ; pitch
+    /// borné comme à la souris. Matrices recalculées à la frame suivante. Position hors
+    /// du monde → refusée, caméra inchangée.
+    pub fn teleport(
+        &mut self,
+        position: Vec3,
+        yaw: Option<f32>,
+        pitch: Option<f32>,
+    ) -> Result<(), String> {
+        self.check_inside(position)?;
+        self.position = position;
+        if let Some(yaw) = yaw {
+            self.yaw = yaw;
+        }
+        if let Some(pitch) = pitch {
+            self.pitch = pitch.clamp(-MAX_PITCH, MAX_PITCH);
+        }
+        Ok(())
     }
 
     /// Vecteur « avant » (direction du regard), reconstruit depuis yaw/pitch.
@@ -131,7 +207,7 @@ impl Camera {
             1.0
         };
         if direction != Vec3::ZERO {
-            self.position += direction.normalize() * p.move_speed * boost * dt;
+            self.position = self.clamp(self.position + direction.normalize() * p.move_speed * boost * dt);
         }
 
         self.recompute_matrices(aspect);
