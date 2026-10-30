@@ -254,6 +254,7 @@ pub fn mesh_chunk(terrain: &TerrainSnapshot, lods: &LodGrid, coord: IVec2) -> Me
 
 #[cfg(test)]
 mod tests {
+    use crate::AppDirs;
     use crate::config::{ConfigFile, MaterialRulesConfig, MaterialsConfig, MeshDebug, WorldGenConfig};
     use crate::app::engine::terrain_generation::chunk::{CHUNK_SIZE, ChunkStore, TerrainSource};
     use crate::app::engine::terrain_generation::generation::macro_map::MacroMap;
@@ -284,6 +285,9 @@ mod tests {
         // Monde par défaut : rayon 4 chunks. `build`, pas `load_or_build` : ne pas
         // écraser le cache du vrai monde.
         let config = WorldGenConfig::default();
+        // Matériaux de Physis. Déjà fixés par un autre test du même processus : sans
+        // importance, les dossiers sont les mêmes.
+        let _ = AppDirs::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../apps/Physis")).install();
         let materials = MaterialsConfig::load().unwrap();
         let rules = MaterialRulesConfig::load().unwrap();
         let source = Arc::new(

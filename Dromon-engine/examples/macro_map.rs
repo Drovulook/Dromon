@@ -1,17 +1,18 @@
 //! Calcule la carte macro et l'exporte en PNG, sans lancer le moteur.
 //!
 //! `cargo run --release -p Dromon-engine --example macro_map`
-//! Sortie : PNG dans `target/world_maps/`, cache `res/world/macro_map.bin` (relu par le
-//! jeu). Le jeu réécrit aussi les PNG chaque fois qu'il recalcule la carte.
+//! Monde de Physis. Sortie : PNG dans `apps/Physis/res/world/maps/`, cache
+//! `apps/Physis/res/world/macro_map.bin` (relu par le jeu). Le jeu réécrit aussi les
+//! PNG chaque fois qu'il recalcule la carte.
 
-use std::path::Path;
 use std::time::Instant;
 
 use anyhow::Result;
 use dromon_engine::config::WorldGenConfig;
-use dromon_engine::{MACRO_MAP_CACHE, MACRO_MAP_EXPORT_DIR, MacroMap};
+use dromon_engine::{AppDirs, MacroMap, macro_map_cache, macro_map_export_dir};
 
 fn main() -> Result<()> {
+    AppDirs::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../apps/Physis")).install()?;
     let config = WorldGenConfig::load()?;
 
     let start = Instant::now();
@@ -78,11 +79,11 @@ fn main() -> Result<()> {
         );
     }
 
-    for path in map.export_pngs(Path::new(MACRO_MAP_EXPORT_DIR))? {
+    for path in map.export_pngs(&macro_map_export_dir())? {
         println!("→ {}", path.display());
     }
     // Toujours réécrit : rafraîchit le cache même si seul le code a changé.
-    let cache = Path::new(MACRO_MAP_CACHE);
+    let cache = &macro_map_cache();
     map.save(cache)?;
     println!("→ {}", cache.display());
 

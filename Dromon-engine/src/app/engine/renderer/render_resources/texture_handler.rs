@@ -8,6 +8,7 @@ use crate::app::{
     },
     logger::Logger,
 };
+use crate::AppDirs;
 use crate::config::Anisotropy;
 use anyhow::Result;
 use ash::vk;
@@ -89,9 +90,9 @@ impl TextureHandler {
 
     /// Texture d'objet : image couleur lue depuis un fichier, en sRGB, avec mipmaps et
     /// son propre descriptor set (set 1). Rend aussi son staging (cf.
-    /// `create_texture_from_bytes`).
+    /// `create_texture_from_bytes`). `path` : relatif au `res/` de l'app.
     pub fn create_object_texture(&self, path: &str) -> Result<(Texture, Buffer)> {
-        let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
+        let full_path = AppDirs::get().res().join(path);
 
         let img = ImageReader::open(full_path)?.decode()?.to_rgba8();
         let (image_width, image_height) = img.dimensions();

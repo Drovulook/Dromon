@@ -52,13 +52,12 @@ impl Engine {
     /// Traite les commandes reçues depuis la frame précédente. Non bloquant.
     pub(super) fn handle_commands(&mut self, requests: &Receiver<Incoming>) {
         while let Ok(Incoming { line, reply }) = requests.try_recv() {
-            let response = match serde_json::from_str::<Request>(&line) {
+            let response = match parse_request(&line) {
                 Ok(Request { id, command }) => match self.execute(command) {
                     Ok(result) => json!({ "id": id, "ok": true, "result": result }),
                     Err(error) => json!({ "id": id, "ok": false, "error": error }),
                 },
-                // `id` relu à part pour que le client reconnaisse sa réponse.
-                Err(e) => json!({ "id": request_id(&line), "ok": false, "error": e.to_string() }),
+                Err((id, error)) => json!({ "id": id, "ok": false, "error": error }),
             };
             reply.send(format!("[REPLY] {response}"));
         }
@@ -129,9 +128,21 @@ fn camera_pose(camera: &Camera) -> Value {
     })
 }
 
-fn request_id(line: &str) -> Value {
-    serde_json::from_str::<Value>(line)
-        .ok()
-        .and_then(|request| request.get("id").cloned())
-        .unwrap_or(Value::Null)
+/// Erreur : `id` de la requête (pour que le client reconnaisse sa réponse) et message.
+/// Lue en deux temps (JSON → `Value` → `Request`) : seule une erreur de syntaxe JSON
+/// porte une position, inutile pour le reste puisque le client a généré la ligne.
+fn parse_request(line: &str) -> Result<Request, (Value, String)> {
+    let mut value: Value =
+        serde_json::from_str(line).map_err(|e| (Value::Null, e.to_string()))?;
+    let id = value.get("id").cloned().unwrap_or(Value::Null);
+    match Request::deserialize(&value) {
+        Ok(request) => Ok(request),
+        // Commande à arguments envoyée sans : serde s'arrête à « missing field `args` ».
+        // Avec `args` vide, il nomme le champ qui manque vraiment (« `hour` »).
+        Err(_) if value.is_object() && value.get("args").is_none() => {
+            value["args"] = json!({});
+            Request::deserialize(&value).map_err(|e| (id, e.to_string()))
+        }
+        Err(e) => Err((id, e.to_string())),
+    }
 }

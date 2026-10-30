@@ -1,3 +1,4 @@
+use crate::AppDirs;
 use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::render_resources::object_mesh::ObjectMesh;
 use crate::app::engine::renderer::render_resources::object_mesh::ObjectVertex;
@@ -5,7 +6,6 @@ use crate::app::{engine::rendering_context::RenderingContext, logger::Logger};
 use anyhow::{Context, Result};
 use ash::vk;
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use std::path::Path;
 use std::sync::Arc;
 
 pub struct ObjectMeshHandler {
@@ -49,8 +49,9 @@ impl ObjectMeshHandler {
         model_path: &str,
         smooth: bool,
     ) -> Result<(Vec<ObjectVertex>, Vec<u32>)> {
-        let full_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), model_path);
-        let full_path = Path::new(&full_path);
+        // Relatif au `res/` de l'app.
+        let full_path = AppDirs::get().res().join(model_path);
+        let full_path = full_path.as_path();
 
         // On évite gltf::import() qui chargerait AUSSI toutes les images
         // référencées par le .gltf.

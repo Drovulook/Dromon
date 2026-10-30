@@ -1,6 +1,5 @@
 use anyhow::Result;
 use glam::{IVec2, Vec3};
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -21,9 +20,9 @@ use crate::{
             },
             rendering_context::RenderingContext,
             terrain_generation::{
-                CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MACRO_MAP_CACHE,
-                MACRO_MAP_EXPORT_DIR, MacroMap, MeshCache, TerrainSnapshot, TerrainSource,
-                chunk_distance,
+                CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MacroMap, MeshCache,
+                TerrainSnapshot, TerrainSource, chunk_distance, macro_map_cache,
+                macro_map_export_dir,
             },
         },
         logger::Logger,
@@ -42,7 +41,10 @@ impl World {
         self.light.shadow = self.config.render.shadow.terrain.clone();
 
         // Avant `new_terrain`, qui part de la position de la caméra.
-        self.bound_camera(Some(world_radius(config)), self.config.debug.camera_unbounded);
+        self.bound_camera(
+            Some(world_radius(config)),
+            self.config.debug.camera_unbounded,
+        );
         let terrain = self.new_terrain(config)?;
         self.water = Some(Water::new(
             self.context.clone(),
@@ -85,7 +87,10 @@ impl World {
             .as_ref()
             .is_none_or(|old| old.world_gen.macro_ != config.macro_);
         // Le monde a pu rétrécir.
-        self.bound_camera(Some(world_radius(config)), self.config.debug.camera_unbounded);
+        self.bound_camera(
+            Some(world_radius(config)),
+            self.config.debug.camera_unbounded,
+        );
         let mut terrain = self.new_terrain(config)?;
         // Les frames en vol dessinent peut-être encore l'ancien terrain (buffers libérés
         // par son remplacement) et lisent les cartes du monde.
@@ -131,7 +136,9 @@ impl World {
 
     /// Rayon du monde, `None` sans terrain.
     pub(crate) fn world_radius(&self) -> Option<f32> {
-        self.terrain.as_ref().map(|terrain| world_radius(&terrain.world_gen))
+        self.terrain
+            .as_ref()
+            .map(|terrain| world_radius(&terrain.world_gen))
     }
 
     fn new_terrain(&self, config: &WorldGenConfig) -> Result<Terrain> {
@@ -161,7 +168,7 @@ fn world_radius(config: &WorldGenConfig) -> f32 {
     (config.macro_.world.radius_chunks as usize * CHUNK_SIZE) as f32
 }
 
-/// Écrit les PNG de la carte macro dans [`MACRO_MAP_EXPORT_DIR`] sur un thread à part
+/// Écrit les PNG de la carte macro dans [`macro_map_export_dir`] sur un thread à part
 /// (~2 s en release) : le jeu continue pendant ce temps. La carte, immuable, est lue
 /// via l'`Arc` du `TerrainSource`, sans copie.
 ///
@@ -180,12 +187,11 @@ fn export_macro_pngs(source: Arc<TerrainSource>, logger: Arc<Logger>) {
             return;
         }
         let start = Instant::now();
-        match source
-            .macro_map()
-            .export_pngs(Path::new(MACRO_MAP_EXPORT_DIR))
-        {
+        let dir = macro_map_export_dir();
+        match source.macro_map().export_pngs(&dir) {
             Ok(_) => logger.info(&format!(
-                "PNG de la carte macro écrits dans {MACRO_MAP_EXPORT_DIR} en {:.1} s",
+                "PNG de la carte macro écrits dans {} en {:.1} s",
+                dir.display(),
                 start.elapsed().as_secs_f32()
             )),
             Err(e) => logger.warn(&format!("export PNG de la carte macro : {e:#}")),
@@ -210,7 +216,7 @@ impl Terrain {
         profile!();
 
         // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
-        let (macro_map, rebuilt) = MacroMap::load_or_build(config, Path::new(MACRO_MAP_CACHE))?;
+        let (macro_map, rebuilt) = MacroMap::load_or_build(config, &macro_map_cache())?;
         let source = Arc::new(TerrainSource::new(
             config,
             materials,

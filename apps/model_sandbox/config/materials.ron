@@ -1,0 +1,14 @@
+// Table des matériaux du terrain (cf. `MaterialsConfig`). Copie de Physis sans les
+// textures (cette app n'a pas de terrain) : couleurs unies. Les noms restent, car
+// material_rules.ron y fait référence.
+(
+    materials: [
+        (name: "rock",      albedo: (0.26, 0.24, 0.22)),
+        (name: "sandstone", albedo: (0.32, 0.21, 0.13)),
+        (name: "dirt",      albedo: (0.21, 0.15, 0.09)),
+        (name: "grass",     albedo: (0.14, 0.24, 0.035)),
+        (name: "snow",      albedo: (0.95, 0.96, 0.98)),
+        (name: "sand",      albedo: (0.62, 0.55, 0.40)),
+        (name: "mud",       albedo: (0.26, 0.25, 0.22)),
+    ],
+)

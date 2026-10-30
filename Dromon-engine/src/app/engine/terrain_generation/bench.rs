@@ -5,13 +5,13 @@
 //! niveaux se comparent entre eux, et les temps ne souffrent pas du partage des cœurs
 //! (hyperthreading) qui gonfle les mesures en jeu.
 
-use std::{fmt::Write, path::Path, sync::Arc, time::Instant};
+use std::{fmt::Write, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use glam::IVec2;
 
 use super::{
-    CHUNK_SIZE, ChunkStore, LodGrid, MACRO_MAP_CACHE, MacroMap, TerrainSnapshot, TerrainSource,
+    CHUNK_SIZE, ChunkStore, LodGrid, MacroMap, TerrainSnapshot, TerrainSource, macro_map_cache,
     mesh_chunk,
 };
 use crate::config::{
@@ -25,7 +25,7 @@ pub fn mesh_bench(per_lod: usize) -> Result<String> {
     let materials = MaterialsConfig::load()?;
     let rules = MaterialRulesConfig::load()?;
     let max_lod = RenderConfig::load()?.terrain.lod.max_lod();
-    let (macro_map, _) = MacroMap::load_or_build(&config, Path::new(MACRO_MAP_CACHE))?;
+    let (macro_map, _) = MacroMap::load_or_build(&config, &macro_map_cache())?;
     let source = Arc::new(TerrainSource::new(&config, &materials, &rules, macro_map)?);
     let snapshot = TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
 

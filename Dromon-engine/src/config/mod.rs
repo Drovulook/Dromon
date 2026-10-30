@@ -28,8 +28,8 @@ pub use material_rules::{
 };
 pub use material_textures::MaterialTexturesConfig;
 pub use materials::{
-    HumidityTint, MaterialDef, MaterialsConfig, TERRAIN_TEXTURE_DIR, TEXTURE_AO, TEXTURE_COLOR,
-    TEXTURE_HEIGHT, TEXTURE_NORMAL, terrain_texture_path,
+    HumidityTint, MaterialDef, MaterialsConfig, TEXTURE_AO, TEXTURE_COLOR, TEXTURE_HEIGHT,
+    TEXTURE_NORMAL, terrain_texture_dir, terrain_texture_path,
 };
 pub use render::{
     Anisotropy, CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig,
@@ -40,13 +40,10 @@ pub use world_gen::{
     OctaveNoise, WorldDetailConfig, WorldGenConfig, WorldMacroConfig, WorldShape,
 };
 
+use crate::AppDirs;
 use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 use std::path::{Path, PathBuf};
-
-/// Dossier `config/` à la racine du workspace. Résolu à la compilation : indépendant du
-/// dossier d'où l'on lance le binaire.
-pub const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../config");
 
 /// Configs lues par le **moteur** au démarrage, avant la création du renderer
 /// (`render.ron`, `environment.ron`, `debug.ron`, `materials.ron`,
@@ -78,9 +75,9 @@ impl EngineConfig {
     }
 }
 
-/// Une struct sérialisée dans son propre fichier RON de [`CONFIG_DIR`].
+/// Une struct sérialisée dans son propre fichier RON du dossier `config/` de l'app.
 pub trait ConfigFile: Serialize + DeserializeOwned {
-    /// Nom du fichier dans [`CONFIG_DIR`] (ex. `"render.ron"`).
+    /// Nom du fichier dans `config/` (ex. `"render.ron"`).
     const FILE_NAME: &'static str;
 
     /// Rejette les valeurs qui casseraient le moteur (pas les réglages discutables).
@@ -90,7 +87,7 @@ pub trait ConfigFile: Serialize + DeserializeOwned {
 
     /// Chemin par défaut du fichier.
     fn default_path() -> PathBuf {
-        Path::new(CONFIG_DIR).join(Self::FILE_NAME)
+        AppDirs::get().config().join(Self::FILE_NAME)
     }
 
     /// Charge et valide le fichier par défaut.

@@ -4,8 +4,8 @@ mod log_parser;
 mod tabs;
 
 use app_state::{AppState, Tab};
+use color_eyre::eyre::{Result, eyre};
 use command::EngineLink;
-use color_eyre::eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
@@ -17,6 +17,7 @@ use ratatui::{
 use std::{
     io::{BufRead, BufReader},
     os::unix::net::{UnixListener, UnixStream},
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -26,10 +27,6 @@ use std::{
     time::Duration,
 };
 
-/// Socket du CLI : le launcher y envoie la compilation et l'état du moteur.
-const SOCKET_PATH: &str = "/tmp/dromon-cli.sock";
-/// Socket du moteur, qui diffuse ses logs. Absent pendant la compilation et après l'arrêt.
-const ENGINE_SOCKET_PATH: &str = "/tmp/dromon.sock";
 /// Le moteur attend le CLI avant de démarrer : ce délai s'ajoute à son lancement.
 const ENGINE_RETRY: Duration = Duration::from_millis(50);
 const ENGINE_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -44,14 +41,23 @@ fn main() -> Result<()> {
         shutdown_signal.store(true, Ordering::SeqCst);
     })?;
 
-    let _ = std::fs::remove_file(SOCKET_PATH);
-    let listener = UnixListener::bind(SOCKET_PATH)?;
+    let app = app_arg().ok_or_else(|| eyre!("usage : Dromon-cli --app <nom du binaire>"))?;
+    // Le launcher y envoie la compilation et l'état du moteur.
+    let cli_socket = socket_dir().join(format!("{app}-cli.sock"));
+    // Diffuse les logs du moteur ; absent pendant la compilation et après l'arrêt.
+    let engine_socket = socket_dir().join(format!("{app}.sock"));
+
+    std::fs::create_dir_all(socket_dir())?;
+    let _ = std::fs::remove_file(&cli_socket);
+    let listener = UnixListener::bind(&cli_socket)?;
 
     let (tx, rx) = mpsc::channel::<String>();
 
+    // se connecte au listener du moteur
     let engine = EngineLink::default();
-    spawn_engine_client(tx.clone(), engine.clone());
+    spawn_engine_client(engine_socket, tx.clone(), engine.clone());
 
+    //listener (dromon-cli.sock; récupère les messages de compilation et de l'arrêt du moteur)
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let tx = tx.clone();
@@ -71,16 +77,31 @@ fn main() -> Result<()> {
     let result = run(terminal, &mut state);
     ratatui::restore();
 
-    let _ = std::fs::remove_file(SOCKET_PATH);
+    let _ = std::fs::remove_file(&cli_socket);
     result
+}
+
+/// Valeur de `--app <nom>`.
+fn app_arg() -> Option<String> {
+    let mut args = std::env::args();
+    args.find(|a| a == "--app")?;
+    args.next()
+}
+
+/// Dossier des sockets. ⚠ Même règle que `socket_path` du moteur et `claude_mcp/dromon_client.py`.
+fn socket_dir() -> PathBuf {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("dromon")
 }
 
 /// Se connecte au moteur et relaie ses lignes ; se reconnecte à chaque arrêt du moteur.
 /// Le côté écriture (commandes) est confié à `engine` le temps de la connexion.
-fn spawn_engine_client(tx: mpsc::Sender<String>, engine: EngineLink) {
+fn spawn_engine_client(path: PathBuf, tx: mpsc::Sender<String>, engine: EngineLink) {
     thread::spawn(move || {
         loop {
-            match UnixStream::connect(ENGINE_SOCKET_PATH) {
+            match UnixStream::connect(&path) {
                 Ok(stream) => {
                     // Délai d'écriture : un moteur figé ne doit pas figer le TUI.
                     let writer = stream

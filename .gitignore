@@ -3,10 +3,12 @@
 CLAUDE.md
 links.md
 /Dromon-Claude-Docs
-/__pycache__
+__pycache__/
 
 /Dromon-engine/res/shaders/*.spv
 /Dromon-engine/res/models/
 /Dromon-engine/res/textures/
-# Cache de la carte macro (~100 Mo), recalculé en une seconde.
-/Dromon-engine/res/world/
+/apps/*/res/models/
+/apps/*/res/textures/
+# Cache de la carte macro (~100 Mo), recalculé en une seconde, et ses PNG de contrôle.
+/apps/*/res/world/

@@ -4,21 +4,25 @@
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter, ErrorKind, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 
 use super::{GridShape, MacroGrid, MacroMap};
+use crate::AppDirs;
 use crate::app::engine::terrain_generation::CHUNK_SIZE;
 use crate::config::{WorldGenConfig, WorldMacroConfig};
 
-/// Emplacement par défaut, dans `res/` pour survivre à `cargo clean`. ⚠ ~100 Mo :
-/// ignoré par git (`.gitignore`), il se recalcule en une seconde.
-pub const MACRO_MAP_CACHE: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/res/world/macro_map.bin");
+/// Emplacement par défaut, dans le `res/` de l'app pour survivre à `cargo clean`.
+/// ⚠ ~100 Mo : ignoré par git (`.gitignore`), il se recalcule en une seconde.
+pub fn macro_map_cache() -> PathBuf {
+    AppDirs::get().res().join("world/macro_map.bin")
+}
 
 /// Dossier des PNG de contrôle (cf. [`MacroMap::export_pngs`]) : sorties de debug.
-pub const MACRO_MAP_EXPORT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/world_maps");
+pub fn macro_map_export_dir() -> PathBuf {
+    AppDirs::get().res().join("world/maps")
+}
 
 const MAGIC: &[u8; 8] = b"DRMACRO\0";
 /// À incrémenter quand l'algorithme change sans que la config change : la clé ne

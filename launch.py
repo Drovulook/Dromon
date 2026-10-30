@@ -7,10 +7,9 @@ import subprocess
 import sys
 import time
 
+from claude_mcp.dromon_client import cli_socket
 from launch_config import ENABLE_PROFILING, RELEASE, USE_CLI
 
-# Socket du CLI (le moteur a le sien, /tmp/dromon.sock, auquel le CLI se connecte).
-SOCKET_PATH = "/tmp/dromon-cli.sock"
 WORKSPACE = os.path.dirname(os.path.abspath(__file__))
 PROFILE = "release" if RELEASE else "debug"
 BUILD_FLAGS = ["--release"] if RELEASE else []
@@ -27,10 +26,10 @@ def cargo_build(package: str, features: list[str] | None = None) -> tuple[bool, 
     return result.returncode == 0, result.stderr
 
 
-def send_to_cli(text: str):
+def send_to_cli(socket_path: str, text: str):
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.connect(SOCKET_PATH)
+            s.connect(socket_path)
             for line in text.splitlines():
                 if line.strip():
                     s.sendall((line + "\n").encode())
@@ -92,17 +91,22 @@ def main():
                 print(build_output, file=sys.stderr)
                 sys.exit(1)
 
-            cli = cargo_run("Dromon-cli")
+            cli_sock = cli_socket(target)
+            # Socket laissé par un CLI tué : l'attente ci-dessous le prendrait pour le
+            # nouveau, et les premiers messages seraient perdus.
+            cli_sock.unlink(missing_ok=True)
+            cli = cargo_run("Dromon-cli", extra_args=["--app", target])
             processes.append(cli)
 
             for _ in range(40):
-                if os.path.exists(SOCKET_PATH):
+                if cli_sock.exists():
                     break
                 time.sleep(0.25)
             else:
                 sys.exit(1)
 
             send_to_cli(
+                str(cli_sock),
                 "[CONFIG] mode={} profiling={}".format(
                     "release" if RELEASE else "debug",
                     "enabled" if ENABLE_PROFILING else "disabled",
@@ -114,7 +118,7 @@ def main():
             if build_output.strip():
                 block += build_output
             block += "-------------------------------------------------------------------------------------------------------------------------------------------------------\n"
-            send_to_cli(block)
+            send_to_cli(str(cli_sock), block)
 
             if not success:
                 cli.wait()  # attend que l'utilisateur ferme le CLI (q / Esc)
@@ -129,6 +133,7 @@ def main():
                 if engine_running and engine.poll() is not None:
                     engine_running = False
                     send_to_cli(
+                        str(cli_sock),
                         "[INFO] L'engine s'est arrêté (code {})".format(
                             engine.returncode
                         )

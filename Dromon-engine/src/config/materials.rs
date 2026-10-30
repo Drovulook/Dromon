@@ -8,9 +8,10 @@ use anyhow::{Result, ensure};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::ConfigFile;
+use crate::AppDirs;
 
 /// IDs disponibles : `u16` (cf. `Voxel`), 0 réservé à l'air, le dernier au matériau
 /// de debug.
@@ -18,8 +19,9 @@ const MAX_MATERIALS: usize = u16::MAX as usize - 1;
 
 /// Textures du terrain : un sous-dossier par texture, aux cartes nommées
 /// [`TEXTURE_COLOR`], [`TEXTURE_HEIGHT`]…
-pub const TERRAIN_TEXTURE_DIR: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/res/textures/terrain_textures");
+pub fn terrain_texture_dir() -> PathBuf {
+    AppDirs::get().res().join("textures/terrain_textures")
+}
 /// Albédo, sRGB.
 pub const TEXTURE_COLOR: &str = "color.png";
 /// Hauteur du relief (blanc = haut), pour le mélange par hauteur.
@@ -31,7 +33,7 @@ pub const TEXTURE_AO: &str = "ao.png";
 
 /// Chemin de la carte `file` de la texture `texture`.
 pub fn terrain_texture_path(texture: &str, file: &str) -> PathBuf {
-    Path::new(TERRAIN_TEXTURE_DIR).join(texture).join(file)
+    terrain_texture_dir().join(texture).join(file)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -53,7 +55,7 @@ pub struct MaterialDef {
     /// Teinte selon les précipitations locales (herbe : verte → paille). `None` :
     /// couleur fixe.
     pub humidity_tint: Option<HumidityTint>,
-    /// Texture : sous-dossier de [`TERRAIN_TEXTURE_DIR`], partageable entre matériaux.
+    /// Texture : sous-dossier de [`terrain_texture_dir`], partageable entre matériaux.
     /// `None` : couleur unie.
     pub texture: Option<String>,
     /// Côté d'une répétition de la texture, en unités monde (voxels).

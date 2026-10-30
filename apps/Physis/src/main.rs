@@ -6,7 +6,7 @@ struct Physis;
 
 impl Scene for Physis {
     fn setup(&mut self, world: &mut World) -> Result<()> {
-        // `config/world_macro.ron` + `config/world_detail.ron` à la racine du workspace.
+        // `config/world_macro.ron` + `config/world_detail.ron` de cette app.
         let config = WorldGenConfig::load()?;
         world.generate_terrain(&config)?;
         Ok(())
@@ -16,5 +16,5 @@ impl Scene for Physis {
 }
 
 fn main() -> Result<()> {
-    dromon_engine::run(Physis)
+    dromon_engine::run(Physis, dromon_engine::app_dirs!())
 }

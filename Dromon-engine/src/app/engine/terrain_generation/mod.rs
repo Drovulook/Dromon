@@ -10,7 +10,7 @@ mod utils;
 
 pub use chunk::{CHUNK_SIZE, ChunkStore, TerrainSnapshot, TerrainSource, VOXEL_MATERIALS, Voxel};
 pub use generation::macro_map::{
-    GridShape, MACRO_MAP_CACHE, MACRO_MAP_EXPORT_DIR, MacroGrid, MacroMap,
+    GridShape, MacroGrid, MacroMap, macro_map_cache, macro_map_export_dir,
 };
 pub use lod::grid::LodGrid;
 pub use lod::{LodFocus, chunk_distance};

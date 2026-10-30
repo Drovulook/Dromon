@@ -1,11 +1,9 @@
 use anyhow::{Context, Result};
 use dromon_engine::{RenderObject, Scene, Timer, Transform, World};
 
-// Chemins relatifs au crate du MOTEUR : ils sont résolus via le `CARGO_MANIFEST_DIR`
-// de `Dromon-engine` (cf. mesh_handler/texture_handler), donc les assets restent
-// dans `Dromon-engine/res/` même si on lance depuis ce binaire.
-const GLTF_PATH: &str = "/res/models/dromon_ship/scene.gltf";
-const TEXTURE_PATH: &str = "/res/models/dromon_ship/DefaultMaterial_baseColor.png";
+// Relatifs au `res/` de cette app.
+const GLTF_PATH: &str = "models/dromon_ship/scene.gltf";
+const TEXTURE_PATH: &str = "models/dromon_ship/DefaultMaterial_baseColor.png";
 
 /// Bac à sable de visualisation de modèles. Implémente `Scene` : le moteur appelle
 /// `setup` une fois (chargement + placement des objets) puis `update` à chaque frame.
@@ -59,5 +57,5 @@ impl Scene for ModelSandbox {
 }
 
 fn main() -> Result<()> {
-    dromon_engine::run(ModelSandbox)
+    dromon_engine::run(ModelSandbox, dromon_engine::app_dirs!())
 }

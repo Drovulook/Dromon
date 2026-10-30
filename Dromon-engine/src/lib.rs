@@ -1,4 +1,5 @@
 mod app;
+mod app_dirs;
 /// Fichiers de configuration RON (`dromon_engine::config::WorldGenConfig`…).
 pub mod config;
 pub mod profiling;
@@ -17,8 +18,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 pub use app::engine::renderer::render_resources::{RenderObject, Transform};
 pub use app::engine::renderer::world::World;
 pub use app::engine::terrain_generation::{
-    GridShape, MACRO_MAP_CACHE, MACRO_MAP_EXPORT_DIR, MacroGrid, MacroMap,
+    GridShape, MacroGrid, MacroMap, macro_map_cache, macro_map_export_dir,
 };
+pub use app_dirs::AppDirs;
 /// Banc de mesure du maillage, pour `examples/mesh_bench.rs` uniquement.
 #[doc(hidden)]
 pub use app::engine::terrain_generation::bench::mesh_bench;
@@ -26,15 +28,18 @@ pub use app::engine::timer::Timer;
 pub use scene::Scene;
 
 /// Point d'entrée du moteur : construit la fenêtre/contexte Vulkan et lance la
-/// boucle d'événements avec la `Scene` fournie par l'application.
-pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
+/// boucle d'événements avec la `Scene` fournie par l'application. `dirs` : en pratique
+/// [`app_dirs!`].
+pub fn run<S: Scene + 'static>(scene: S, dirs: AppDirs) -> Result<()> {
     let use_cli = std::env::args().any(|a| a == "--use-cli");
     let use_profiling = std::env::args().any(|a| a == "--use-profiling");
-    let (logger, requests) = Logger::new(use_cli);
+    let (logger, requests) = Logger::new(&app_name(), use_cli);
     let logger = Arc::new(logger);
     if use_cli {
         Logger::install_panic_hook(&logger);
     }
+
+    dirs.install().inspect_err(|e| logger.error(&format!("{e:#}")))?;
 
     // Arme la collecte de profiling selon le flag `--use-profiling`.
     profiling::set_enabled(use_profiling);
@@ -74,4 +79,13 @@ pub fn run<S: Scene + 'static>(scene: S) -> Result<()> {
     }
     loop_result?;
     Ok(())
+}
+
+/// Nom du binaire (`Physis`, `ai_sandbox`…) : nomme le socket de l'app, que les clients
+/// retrouvent par ce nom.
+fn app_name() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.file_stem()?.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "dromon".to_owned())
 }

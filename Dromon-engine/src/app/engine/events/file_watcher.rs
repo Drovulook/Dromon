@@ -2,9 +2,10 @@
 //! textures du terrain. Le thread de `notify` pousse les événements bruts dans un
 //! channel ; l'`Engine` le vide à chaque frame via [`FileWatcher::poll`].
 
+use crate::AppDirs;
 use crate::app::logger::Logger;
 use crate::config::{
-    CONFIG_DIR, TERRAIN_TEXTURE_DIR, TEXTURE_AO, TEXTURE_COLOR, TEXTURE_HEIGHT, TEXTURE_NORMAL,
+    TEXTURE_AO, TEXTURE_COLOR, TEXTURE_HEIGHT, TEXTURE_NORMAL, terrain_texture_dir,
 };
 use anyhow::{Context, Result};
 use notify::event::{AccessKind, AccessMode, ModifyKind, RenameMode};
@@ -25,9 +26,9 @@ const TERRAIN_TEXTURE_FILES: [&str; 4] =
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FileChange {
-    /// Fichier de [`CONFIG_DIR`], ex. `"render.ron"`.
+    /// Fichier du dossier `config/` de l'app, ex. `"render.ron"`.
     Config(String),
-    /// Sous-dossier de [`TERRAIN_TEXTURE_DIR`] dont au moins une carte a changé.
+    /// Sous-dossier de [`terrain_texture_dir`] dont au moins une carte a changé.
     TerrainTexture(String),
 }
 
@@ -35,8 +36,8 @@ pub struct FileWatcher {
     // Gardé vivant : le drop arrête la surveillance.
     _watcher: RecommendedWatcher,
     receiver: Receiver<notify::Result<Event>>,
-    // Canonicalisés : notify rapporte les chemins tels qu'on les a donnés, et
-    // `CONFIG_DIR` contient un `..` qui fausserait les comparaisons.
+    // Canonicalisés : notify rapporte les chemins tels qu'on les a donnés, et un `..`
+    // ou un lien symbolique fausserait les comparaisons.
     config_dir: PathBuf,
     texture_dir: PathBuf,
     /// Changements en attente, avec l'instant de leur dernier événement.
@@ -46,9 +47,12 @@ pub struct FileWatcher {
 
 impl FileWatcher {
     pub fn new(logger: Arc<Logger>) -> Result<Self> {
-        let config_dir = std::fs::canonicalize(CONFIG_DIR).context("dossier config/")?;
-        let texture_dir =
-            std::fs::canonicalize(TERRAIN_TEXTURE_DIR).context("dossier terrain_textures/")?;
+        let config_dir =
+            std::fs::canonicalize(AppDirs::get().config()).context("dossier config/")?;
+        // Créé au besoin : une app sans terrain texturé (model_sandbox) n'en a pas.
+        let texture_dir = terrain_texture_dir();
+        std::fs::create_dir_all(&texture_dir).context("dossier terrain_textures/")?;
+        let texture_dir = std::fs::canonicalize(texture_dir).context("dossier terrain_textures/")?;
 
         let (sender, receiver) = channel();
         let mut watcher = notify::recommended_watcher(sender)?;

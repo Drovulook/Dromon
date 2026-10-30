@@ -1,15 +1,14 @@
-//! Serveur du socket : le moteur écoute sur [`SOCKET_PATH`], diffuse les logs à tous
+//! Serveur du socket : le moteur écoute sur [`socket_path`], diffuse les logs à tous
 //! les clients et transmet leurs lignes (commandes) à l'`Engine`, avec de quoi répondre
 //! au seul client qui a demandé.
 
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-
-pub const SOCKET_PATH: &str = "/tmp/dromon.sock";
 
 /// Attente du CLI au démarrage. Le moteur ne log rien avant sa connexion : aucun
 /// message n'est perdu, même sur un crash brutal (segfault du driver).
@@ -57,42 +56,75 @@ impl Replier {
     }
 }
 
-/// Bloque jusqu'à la connexion du premier client ; erreur `TimedOut` sinon. Renvoie le
-/// worker, l'émetteur vers le socket et les lignes reçues des clients.
-pub fn spawn_worker() -> io::Result<(JoinHandle<()>, SyncSender<Outgoing>, Receiver<Incoming>)> {
+/// Socket du moteur pour l'app `app` : `$XDG_RUNTIME_DIR/dromon/<app>.sock` (tmpfs propre
+/// à l'utilisateur), sinon dans le dossier temporaire. ⚠ Même règle dans le CLI et
+/// `claude_mcp/dromon_client.py`.
+pub fn socket_path(app: &str) -> PathBuf {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("dromon").join(format!("{app}.sock"))
+}
+
+pub struct ServerHandles {
+    pub worker: JoinHandle<()>,
+    /// Logs et réponses vers le socket.
+    pub outgoing: SyncSender<Outgoing>,
+    /// Lignes reçues des clients.
+    pub incoming: Receiver<Incoming>,
+    /// Un client s'est connecté pendant l'attente du démarrage.
+    pub client_connected: bool,
+}
+
+/// Ouvre le socket `path`. `wait_first_client` : attend un client ([`FIRST_CLIENT_TIMEOUT`]
+/// au plus) avant de rendre la main. Erreur si une autre instance de l'app l'occupe.
+pub fn spawn_worker(path: PathBuf, wait_first_client: bool) -> io::Result<ServerHandles> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    // Ne pas voler le socket d'une instance vivante (elle ne recevrait plus rien).
+    if UnixStream::connect(&path).is_ok() {
+        return Err(io::Error::new(
+            ErrorKind::AddrInUse,
+            format!("{} occupé par une autre instance", path.display()),
+        ));
+    }
     // Fichier laissé par un moteur tué : `bind` échouerait.
-    let _ = std::fs::remove_file(SOCKET_PATH);
-    let listener = UnixListener::bind(SOCKET_PATH)?;
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path)?;
     // `accept` non bloquant : le worker alterne entre nouveaux clients et messages.
     listener.set_nonblocking(true)?;
 
     let (outgoing_tx, outgoing_rx) = sync_channel(OUTGOING_CAPACITY);
     let (incoming_tx, incoming_rx) = channel();
-    let deadline = Instant::now() + FIRST_CLIENT_TIMEOUT;
     let mut server = Server {
+        path,
         listener,
         clients: Vec::new(),
         next_id: 0,
         outgoing: outgoing_tx.clone(),
         incoming: incoming_tx,
     };
-    while server.clients.is_empty() {
-        if Instant::now() >= deadline {
-            let _ = std::fs::remove_file(SOCKET_PATH);
-            return Err(io::Error::new(
-                ErrorKind::TimedOut,
-                "aucun client sur le socket des logs",
-            ));
+    if wait_first_client {
+        let deadline = Instant::now() + FIRST_CLIENT_TIMEOUT;
+        while server.clients.is_empty() && Instant::now() < deadline {
+            server.accept_clients();
+            std::thread::sleep(POLL);
         }
-        server.accept_clients();
-        std::thread::sleep(POLL);
     }
+    let client_connected = !server.clients.is_empty();
 
     let worker = std::thread::spawn(move || server.run(outgoing_rx));
-    Ok((worker, outgoing_tx, incoming_rx))
+    Ok(ServerHandles {
+        worker,
+        outgoing: outgoing_tx,
+        incoming: incoming_rx,
+        client_connected,
+    })
 }
 
 struct Server {
+    path: PathBuf,
     listener: UnixListener,
     clients: Vec<(ClientId, UnixStream)>,
     next_id: ClientId,
@@ -111,7 +143,7 @@ impl Server {
                 Err(RecvTimeoutError::Timeout) => {}
             }
         }
-        let _ = std::fs::remove_file(SOCKET_PATH);
+        let _ = std::fs::remove_file(&self.path);
     }
 
     fn accept_clients(&mut self) {

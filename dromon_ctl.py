@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Envoie une commande au moteur (lancé avec --use-cli) et affiche la réponse.
+"""Envoie une commande au moteur et affiche la réponse.
 
-Usage : ./dromon_ctl.py <commande> [clé=valeur ...]
+Usage : ./dromon_ctl.py [--app <binaire>] <commande> [clé=valeur ...]
+  Sans --app : la seule app lancée (erreur s'il y en a plusieurs).
   ./dromon_ctl.py ping
+  ./dromon_ctl.py --app Physis camera.get
   ./dromon_ctl.py camera.get
   ./dromon_ctl.py camera.teleport pos=1200,-340,80 yaw_deg=90
   ./dromon_ctl.py time.pause            (time.resume, time.get)
@@ -13,14 +15,9 @@ Code de sortie : 0 succès, 1 erreur du moteur ou moteur injoignable, 2 mauvais 
 """
 
 import json
-import os
-import socket
 import sys
-import time
 
-SOCKET_PATH = "/tmp/dromon.sock"
-TIMEOUT_SECS = 5.0
-REPLY_TAG = "[REPLY] "
+from claude_mcp.dromon_client import engine_socket, request, running_apps
 
 
 def parse_value(text: str):
@@ -36,9 +33,9 @@ def parse_value(text: str):
     return text
 
 
-def parse_args(argv: list[str]) -> dict:
+def parse_args(argv: list[str]) -> tuple[str, dict]:
+    """`<commande> clé=valeur…` → (commande, args)."""
     command, *pairs = argv
-    request = {"id": os.getpid(), "cmd": command}
     args = {}
     for pair in pairs:
         key, sep, value = pair.partition("=")
@@ -46,28 +43,22 @@ def parse_args(argv: list[str]) -> dict:
             print(f"argument invalide (attendu clé=valeur) : {pair}", file=sys.stderr)
             sys.exit(2)
         args[key] = parse_value(value)
-    if args:
-        request["args"] = args
-    return request
+    return command, args
 
 
-def send(request: dict) -> dict:
-    """Envoie la requête et attend sa réponse. Le moteur diffuse aussi ses logs à
-    tous les clients : on ignore tout ce qui n'est pas notre `[REPLY]`."""
-    deadline = time.monotonic() + TIMEOUT_SECS
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(TIMEOUT_SECS)
-        sock.connect(SOCKET_PATH)
-        sock.sendall((json.dumps(request) + "\n").encode())
-        for line in sock.makefile("r", encoding="utf-8"):
-            if time.monotonic() > deadline:
-                break
-            if not line.startswith(REPLY_TAG):
-                continue
-            reply = json.loads(line[len(REPLY_TAG):])
-            if reply.get("id") == request["id"]:
-                return reply
-    raise TimeoutError(f"pas de réponse en {TIMEOUT_SECS} s")
+def pick_app(argv: list[str]) -> tuple[str, list[str]]:
+    """Extrait `--app <nom>` de `argv`, sinon prend la seule app lancée."""
+    if argv[:1] == ["--app"]:
+        if len(argv) < 2:
+            print("--app : nom du binaire attendu", file=sys.stderr)
+            sys.exit(2)
+        return argv[1], argv[2:]
+    apps = running_apps()
+    if len(apps) != 1:
+        found = ", ".join(apps) or "aucune"
+        print(f"préciser --app (apps lancées : {found})", file=sys.stderr)
+        sys.exit(2)
+    return apps[0], argv
 
 
 def main():
@@ -75,10 +66,15 @@ def main():
         print(__doc__, file=sys.stderr)
         sys.exit(2)
 
+    app, argv = pick_app(sys.argv[1:])
+    if not argv:
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
+    command, args = parse_args(argv)
     try:
-        reply = send(parse_args(sys.argv[1:]))
+        reply = request(app, command, args)
     except OSError as e:  # socket absent, connexion refusée, timeout
-        print(f"moteur injoignable ({SOCKET_PATH}) : {e}", file=sys.stderr)
+        print(f"moteur injoignable ({engine_socket(app)}) : {e}", file=sys.stderr)
         sys.exit(1)
 
     if not reply["ok"]:

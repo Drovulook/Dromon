@@ -5,28 +5,36 @@ use super::socket_server::{self, Incoming, Outgoing};
 
 pub struct Logger {
     sender: Option<SyncSender<Outgoing>>,
+    /// Sans CLI : logs aussi sur stderr. Avec, jamais : ils écriraient sur le TUI.
+    stderr: bool,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Logger {
-    /// `use_cli` : attend la connexion du CLI (bloquant, 2 s max), sinon logs sur stderr.
+    /// Ouvre le socket de l'app `app` (logs diffusés + commandes), avec ou sans CLI.
+    /// `use_cli` : attend sa connexion (bloquant, 2 s max).
     /// Renvoie aussi les lignes reçues des clients (commandes), `None` sans socket.
-    pub fn new(use_cli: bool) -> (Self, Option<Receiver<Incoming>>) {
-        let mut logger = Self {
-            sender: None,
-            worker: None,
-        };
-        if !use_cli {
-            return (logger, None);
-        }
-        match socket_server::spawn_worker() {
-            Ok((worker, sender, incoming)) => {
-                logger.sender = Some(sender);
-                logger.worker = Some(worker);
-                (logger, Some(incoming))
+    pub fn new(app: &str, use_cli: bool) -> (Self, Option<Receiver<Incoming>>) {
+        let path = socket_server::socket_path(app);
+        match socket_server::spawn_worker(path, use_cli) {
+            Ok(server) => {
+                if use_cli && !server.client_connected {
+                    eprintln!("[WARN] CLI absent au démarrage : premiers logs perdus");
+                }
+                let logger = Self {
+                    sender: Some(server.outgoing),
+                    stderr: !use_cli,
+                    worker: Some(server.worker),
+                };
+                (logger, Some(server.incoming))
             }
             Err(e) => {
-                eprintln!("[WARN] socket des logs indisponible ({e}) : logs sur stderr");
+                eprintln!("[WARN] socket indisponible ({e}) : logs sur stderr, pas de commandes");
+                let logger = Self {
+                    sender: None,
+                    stderr: true,
+                    worker: None,
+                };
                 (logger, None)
             }
         }
@@ -85,11 +93,11 @@ impl Logger {
     }
 
     fn send(&self, msg: String) {
-        match &self.sender {
-            Some(tx) => {
-                let _ = tx.try_send(Outgoing::Broadcast(msg));
-            }
-            None => eprintln!("{}", msg),
+        if self.stderr {
+            eprintln!("{msg}");
+        }
+        if let Some(tx) = &self.sender {
+            let _ = tx.try_send(Outgoing::Broadcast(msg));
         }
     }
 }
