@@ -1,13 +1,16 @@
+mod capture;
 mod commands;
 mod debug_messenger;
 mod events;
 mod hot_reload;
 pub mod renderer;
 mod rendering_context;
+mod shortcuts;
 pub mod terrain_generation;
 pub mod timer;
 
 use crate::Scene;
+use crate::app::engine::capture::CaptureDir;
 use crate::app::engine::events::input::{self, base_event_subscriber};
 use crate::app::engine::events::FileWatcher;
 use crate::app::engine::rendering_context::{
@@ -40,6 +43,8 @@ pub struct Engine {
     logger: Arc<Logger>,
     timer: Timer,
     config: Arc<EngineConfig>,
+    /// Captures de la commande `screenshot`, supprimées à l'arrêt.
+    capture_dir: CaptureDir,
 }
 
 impl Engine {
@@ -103,6 +108,7 @@ impl Engine {
             logger,
             timer: Timer::new(),
             config,
+            capture_dir: CaptureDir::new(&crate::app_name()),
         })
     }
 
@@ -141,6 +147,7 @@ impl Engine {
                         self.handle_commands(requests);
                     }
                     self.handle_file_changes();
+                    self.handle_shortcuts(window_id);
                     if let Some(renderer) = self.renderers.get_mut(&window_id) {
                         renderer.render(&self.timer, self.input_manager.input_state(), scene)?;
                     }

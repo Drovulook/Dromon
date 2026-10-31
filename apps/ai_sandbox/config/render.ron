@@ -1,0 +1,114 @@
+// Réglages du rendu, lus au démarrage du moteur (cf. `RenderConfig`).
+// Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
+(
+    // Synchronisation verticale : Fifo (vsync stricte, seul mode garanti), FifoRelaxed,
+    // Mailbox (vsync à faible latence), Immediate (sans vsync, pour mesurer les perfs).
+    // Repli sur Fifo si le mode n'est pas supporté.
+    present_mode: Mailbox,
+
+    // Affichage des meshes (objets et terrain) : Fill (triangles pleins), Edges (arêtes
+    // seules, fil de fer) ou Vertices (sommets seuls, 1 pixel). Lu au démarrage.
+    display_mode: Fill,
+
+    camera: (
+        // Pose de départ. Pour un terrain, rester au-dessus de world.max_height
+        // (world_macro.ron) : on démarre alors au-dessus des plus hauts sommets.
+        // Derrière la plage, dos à la mer, face aux montagnes (test overdraw : crêtes
+        // superposées en vue rasante).
+        // Ancienne pose (au large) : (13900, -5590, 550), yaw 115, pitch -5.
+        // Ancienne pose (survol de la chaîne) : (7000, 2500, 1650), yaw -40, pitch -20.
+        // Pose actuelle : au large de la pointe sud de la grande chaîne du nord-ouest,
+        // regard le long de son flanc ouest (humide, enneigé), éclairé l'après-midi.
+        // Ancienne pose (plage face au massif central) : (13300, -4300, 700), yaw 212, pitch 3.
+        start_position: (-11000.0, -3650.0, 620.0),
+        start_yaw_deg: 62.0,   // 0 = vers +X (est), 90 = vers +Y (nord)
+        start_pitch_deg: 3.0,  // 0 = horizontale, négatif = vers le bas
+        fov_deg: 45.0,      // champ de vision vertical au démarrage
+        min_fov_deg: 20.0,  // bornes du zoom (molette)
+        max_fov_deg: 110.0,
+        near: 0.1,
+        far: 10000.0,        // distance d'affichage : inutile au-delà de la portée de chargement
+        move_speed: 400.0,  // unités monde par seconde
+        rotation_sensitivity: 0.002, // radians par pixel de souris
+        zoom_speed: 0.05,   // radians de FOV par cran de molette
+        boost_factor_rot: 4.0,  // × tant que Alt est maintenue (rotation et zoom)
+        boost_factor_move: 3.8, // × tant que Alt est maintenue (déplacement)
+        slow_factor: 0.2,       // × tant que Shift est maintenue (tout ; se combine avec Alt)
+    ),
+
+    terrain: (
+        load_radius_chunks: 125,     // portée de chargement autour de la caméra (~20 000 chunks)
+        unload_margin_chunks: 2.0,  // un chunk ne sort qu'au-delà de portée + marge
+        lod: (
+            // Distances (unités monde) de passage au niveau suivant. Leur nombre fixe le
+            // LOD max (pas = 1 << lod voxels) : 4 rayons → LOD 0 à 4.
+            radii: [1000.0, 2000.0, 4000.0, 7000.0],
+            hysteresis: 0.08,   // bande morte relative autour de chaque rayon
+            height_weight: 1.0, // 1 = distance 3D œil → chunk, 0 = horizontale seule
+        ),
+        frame_budget_ms: 1.0,        // construction / destruction de buffers par frame
+        initial_load_budget_ms: 1.0, // idem pendant le chargement initial
+        mesh_cache_mb: 5000,         // cache des géométries (allers-retours de caméra)
+    ),
+
+    // Mer : quadtree CDLOD (cf. vault, Architecture/Rendu-Eau.md).
+    water: (
+        enabled: true,     // false : surface non dessinée (mesures) ; le fond reste teinté
+        leaf_size: 64.0,  // côté des nœuds les plus fins (grille 32 × 32 → cellules de 2)
+        range_factor: 8.0, // portée d'un niveau ÷ côté de ses nœuds
+        // Début du geomorphing dans la zone [portée/2, portée] d'un niveau (0 = dès le
+        // début). range_factor · morph_start_ratio doit atteindre 2√2 ≈ 2,83.
+        morph_start_ratio: 0.75,
+    ),
+
+    shadow: (
+        // Côté de la shadow map, en texels. Résolution des ombres :
+        // 2 · half_size / map_resolution unités monde par texel.
+        map_resolution: 4096,
+
+        // Anti-acné, en texels de shadow map. Taches d'ombre sur les surfaces éclairées
+        // (« acné », surtout soleil bas) → augmenter ; ombres décollées des objets →
+        // diminuer. Le normal offset doit couvrir l'étalement du PCF (±1,5 texel).
+        normal_offset_texels: 2.5, // décalage le long de la normale, ∝ sin(angle N/L)
+        depth_bias_texels: 1.0,    // biais de profondeur constant
+
+        // Petite scène d'objets fixes : boîte centrée sur l'origine.
+        static_scene: (
+            half_size: 15.0,
+            near: 0.1,
+            far: 60.0,
+            eye_distance: 30.0,
+            follow_camera: false,
+            focus_distance: 0.0,
+        ),
+
+        // Terrain survolé (appliquée par `generate_terrain`). Boîte de 4000 unités
+        // (~2 u/texel) : couvre une vallée devant la caméra, au prix d'ombres plus
+        // floues de près. L'œil recule de 3000 pour passer au-dessus des sommets
+        // (relief ≤ ~1300, lumière à ~30° de la verticale) ; `far` couvre tout le
+        // relief, inclinaison de la boîte comprise (4000 · tan 30° ≈ 2300 de plus).
+        terrain: (
+            half_size: 2000.0,
+            near: 1.0,
+            far: 8000.0,
+            eye_distance: 3000.0,
+            follow_camera: true,
+            focus_distance: 1500.0, // centre de la boîte, devant la caméra
+        ),
+    ),
+
+    // Tone mapping (Khronos PBR Neutral, lib/tonemap.slang) : identité sous ~0,76, puis
+    // compression des hautes lumières en gardant la teinte (au lieu de couper chaque
+    // canal à 1, qui blanchit les couleurs claires au soleil).
+    tonemap: (
+        enabled: true,  // false : coupure à 1 comme avant (comparaison)
+        exposure: 1.0,  // multiplicateur avant la courbe ; > 1 éclaircit
+    ),
+
+    // Filtrage des textures (objets, terrain).
+    textures: (
+        // Anisotrope : sondes max le long d'un sol vu en rasant. Max = limite du GPU
+        // (16 en général) ; Fixed(a) = valeur fixe, 1 = désactivé.
+        anisotropy: Fixed(8),
+    ),
+)

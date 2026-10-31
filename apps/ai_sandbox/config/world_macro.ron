@@ -1,0 +1,139 @@
+// Carte macro du monde, précalculée au démarrage (cf. `WorldMacroConfig`).
+// Un champ absent prend sa valeur par défaut ; un champ inconnu est une erreur.
+// Lue aussi par le détail (`world_detail.ron`), jamais l'inverse.
+(
+    seed: 2001,
+
+    world: (
+        // Disque de 600 chunks de rayon (38 400 voxels, ~1,1 M chunks).
+        radius_chunks: 600,
+        // Plafond du monde, en voxels.
+        max_height: 1800,
+        // Niveau de la mer, en voxels. Budget vertical : abysses ~30 (plancher du
+        // monde à 0), sommets ≈ sea_level + 30 + mountain.amplitude · 0,8 (~1 390).
+        sea_level: 400.0,
+    ),
+
+    // Côté d'une cellule de la carte macro, en voxels. 32 → grille 2400 × 2400 pour
+    // ce rayon. Ne porte que les grandes formes : le détail fin est en `world_detail`.
+    cell_size: 32,
+
+    // Continents : c = base + detail + land_bias − bord ; seul le signe compte
+    // (> 0 terre). La distance à la côte est ensuite mesurée sur la grille.
+    continents: (
+        // Forme : un seul bruit, longueur d'onde (1/f ~20 000 voxels) ≈ taille d'un
+        // continent. Valeur dans ~[-amplitude, amplitude].
+        base: (
+            frequency: 0.000025, // grande masse continentale unique (ancien : 0.00004)
+            amplitude: 0.45,
+        ),
+        // Découpe des côtes : somme d'octaves indépendante de la base. Le détail
+        // déplace la côte d'environ amplitude / pente de la base : faible devant la
+        // base → continents massifs ; fort → bras, presqu'îles, archipels.
+        detail: (
+            frequency: 0.00011, // première octave (λ ~9 500 voxels)
+            octaves: 5,          // côtes plus découpées (ancien : 4)
+            lacunarity: 2.1,     // non entière, sinon les octaves s'alignent
+            gain: 0.6,           // plus grand = plus de petits détails
+            amplitude: 0.42,
+        ),
+        land_bias: 0.12,     // > 0 plus de terre, < 0 plus de mer (ancien : 0.03)
+
+        border_start: 0.9,  // fraction du rayon où l'océan de bord commence
+        // > base.amplitude + detail.amplitude + land_bias → océan garanti au bord
+        border_strength: 1.2,
+        // Ondulation du début de l'océan de bord (fraction du rayon) : il commence
+        // entre border_start − border_noise et border_start. 0.0 = cercle.
+        border_noise: 0.3,
+        border_noise_frequency: 0.0001, // ~24 caps et baies sur le pourtour (2πR·f)
+        
+        // Mer non reliée à l'océan : comblée si plus petite qu'un disque de ce rayon
+        // (voxels). 0.0 = toutes gardées ; très grand = aucune.
+        inland_sea_min_radius: 3000.0,
+        // Île « petite » si plus petite qu'un disque de ce rayon (voxels) ; seule une
+        // fraction small_island_keep est gardée (tirage fixé par la graine).
+        island_min_radius: 1000.0,
+        small_island_keep: 0.6,
+    ),
+
+    // Altitude de base selon la distance à la côte d (voxels, > 0 terre) : points
+    // (d, altitude relative à sea_level) reliés par des segments, constant au-delà.
+    coast: (
+        points: [
+            (-12000.0, -370.0), // plaine abyssale (z = 30 pour sea_level 400)
+            (-3000.0, -300.0),  // pied du talus continental (pente ~5,5°)
+            (-700.0, -80.0),    // rebord du plateau continental (pente ~6,5°)
+            (0.0, 0.0),         // côte
+            (3000.0, 30.0),     // plaine côtière, puis plat
+        ],
+    ),
+
+    // Chaînes de montagnes : où et à quelle hauteur. La forme du relief est côté
+    // détail (mélange plaine / montagne par le masque w).
+    mountains: (
+        frequency: 0.000035,      // axes = crêtes d'un bruit ridged (λ ~28 000) ; ancien 0.00003
+        axis_threshold: 0.96,      // plus haut = chaînes plus fines et plus rares (ancien 0.91)
+        warp_frequency: 0.00005,  // plie les chaînes
+        warp_amplitude: 7000.0,   // 0.0 = chaînes non pliées (ancien 4500)
+        min_coast_distance: 700.0, // pas d'axe plus près de la côte
+        // w : 1 sur l'axe → 0 à cette distance. Pente ajoutée ≈ 1,5 · amplitude /
+        // largeur (700 / 3500 → ~17°) ; trop étroit = mur.
+        foothill_width: 2500.0, // ~28° ; chaînes étroites type Monts Brumeux (ancien 3500)
+        // w nul à la côte, plein à cette distance : les chaînes s'effilent vers la
+        // mer au lieu de finir en falaise, et le trait de côte ne bouge pas.
+        coast_fade: 2500.0, // montagnes plus proches de la mer (côtes spectaculaires)
+        amplitude: 1050.0,        // hauteur des chaînes au-dessus du profil côtier (ancien 900 ; suit world_detail)
+    ),
+
+    // Climat, sur une grille plus grossière (il varie à l'échelle du km).
+    climate: (
+        cell_size: 256,           // multiple de cell_size ; 256 → grille 300 × 300
+        // Température au niveau de la mer aux bords sud et nord (°C) : gradient
+        // imposé, la vraie latitude ne varierait pas sur un si petit monde.
+        south_temperature: 28.0,
+        north_temperature: -2.0,
+        // °C perdus par voxel au-dessus de la mer. Réglé pour le jeu : 0.025 × 700
+        // → −17,5 °C sur les crêtes (le réel, 0.0065, ne ferait jamais neiger).
+        lapse_rate: 0.025,
+        noise_amplitude: 2.0,     // variations locales (°C)
+        noise_frequency: 0.00005,
+
+        // Vent dominant selon la latitude (0 = bord sud, 1 = bord nord) :
+        // (latitude, cap d'où il VIENT, vitesse). Cap : 0 nord, 90 est, 180 sud,
+        // 270 ouest. Les vecteurs sont interpolés : entre deux régimes opposés, ils
+        // s'annulent en une bande calme et sèche (latitudes subtropicales).
+        wind_bands: [
+            (0.0, 60.0, 1.0),   // alizés de nord-est (sud du monde, chaud)
+            (0.35, 60.0, 0.9),
+            (0.40, 60.0, 0.2),
+            (0.50, 240.0, 0.2),
+            (0.55, 240.0, 0.9), // vents de sud-ouest (nord du monde, tempéré)
+            (1.0, 240.0, 1.0),
+        ],
+        wind_deviation_deg: 25.0,    // rotation max par le bruit
+        wind_speed_variation: 0.3,   // ±30 % de vitesse
+        // Basse fréquence (λ = 1/f ~20 000 voxels) : un vent qui tourne vite strie
+        // l'humidité.
+        wind_noise_frequency: 0.00005,
+
+        // Courants marins : le vent, dévié pour longer les côtes. L'eau garde la
+        // température de son point de départ sur current_reach voxels de trajet
+        // (0.0 = pas de courants, SST = équilibre de la latitude).
+        current_reach: 36000.0,
+        current_coast_width: 3000.0, // les courants longent la côte en deçà
+        // Là où le vent pousse l'eau vers le large, de l'eau froide des profondeurs
+        // remonte (°C retirés à vent nominal, contre la côte) → côte fraîche et sèche.
+        // 0.0 = désactivée.
+        upwelling_strength: 3.0,
+
+        // Humidité : la vapeur (1 = air saturé à 20 °C) se charge sur la mer, voyage
+        // avec le vent et pleut sur terre. Carte finale : 0 = désert, 1 = côte humide.
+        evaporation: 0.3,       // recharge sur mer, fraction de l'écart à saturation (ancien 0.2)
+        // Pluie de base sur terre, par cellule parcourue : la vapeur est divisée par
+        // e tous les ~cell_size / rain_base voxels (256 / 0.005 → 51 000).
+        // Ancien 0.008 : trop sec au cœur du grand continent.
+        rain_base: 0.005,
+        rain_orographic: 0.1,   // fraction de vapeur tombée par 100 voxels de montée
+        moisture_diffusion: 0.15, // humidité côtière même sans vent (bande calme)
+    ),
+)

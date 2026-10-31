@@ -30,6 +30,7 @@
         zoom_speed: 0.05,   // radians de FOV par cran de molette
         boost_factor_rot: 4.0,  // × tant que Alt est maintenue (rotation et zoom)
         boost_factor_move: 3.8, // × tant que Alt est maintenue (déplacement)
+        slow_factor: 0.2,       // × tant que Shift est maintenue (tout ; se combine avec Alt)
     ),
 
     terrain: (

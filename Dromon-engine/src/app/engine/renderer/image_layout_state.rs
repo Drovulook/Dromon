@@ -33,6 +33,13 @@ impl ImageLayoutState {
         stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         queue_family_index: vk::QUEUE_FAMILY_IGNORED,
     };
+    /// Lue par une copie vers un buffer (capture d'écran).
+    pub const COPY_SOURCE_COLOR_IMAGE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::TRANSFER_READ,
+        layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        stage_mask: vk::PipelineStageFlags2::COPY,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
     pub const PRESENT_COLOR_IMAGE_STATE: Self = Self {
         access_mask: vk::AccessFlags2::empty(),
         layout: vk::ImageLayout::PRESENT_SRC_KHR,

@@ -313,6 +313,9 @@ pub struct CameraParams {
     /// déplacement).
     pub boost_factor_rot: f32,
     pub boost_factor_move: f32,
+    /// Multiplicateur tant que Shift est maintenue (déplacement, rotation et zoom), pour
+    /// un cadrage précis. Se combine avec Alt.
+    pub slow_factor: f32,
 }
 
 impl Default for CameraParams {
@@ -331,6 +334,7 @@ impl Default for CameraParams {
             zoom_speed: 0.05,
             boost_factor_rot: 4.0,
             boost_factor_move: 3.8,
+            slow_factor: 0.2,
         }
     }
 }

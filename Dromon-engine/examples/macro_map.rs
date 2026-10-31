@@ -1,7 +1,7 @@
 //! Calcule la carte macro et l'exporte en PNG, sans lancer le moteur.
 //!
 //! `cargo run --release -p Dromon-engine --example macro_map`
-//! Monde de Physis. Sortie : PNG dans `apps/Physis/res/world/maps/`, cache
+//! Monde de Physis. Sortie : PNG dans `apps/Physis/work/macro_maps/`, cache
 //! `apps/Physis/res/world/macro_map.bin` (relu par le jeu). Le jeu réécrit aussi les
 //! PNG chaque fois qu'il recalcule la carte.
 

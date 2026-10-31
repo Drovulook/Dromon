@@ -14,6 +14,7 @@ static APP_DIRS: OnceLock<AppDirs> = OnceLock::new();
 pub struct AppDirs {
     config: PathBuf,
     res: PathBuf,
+    work: PathBuf,
 }
 
 /// Dossiers du crate qui **invoque** la macro : `env!` est développé à la compilation de
@@ -26,12 +27,13 @@ macro_rules! app_dirs {
 }
 
 impl AppDirs {
-    /// `root` : racine de l'app, qui contient `config/` et `res/`.
+    /// `root` : racine de l'app, qui contient `config/`, `res/` et `work/`.
     pub fn new(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref();
         Self {
             config: root.join("config"),
             res: root.join("res"),
+            work: root.join("work"),
         }
     }
 
@@ -39,8 +41,15 @@ impl AppDirs {
         &self.config
     }
 
+    /// Ce que le moteur lit en jeu (textures, modèles, caches).
     pub fn res(&self) -> &Path {
         &self.res
+    }
+
+    /// Sorties intermédiaires pour l'humain ou l'agent (exports PNG…) : jetables, jamais
+    /// lues par le moteur.
+    pub fn work(&self) -> &Path {
+        &self.work
     }
 
     /// Fixe les dossiers du processus, une seule fois.

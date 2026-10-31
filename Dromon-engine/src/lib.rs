@@ -82,8 +82,8 @@ pub fn run<S: Scene + 'static>(scene: S, dirs: AppDirs) -> Result<()> {
 }
 
 /// Nom du binaire (`Physis`, `ai_sandbox`…) : nomme le socket de l'app, que les clients
-/// retrouvent par ce nom.
-fn app_name() -> String {
+/// retrouvent par ce nom, et son dossier de captures.
+pub(crate) fn app_name() -> String {
     std::env::current_exe()
         .ok()
         .and_then(|exe| Some(exe.file_stem()?.to_string_lossy().into_owned()))

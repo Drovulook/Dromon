@@ -21,6 +21,9 @@ pub struct Swapchain {
     pub msaa_color_image_view: vk::ImageView,
     /// Mode demandé par `render.ron`, ou `FIFO` si la surface ne le supporte pas.
     present_mode: vk::PresentModeKHR,
+    /// Les images acceptent d'être source de copie (`TRANSFER_SRC`) : condition des
+    /// captures d'écran. Garanti nulle part, mais quasi universel.
+    pub capture_supported: bool,
 
     // depth image
     pub depth_format: vk::Format,
@@ -74,6 +77,11 @@ impl Swapchain {
             },
         );
 
+        let capture_supported = surface
+            .capabilities
+            .supported_usage_flags
+            .contains(vk::ImageUsageFlags::TRANSFER_SRC);
+
         let msaa_samples = context.get_max_usable_sample_count();
         //.min(vk::SampleCountFlags::TYPE_4); // réduction de x8 à x4
         logger.info(&format!("MSAA count: {:?}", msaa_samples));
@@ -89,6 +97,7 @@ impl Swapchain {
             msaa_color_image_memory: Default::default(),
             msaa_color_image_view: Default::default(),
             present_mode,
+            capture_supported,
             depth_format,
             depth_image: Default::default(),
             depth_image_memory: Default::default(),
@@ -115,6 +124,11 @@ impl Swapchain {
             return Ok(());
         }
 
+        let mut usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
+        if self.capture_supported {
+            usage |= vk::ImageUsageFlags::TRANSFER_SRC;
+        }
+
         unsafe {
             self.context.device.device_wait_idle()?;
 
@@ -126,7 +140,7 @@ impl Swapchain {
                     .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
                     .image_extent(self.extent)
                     .image_array_layers(1)
-                    .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                    .image_usage(usage)
                     .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
                     .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)

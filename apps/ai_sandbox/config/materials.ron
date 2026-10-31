@@ -1,0 +1,70 @@
+// Table des matériaux du terrain (cf. `MaterialsConfig`).
+// L'ID d'un matériau = sa position + 1 (0 = air, réservé) ; le code les désigne par
+// leur `name` : l'ordre est libre. Une propriété absente prend sa valeur par défaut.
+//
+// albedo : couleur de base LINÉAIRE (pas sRGB), composantes dans [0, 1]. Matériau
+//   texturé : c'est la couleur d'ensemble, la texture n'apporte que le détail
+//   (texel / moyenne de la texture × albedo) ; albedo = moyenne → photo inchangée.
+// humidity_tint : Some((dry_albedo, dry, wet)) — couleur fondue de dry_albedo (pluie
+//   ≤ dry) vers albedo (pluie ≥ wet). Pluie normalisée sur les terres : 18 % sous
+//   0,05, médiane ~0,32, 1 = côte humide de référence. Le sable des déserts apparaît
+//   sous ~0,10 (règles, `DESERT_EDGE`) : l'herbe doit être sèche avant.
+// texture : Some("dossier") — sous-dossier de res/textures/terrain_textures/ (color.png,
+//   height.png…), partageable entre matériaux. Absent : couleur unie.
+// texture_size : côté d'une répétition de la texture, en voxels (défaut 10).
+(
+    materials: [
+        // Albédo : milieu entre la moyenne de la texture (0.12, 0.11, 0.10) et
+        // l'ancienne couleur unie (0.40, 0.38, 0.35).
+        // Ajusté vers un gris-brun plus sombre (ancien 0.26, 0.24, 0.22) : moins de
+        // contraste avec la terre voisine, falaises moins « aplat gris ».
+        (name: "rock",  albedo: (0.21, 0.18, 0.15), texture: Some("rock"), texture_size: 20.0),
+        // Roche des zones arides (pluie ≲ 0,25), à la place de `rock` : ocre-rouge.
+        (
+            name: "sandstone",
+            // Milieu entre la moyenne de la texture (0.11, 0.08, 0.07) et l'ancienne
+            // couleur unie (0.52, 0.34, 0.20).
+            albedo: (0.32, 0.21, 0.13),
+            texture: Some("sandstone"),
+            texture_size: 20.0,
+        ),
+        (
+            name: "dirt",
+            texture: Some("dirt"),
+            texture_size: 10.0,
+            albedo: (0.21, 0.15, 0.09),     // humide : brun sombre (= moyenne de la texture)
+            humidity_tint: Some((
+                dry_albedo: (0.34, 0.24, 0.14), // sec : ocre clair, poussiéreux
+                dry: 0.10,
+                wet: 0.50,
+            )),
+        ),
+        (
+            name: "grass",
+            texture: Some("grass"),
+            texture_size: 10.0,
+            albedo: (0.14, 0.24, 0.035),    // humide : vert dense (= moyenne de la texture)
+            humidity_tint: Some((
+                dry_albedo: (0.34, 0.28, 0.06), // sec : vert-jaune sec (≠ terre, plus brune)
+                dry: 0.10, // ancien 0.20 / 0.70 : prairies tempérées jaunies
+                wet: 0.40,
+            )),
+        ),
+        (name: "snow",  albedo: (0.95, 0.96, 0.98), texture: Some("snow"), texture_size: 10.0),
+        // Albédo réel du sable : 0,3–0,45. Au-delà, sans tone mapping, le soleil sature
+        // les canaux et le sable vire au blanc (confondu avec la neige).
+        (
+            name: "sand",
+            texture: Some("sand"),
+            texture_size: 10.0,
+            albedo: (0.62, 0.55, 0.40),     // humide (plages) : beige clair
+            humidity_tint: Some((
+                dry_albedo: (0.58, 0.47, 0.30), // sec (désert) : beige doré
+                dry: 0.05,
+                wet: 0.30,
+            )),
+        ),
+        // Vase des fonds marins, au-delà du plateau continental.
+        (name: "mud",   albedo: (0.26, 0.25, 0.22), texture: Some("mud"), texture_size: 10.0),
+    ],
+)

@@ -56,14 +56,19 @@ impl Replier {
     }
 }
 
-/// Socket du moteur pour l'app `app` : `$XDG_RUNTIME_DIR/dromon/<app>.sock` (tmpfs propre
-/// à l'utilisateur), sinon dans le dossier temporaire. ⚠ Même règle dans le CLI et
-/// `claude_mcp/dromon_client.py`.
-pub fn socket_path(app: &str) -> PathBuf {
+/// Fichiers éphémères du moteur (sockets, captures) : `$XDG_RUNTIME_DIR/dromon/` (tmpfs
+/// propre à l'utilisateur), sinon dans le dossier temporaire. ⚠ Même règle dans le CLI
+/// et `claude_mcp/dromon_client.py`.
+pub fn runtime_dir() -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    base.join("dromon").join(format!("{app}.sock"))
+    base.join("dromon")
+}
+
+/// Socket du moteur pour l'app `app`.
+pub fn socket_path(app: &str) -> PathBuf {
+    runtime_dir().join(format!("{app}.sock"))
 }
 
 pub struct ServerHandles {

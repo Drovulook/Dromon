@@ -9,6 +9,7 @@ pub(crate) mod render_resources;
 mod render_systems;
 mod renderer_initialize;
 mod renderer_record_pass;
+pub(crate) mod screenshot;
 mod shadow_map;
 mod swapchain;
 mod uniform_buffer;
@@ -20,6 +21,7 @@ use crate::app::engine::renderer::descriptors::DescriptorHandler;
 use crate::app::engine::renderer::render_systems::{
     SkyRenderSystem, TerrainRenderSystem, WaterRenderSystem,
 };
+use crate::app::engine::renderer::screenshot::{ScreenshotRequest, Screenshots};
 use crate::app::engine::renderer::shadow_map::ShadowMap;
 use crate::app::engine::renderer::uniform_buffer::UniformBuffer;
 use crate::app::engine::renderer::world::World;
@@ -58,6 +60,7 @@ pub struct Renderer {
     context: Arc<RenderingContext>,
     descriptor_handler: Arc<DescriptorHandler>,
     gpu_profiler: GpuProfiler,
+    screenshots: Screenshots,
     world: World,
 }
 
@@ -218,6 +221,8 @@ impl Renderer {
                 in_flight_frames_count,
             )?;
 
+            let screenshots = Screenshots::new(context.clone(), in_flight_frames_count);
+
             Ok(Self {
                 in_flight_frames_count,
                 frame_index: 0,
@@ -235,6 +240,7 @@ impl Renderer {
                 context,
                 descriptor_handler,
                 gpu_profiler,
+                screenshots,
                 world,
             })
         }
@@ -242,6 +248,17 @@ impl Renderer {
 
     pub fn resize(&mut self) {
         self.swapchain.is_dirty = true;
+    }
+
+    /// Capture de l'image d'une prochaine frame (cf. [`Screenshots`]).
+    pub(crate) fn request_screenshot(&mut self, request: ScreenshotRequest) {
+        if self.swapchain.capture_supported {
+            self.screenshots.request(request);
+        } else {
+            (request.done)(Err(anyhow::anyhow!(
+                "capture impossible : la surface refuse TRANSFER_SRC"
+            )));
+        }
     }
 
     pub(crate) fn world_mut(&mut self) -> &mut World {
@@ -376,6 +393,8 @@ impl Renderer {
             // Fence passé → les timestamps GPU de la dernière soumission de ce slot
             // sont prêts. On les lit avant de réutiliser le slot.
             self.gpu_profiler.resolve(self.frame_index);
+            // Même raison : la copie de capture de ce slot est terminée.
+            self.screenshots.collect(self.frame_index);
 
             if self.swapchain.is_dirty {
                 self.swapchain.update_size()?;
@@ -457,6 +476,15 @@ impl Renderer {
                         .scope(frame.command_buffer, self.frame_index, "render pass");
                 self.record_render_pass(frame, image_index);
             }
+
+            // Image → présentable, copiée au passage si une capture attend.
+            self.screenshots.record(
+                frame.command_buffer,
+                self.frame_index,
+                self.swapchain.color_images[image_index as usize],
+                self.swapchain.extent,
+                self.swapchain.color_format,
+            );
 
             drop(gpu_frame);
             self.context

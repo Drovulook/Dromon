@@ -101,6 +101,10 @@ dependencies = [
 [[package]]
 name = "ai_sandbox"
 version = "0.1.0"
+dependencies = [
+ "Dromon-engine",
+ "anyhow",
+]
 
 [[package]]
 name = "allocator-api2"

@@ -158,12 +158,19 @@ impl Camera {
         let dt = timer.delta_secs();
         let p = &self.params;
 
-        // Alt maintenue → on amplifie déplacement, rotation et zoom.
-        let boost = if input.is_held(KeyCode::AltLeft) {
-            p.boost_factor_rot
+        // Alt maintenue → on amplifie déplacement, rotation et zoom ; Shift → on les
+        // ralentit (cadrage précis). Les deux se combinent.
+        let slow = if input.is_held(KeyCode::ShiftLeft) {
+            p.slow_factor
         } else {
             1.0
         };
+        let boost = slow
+            * if input.is_held(KeyCode::AltLeft) {
+                p.boost_factor_rot
+            } else {
+                1.0
+            };
 
         // Tant que R est maintenue, la souris ne fait plus pivoter la caméra.
         if !input.is_held(KeyCode::KeyR) {
@@ -201,11 +208,12 @@ impl Camera {
         }
 
         // normalize() évite d'aller plus vite en diagonale (front + right).
-        let boost = if input.is_held(KeyCode::AltLeft) {
-            p.boost_factor_move
-        } else {
-            1.0
-        };
+        let boost = slow
+            * if input.is_held(KeyCode::AltLeft) {
+                p.boost_factor_move
+            } else {
+                1.0
+            };
         if direction != Vec3::ZERO {
             self.position = self.clamp(self.position + direction.normalize() * p.move_speed * boost * dt);
         }

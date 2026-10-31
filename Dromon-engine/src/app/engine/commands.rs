@@ -2,12 +2,14 @@
 //! dans la frame. Protocole : une ligne JSON par requête,
 //! `{"id": 1, "cmd": "camera.teleport", "args": {…}}` ; réponse au seul client,
 //! `[REPLY] {"id": 1, "ok": true, "result": …}` ou `{"id": 1, "ok": false, "error": "…"}`.
+//! Une commande qui ne se termine pas dans la frame garde son [`Responder`] pour répondre
+//! plus tard.
 
 use crate::app::engine::Engine;
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::world::World;
 use crate::app::engine::renderer::world::game_clock::GameClock;
-use crate::app::socket_server::Incoming;
+use crate::app::socket_server::{Incoming, Replier};
 use glam::Vec3;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -46,24 +48,73 @@ enum Command {
     /// Heure dans [0, 24), même jour.
     #[serde(rename = "time.set")]
     TimeSet { hour: f64 },
+    /// Capture de la fenêtre principale (PNG temporaire). Différée : quelques frames.
+    #[serde(rename = "screenshot")]
+    Screenshot,
+}
+
+/// Réponse due à une requête, envoyée **une seule fois** : `send` consomme le
+/// `Responder`. Détruit sans avoir répondu (travail abandonné, moteur arrêté…) → le
+/// client reçoit une erreur au lieu d'attendre son délai.
+pub(crate) struct Responder {
+    id: Value,
+    /// `Option` : `Drop` ne reçoit que `&mut self` et doit pouvoir le retirer (`take`).
+    reply: Option<Replier>,
+}
+
+impl Responder {
+    fn new(id: Value, reply: Replier) -> Self {
+        Self {
+            id,
+            reply: Some(reply),
+        }
+    }
+
+    pub(crate) fn send(mut self, result: Result<Value, String>) {
+        self.respond(result);
+    }
+
+    fn respond(&mut self, result: Result<Value, String>) {
+        let Some(reply) = self.reply.take() else {
+            return;
+        };
+        let response = match result {
+            Ok(result) => json!({ "id": self.id, "ok": true, "result": result }),
+            Err(error) => json!({ "id": self.id, "ok": false, "error": error }),
+        };
+        reply.send(format!("[REPLY] {response}"));
+    }
+}
+
+impl Drop for Responder {
+    fn drop(&mut self) {
+        self.respond(Err("commande abandonnée sans réponse".to_owned()));
+    }
 }
 
 impl Engine {
     /// Traite les commandes reçues depuis la frame précédente. Non bloquant.
     pub(super) fn handle_commands(&mut self, requests: &Receiver<Incoming>) {
         while let Ok(Incoming { line, reply }) = requests.try_recv() {
-            let response = match parse_request(&line) {
-                Ok(Request { id, command }) => match self.execute(command) {
-                    Ok(result) => json!({ "id": id, "ok": true, "result": result }),
-                    Err(error) => json!({ "id": id, "ok": false, "error": error }),
-                },
-                Err((id, error)) => json!({ "id": id, "ok": false, "error": error }),
-            };
-            reply.send(format!("[REPLY] {response}"));
+            match parse_request(&line) {
+                Ok(Request { id, command }) => {
+                    self.execute(command, Responder::new(json!(id), reply));
+                }
+                Err((id, error)) => Responder::new(id, reply).send(Err(error)),
+            }
         }
     }
 
-    fn execute(&mut self, command: Command) -> Result<Value, String> {
+    fn execute(&mut self, command: Command, responder: Responder) {
+        match command {
+            // Différées : le responder part avec la demande, la réponse viendra plus tard.
+            Command::Screenshot => self.command_screenshot(responder),
+            command => responder.send(self.execute_now(command)),
+        }
+    }
+
+    /// Commandes terminées dans la frame.
+    fn execute_now(&mut self, command: Command) -> Result<Value, String> {
         match command {
             Command::Ping => Ok(json!("pong")),
             Command::CameraGet => Ok(camera_pose(&self.world()?.camera)),
@@ -96,6 +147,7 @@ impl Engine {
                 clock.set_hour(hour)?;
                 Ok(clock_state(clock))
             }
+            Command::Screenshot => unreachable!("commande différée, cf. `execute`"),
         }
     }
 

@@ -21,7 +21,7 @@ pub fn macro_map_cache() -> PathBuf {
 
 /// Dossier des PNG de contrôle (cf. [`MacroMap::export_pngs`]) : sorties de debug.
 pub fn macro_map_export_dir() -> PathBuf {
-    AppDirs::get().res().join("world/maps")
+    AppDirs::get().work().join("macro_maps")
 }
 
 const MAGIC: &[u8; 8] = b"DRMACRO\0";

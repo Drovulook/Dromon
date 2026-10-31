@@ -9,6 +9,7 @@ Usage : ./dromon_ctl.py [--app <binaire>] <commande> [clé=valeur ...]
   ./dromon_ctl.py camera.teleport pos=1200,-340,80 yaw_deg=90
   ./dromon_ctl.py time.pause            (time.resume, time.get)
   ./dromon_ctl.py time.set hour=18.5
+  ./dromon_ctl.py screenshot            (PNG temporaire, supprimé à l'arrêt du moteur)
 
 Valeur : JSON si possible, sinon nombres séparés par des virgules (→ liste), sinon texte.
 Code de sortie : 0 succès, 1 erreur du moteur ou moteur injoignable, 2 mauvais usage.

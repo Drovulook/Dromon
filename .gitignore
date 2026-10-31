@@ -1,6 +1,8 @@
 /target
 /.claude
 CLAUDE.md
+# Instructions de l'agent du bac à sable : partie de sa définition, versionnée.
+!/apps/ai_sandbox/CLAUDE.md
 links.md
 /Dromon-Claude-Docs
 __pycache__/
@@ -10,5 +12,7 @@ __pycache__/
 /Dromon-engine/res/textures/
 /apps/*/res/models/
 /apps/*/res/textures/
-# Cache de la carte macro (~100 Mo), recalculé en une seconde, et ses PNG de contrôle.
+# Cache de la carte macro (~100 Mo), recalculé en une seconde.
 /apps/*/res/world/
+# Sorties intermédiaires (exports PNG…) : jetables.
+/apps/*/work/

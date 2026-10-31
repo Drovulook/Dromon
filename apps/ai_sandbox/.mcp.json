@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dromon": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "cd \"$(git rev-parse --show-toplevel)\" && exec uv run --script claude_mcp/dromon_mcp.py --app ai_sandbox"
+      ]
+    }
+  }
+}

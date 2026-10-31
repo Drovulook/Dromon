@@ -30,6 +30,11 @@ with png export,
 - atmospheric fog,
 - sun with day/night cycle, sky gradient and stars.
 
+### AI agent sandbox
+
+- `apps/ai_sandbox`: a Claude Code agent drives the running engine through an MCP bridge: camera, time of day, logs and screenshots.
+- It edits the app's config and asset sources, which are hot-reloaded, and checks the result in game.
+
 ### CLI
 
 - Companion terminal UI (ratatui) connecting to the engine over a Unix socket.
@@ -37,6 +42,7 @@ with png export,
 - Real-time engine logs
 - Init call tree, per-frame CPU breakdown, and GPU timestamps.
 - Collapsible trees with proportional duration bars.
+
 
 ### Procedural terrain and world map
 

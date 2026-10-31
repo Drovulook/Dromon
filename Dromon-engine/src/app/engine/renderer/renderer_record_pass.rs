@@ -193,15 +193,6 @@ impl Renderer {
 
             self.context.device.cmd_end_rendering(frame.command_buffer);
         }
-
-        self.context.transition_image_layout(
-            frame.command_buffer,
-            &[(
-                self.swapchain.color_images[image_index as usize],
-                ImageLayoutState::RENDERABLE_COLOR_IMAGE_STATE,
-                ImageLayoutState::PRESENT_COLOR_IMAGE_STATE,
-            )],
-            1,
-        );
+        // L'image reste cible de rendu : `Screenshots::record` la rend présentable.
     }
 }
