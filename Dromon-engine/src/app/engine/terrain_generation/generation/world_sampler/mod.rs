@@ -10,9 +10,11 @@ mod height;
 
 pub use climate::LocalClimate;
 
+use noise::SuperSimplex;
+
 use super::height_field::HeightField;
 use super::macro_map::MacroMap;
-use crate::config::{CoastProfile, WorldGenConfig};
+use crate::config::{CoastProfile, HillsCoastParams, WorldGenConfig};
 
 pub struct WorldSampler {
     macro_map: MacroMap,
@@ -20,7 +22,9 @@ pub struct WorldSampler {
     hills: HeightField,
     sea_level: f64,
     coast: CoastProfile,
-    hills_coast_fade: f64,
+    hills_coast: HillsCoastParams,
+    /// Place les zones de falaises (cf. `HillsCoastParams::cliff_threshold`).
+    cliff_noise: SuperSimplex,
     /// °C perdus par voxel au-dessus de la mer (cf. `ClimateParams::lapse_rate`).
     lapse_rate: f64,
 }
@@ -37,7 +41,8 @@ impl WorldSampler {
             hills: HeightField::new(seed.wrapping_add(1), config.detail.hills),
             sea_level: config.macro_.world.sea_level,
             coast: config.macro_.coast.clone(),
-            hills_coast_fade: config.detail.hills_coast_fade,
+            hills_coast: config.detail.hills_coast,
+            cliff_noise: SuperSimplex::new(seed.wrapping_add(2)),
             lapse_rate: config.macro_.climate.lapse_rate,
         }
     }

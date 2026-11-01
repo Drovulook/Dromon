@@ -36,7 +36,8 @@ pub use render::{
     ShadowSettings, TerrainRenderParams, TextureParams, TonemapParams, WaterRenderParams,
 };
 pub use world_gen::{
-    BaseNoise, ClimateParams, CoastProfile, ContinentParams, HeightParams, MountainParams,
+    BaseNoise, ClimateParams, CoastProfile, ContinentParams, HeightParams, HillsCoastParams,
+    MountainParams,
     OctaveNoise, WorldDetailConfig, WorldGenConfig, WorldMacroConfig, WorldShape,
 };
 

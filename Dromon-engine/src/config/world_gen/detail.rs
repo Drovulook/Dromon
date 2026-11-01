@@ -13,11 +13,50 @@ pub struct WorldDetailConfig {
     /// Relief des chaînes, pondéré par le masque macro `w`.
     pub mountain: HeightParams,
     /// Collines des plaines, pondérées par `1 − w`. Doivent rester ≥ 0 (cf.
-    /// `hills_coast_fade`) : `base_height ≥ amplitude`.
+    /// `hills_coast`) : `base_height ≥ amplitude`.
     pub hills: HeightParams,
+    /// Raccord des collines à la côte : pente douce ou falaise.
+    pub hills_coast: HillsCoastParams,
+}
+
+/// Raccord des collines à la côte. La côte est soit douce (`fade`), soit en
+/// falaise (`cliff_*`) là où un bruit basse fréquence dépasse `cliff_threshold`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HillsCoastParams {
     /// Les collines s'effacent à la côte et atteignent leur plein à cette distance
     /// (voxels) : sinon leurs creux passeraient sous la mer près des côtes basses.
-    pub hills_coast_fade: f64,
+    /// Pente max ≈ 1,5 · hauteur / `fade`.
+    pub fade: f64,
+    /// Largeur (voxels) d'une falaise à pleine hauteur : basse → à pic. En bord de
+    /// zone, la falaise garde sa raideur et perd de la hauteur.
+    pub cliff_fade: f64,
+    /// Fréquence du bruit qui place les zones de falaises (longueur d'onde `1/f`,
+    /// ≫ `fade` pour que la transition reste douce le long de la côte).
+    pub cliff_frequency: f64,
+    /// Seuil du bruit (∈ ~`[-1, 1]`) au-dessus duquel la côte devient falaise. Plus
+    /// haut = plus rare ; ≥ 1.0 = aucune falaise.
+    pub cliff_threshold: f64,
+}
+
+impl Default for HillsCoastParams {
+    fn default() -> Self {
+        HillsCoastParams {
+            fade: 500.0,
+            cliff_fade: 100.0,
+            cliff_frequency: 0.0001,
+            cliff_threshold: 1.0,
+        }
+    }
+}
+
+impl HillsCoastParams {
+    fn validate(&self) -> Result<()> {
+        ensure!(self.fade > 0.0, "hills_coast.fade doit être > 0");
+        ensure!(self.cliff_fade > 0.0, "hills_coast.cliff_fade doit être > 0");
+        ensure!(self.cliff_frequency > 0.0, "hills_coast.cliff_frequency doit être > 0");
+        Ok(())
+    }
 }
 
 impl Default for WorldDetailConfig {
@@ -25,7 +64,7 @@ impl Default for WorldDetailConfig {
         WorldDetailConfig {
             mountain: HeightParams::default(),
             hills: HeightParams::default(),
-            hills_coast_fade: 500.0,
+            hills_coast: HillsCoastParams::default(),
         }
     }
 }
@@ -37,8 +76,7 @@ impl ConfigFile for WorldDetailConfig {
     fn validate(&self) -> Result<()> {
         self.mountain.validate("mountain")?;
         self.hills.validate("hills")?;
-        ensure!(self.hills_coast_fade > 0.0, "hills_coast_fade doit être > 0");
-        Ok(())
+        self.hills_coast.validate()
     }
 }
 

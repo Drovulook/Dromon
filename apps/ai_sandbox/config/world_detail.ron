@@ -38,11 +38,11 @@
     // un creux ne doit pas passer sous la mer près des côtes basses.
     hills: (
         base_height: 90.0,
-        amplitude: 220.0,        // collines de 0 à ~180 voxels (ancien 60 / 150 : plaines trop plates)
-        frequency: 0.0002,      // λ ~1 700 voxels
+        amplitude: 420.0,        // collines de 0 à ~180 voxels (ancien 60 / 150 : plaines trop plates)
+        frequency: 0.00005,      // λ ~1 700 voxels
         octaves: 4,
         lacunarity: 2.15,
-        gain: 0.45,
+        gain: 0.55,
         erosion: 0.01,
         ridge: 0.01,             // collines rondes
         lowland_flatness: 0.0,
@@ -52,6 +52,15 @@
         warp_amplitude: 0.0,
     ),
 
-    // Les collines s'effacent à la côte, pleines à cette distance (voxels).
-    hills_coast_fade: 500.0,
+    // Raccord des collines à la côte : pente douce, ou falaise par endroits.
+    hills_coast: (
+        // Pleines à cette distance de la côte (voxels). Pente max ≈ 1,5 · hauteur / fade :
+        // collines de ~300 sur 2 500 → ~10° (500 donnait ~40°).
+        fade: 2000.0,
+        // Falaises là où un bruit basse fréquence dépasse le seuil : toute la hauteur
+        // des collines franchie sur `cliff_fade` voxels.
+        cliff_fade: 100.0,
+        cliff_frequency: 0.0001, // λ ~10 000 voxels le long des côtes
+        cliff_threshold: 0.4,    // plus haut = plus rare ; ≥ 1.0 = aucune falaise
+    ),
 )

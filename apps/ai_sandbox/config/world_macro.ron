@@ -132,7 +132,7 @@
         // Pluie de base sur terre, par cellule parcourue : la vapeur est divisée par
         // e tous les ~cell_size / rain_base voxels (256 / 0.005 → 51 000).
         // Ancien 0.008 : trop sec au cœur du grand continent.
-        rain_base: 0.005,
+        rain_base: 0.003,
         rain_orographic: 0.1,   // fraction de vapeur tombée par 100 voxels de montée
         moisture_diffusion: 0.15, // humidité côtière même sans vent (bande calme)
     ),

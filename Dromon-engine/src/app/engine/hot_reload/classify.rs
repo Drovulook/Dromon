@@ -232,11 +232,11 @@ fn detail_reloads(old: &WorldDetailConfig, new: &WorldDetailConfig, out: &mut Re
     let WorldDetailConfig {
         mountain,
         hills,
-        hills_coast_fade,
+        hills_coast,
     } = old;
     out.check("mountain", mountain, &new.mountain, Reload::Terrain);
     out.check("hills", hills, &new.hills, Reload::Terrain);
-    out.check("hills_coast_fade", hills_coast_fade, &new.hills_coast_fade, Reload::Terrain);
+    out.check("hills_coast", hills_coast, &new.hills_coast, Reload::Terrain);
 }
 
 fn macro_reloads(old: &WorldMacroConfig, new: &WorldMacroConfig, out: &mut Reloads) {
