@@ -48,6 +48,17 @@ impl Buffer {
         })
     }
 
+    /// Buffer de **relecture** (GPU → CPU), destination de copies. `HOST_CACHED` de
+    /// préférence (lire de la mémoire non cachée, faite pour les envois CPU → GPU, est
+    /// très lent), sinon la mémoire de staging.
+    pub fn readback(context: &Arc<RenderingContext>, size: vk::DeviceSize) -> Result<Self> {
+        let host = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+        let usage = vk::BufferUsageFlags::TRANSFER_DST;
+        Self::new(context.clone(), size, usage, host | vk::MemoryPropertyFlags::HOST_CACHED)
+            .or_else(|_| Self::new(context.clone(), size, usage, host))
+            .context("buffer de relecture")
+    }
+
     /// Écrit `buffer_data` dans le buffer. Le bloc étant mappé en permanence, il ne
     /// reste qu'un `memcpy` — plus aucun appel au driver.
     pub fn upload<T: Copy>(&self, buffer_data: &[T]) -> Result<()> {

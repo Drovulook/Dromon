@@ -3,7 +3,7 @@
 // (material_buffer.rs).
 #pragma once
 #include "bindings.slang"
-#include "noise.slang"
+#include "common/noise.slang"
 
 struct Material {
   float4 albedo;    // rgb = albédo linéaire (humide si teinté)

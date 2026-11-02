@@ -4,7 +4,7 @@
 
 #include "bindings.slang"
 #include "world_maps.slang"
-#include "noise.slang"
+#include "common/noise.slang"
 
 float seaLevel() { return ubo.water.x; }
 

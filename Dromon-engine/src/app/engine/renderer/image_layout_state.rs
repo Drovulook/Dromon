@@ -47,6 +47,22 @@ impl ImageLayoutState {
         queue_family_index: vk::QUEUE_FAMILY_IGNORED,
     };
 
+    // storage image (compute, texgen) : layout GENERAL, seul accepté en écriture
+    // arbitraire. Écrite par un dispatch…
+    pub const STORAGE_WRITE_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+        layout: vk::ImageLayout::GENERAL,
+        stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+    // … puis lue par le suivant : WRITE → READ rend les écritures visibles.
+    pub const STORAGE_READ_STATE: Self = Self {
+        access_mask: vk::AccessFlags2::SHADER_STORAGE_READ,
+        layout: vk::ImageLayout::GENERAL,
+        stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
+        queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+    };
+
     // depth image
     pub const UNDEFINED_DEPTH_IMAGE_STATE: Self = Self {
         access_mask: vk::AccessFlags2::empty(),

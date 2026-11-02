@@ -4,7 +4,7 @@
 // et de quelle teinte.
 #pragma once
 #include "bindings.slang"
-#include "noise.slang"
+#include "common/noise.slang"
 
 static const float STAR_CELLS = 256.0; // cases par côté de face
 

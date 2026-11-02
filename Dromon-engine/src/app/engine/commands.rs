@@ -6,6 +6,7 @@
 //! plus tard.
 
 use crate::app::engine::Engine;
+use crate::app::engine::renderer::Renderer;
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::world::World;
 use crate::app::engine::renderer::world::game_clock::GameClock;
@@ -51,6 +52,14 @@ enum Command {
     /// Capture de la fenêtre principale (PNG temporaire). Différée : quelques frames.
     #[serde(rename = "screenshot")]
     Screenshot,
+    /// Textures de `<app>/dev_res/texgen/<recipe>.slang` → PNG dans `work/texgen/<recipe>/`.
+    /// Bloquant (~1 s). Défauts : `size` 2048 (taille des textures du terrain), `seed` 0.
+    #[serde(rename = "texgen")]
+    Texgen {
+        recipe: String,
+        size: Option<u32>,
+        seed: Option<u32>,
+    },
 }
 
 /// Réponse due à une requête, envoyée **une seule fois** : `send` consomme le
@@ -147,16 +156,25 @@ impl Engine {
                 clock.set_hour(hour)?;
                 Ok(clock_state(clock))
             }
+            Command::Texgen { recipe, size, seed } => self
+                .primary_renderer()?
+                .texgen(&recipe, size.unwrap_or(2048), seed.unwrap_or(0))
+                // `{:#}` : toute la chaîne de contextes, dont la sortie de slangc.
+                .map_err(|e| format!("{e:#}")),
             Command::Screenshot => unreachable!("commande différée, cf. `execute`"),
         }
     }
 
-    /// Le monde de la fenêtre principale.
-    fn world(&mut self) -> Result<&mut World, String> {
+    /// Le renderer de la fenêtre principale.
+    fn primary_renderer(&mut self) -> Result<&mut Renderer, String> {
         self.renderers
             .get_mut(&self.primary_window_id)
-            .map(|renderer| renderer.world_mut())
             .ok_or_else(|| "pas de fenêtre principale".to_owned())
+    }
+
+    /// Le monde de la fenêtre principale.
+    fn world(&mut self) -> Result<&mut World, String> {
+        self.primary_renderer().map(|renderer| renderer.world_mut())
     }
 }
 

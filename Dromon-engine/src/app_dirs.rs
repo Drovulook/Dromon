@@ -1,6 +1,7 @@
-//! **Dossiers de l'application** lancée : `<app>/config/` (RON, rechargés à chaud) et
-//! `<app>/res/` (assets). Fixés une fois au démarrage, puis lus partout : c'est une
-//! donnée du processus, comme le dossier courant.
+//! **Dossiers de l'application** lancée : `<app>/config/` (RON, rechargés à chaud),
+//! `<app>/dev_res/` (sources des assets), `<app>/res/` (assets) et `<app>/work/`
+//! (intermédiaires). Fixés une fois au démarrage, puis lus partout : c'est une donnée du
+//! processus, comme le dossier courant.
 
 use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
@@ -13,6 +14,7 @@ static APP_DIRS: OnceLock<AppDirs> = OnceLock::new();
 #[derive(Clone, Debug)]
 pub struct AppDirs {
     config: PathBuf,
+    dev_res: PathBuf,
     res: PathBuf,
     work: PathBuf,
 }
@@ -27,11 +29,12 @@ macro_rules! app_dirs {
 }
 
 impl AppDirs {
-    /// `root` : racine de l'app, qui contient `config/`, `res/` et `work/`.
+    /// `root` : racine de l'app, qui contient `config/`, `dev_res/`, `res/` et `work/`.
     pub fn new(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref();
         Self {
             config: root.join("config"),
+            dev_res: root.join("dev_res"),
             res: root.join("res"),
             work: root.join("work"),
         }
@@ -39,6 +42,12 @@ impl AppDirs {
 
     pub fn config(&self) -> &Path {
         &self.config
+    }
+
+    /// Sources des assets (recettes texgen…), versionnées : le moteur les compile ou les
+    /// exécute pour produire `res/` ou `work/`.
+    pub fn dev_res(&self) -> &Path {
+        &self.dev_res
     }
 
     /// Ce que le moteur lit en jeu (textures, modèles, caches).

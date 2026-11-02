@@ -3,7 +3,8 @@ mod object_mesh;
 mod object_mesh_handler;
 mod terrain_mesh;
 mod terrain_textures;
-mod texture;
+// Visible du renderer : texgen y range ses storage images.
+pub(super) mod texture;
 mod texture_handler;
 mod transform;
 mod water_mesh;

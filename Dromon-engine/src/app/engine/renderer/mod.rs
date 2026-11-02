@@ -12,6 +12,7 @@ mod renderer_record_pass;
 pub(crate) mod screenshot;
 mod shadow_map;
 mod swapchain;
+mod texgen;
 mod uniform_buffer;
 pub(crate) mod world;
 
@@ -259,6 +260,11 @@ impl Renderer {
                 "capture impossible : la surface refuse TRANSFER_SRC"
             )));
         }
+    }
+
+    /// Textures d'une recette texgen (cf. [`texgen::run`]). Bloquant : gèle la frame.
+    pub(crate) fn texgen(&self, recipe: &str, size: u32, seed: u32) -> Result<serde_json::Value> {
+        texgen::run(&self.context, recipe, size, seed)
     }
 
     pub(crate) fn world_mut(&mut self) -> &mut World {

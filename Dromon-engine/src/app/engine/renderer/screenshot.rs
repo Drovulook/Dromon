@@ -70,7 +70,8 @@ impl Screenshots {
         let Some(request) = request else {
             return self.present(command_buffer, image);
         };
-        let buffer = match readback_buffer(&self.context, extent) {
+        let size = extent.width as vk::DeviceSize * extent.height as vk::DeviceSize * 4;
+        let buffer = match Buffer::readback(&self.context, size) {
             Ok(buffer) => buffer,
             Err(e) => {
                 (request.done)(Err(e));
@@ -179,22 +180,11 @@ impl Screenshots {
     }
 }
 
-/// Mémoire relue par le CPU : `HOST_CACHED` de préférence (lire de la mémoire non
-/// cachée, faite pour les envois CPU → GPU, est très lent), sinon la mémoire de staging.
-fn readback_buffer(context: &Arc<RenderingContext>, extent: vk::Extent2D) -> Result<Buffer> {
-    let size = extent.width as vk::DeviceSize * extent.height as vk::DeviceSize * 4;
-    let host = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
-    let usage = vk::BufferUsageFlags::TRANSFER_DST;
-    Buffer::new(context.clone(), size, usage, host | vk::MemoryPropertyFlags::HOST_CACHED)
-        .or_else(|_| Buffer::new(context.clone(), size, usage, host))
-        .context("buffer de capture")
-}
-
 /// Copie CPU du contenu du buffer (mémoire cohérente : rien à invalider).
 fn read_pixels(buffer: &Buffer, extent: vk::Extent2D) -> Result<Vec<u8>> {
     let len = extent.width as usize * extent.height as usize * 4;
     let ptr = buffer.map()?;
-    // SAFETY : le buffer fait `len` octets (cf. `readback_buffer`), est mappé tant qu'il
+    // SAFETY : le buffer fait `len` octets (cf. `record`), est mappé tant qu'il
     // vit, et le GPU a fini d'y écrire (fence du slot passée).
     Ok(unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec())
 }
