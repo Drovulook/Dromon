@@ -8,7 +8,7 @@ use anyhow::{Result, ensure};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::ConfigFile;
 use crate::AppDirs;
@@ -17,10 +17,15 @@ use crate::AppDirs;
 /// de debug.
 const MAX_MATERIALS: usize = u16::MAX as usize - 1;
 
-/// Textures du terrain : un sous-dossier par texture, aux cartes nommées
-/// [`TEXTURE_COLOR`], [`TEXTURE_HEIGHT`]…
+/// Textures du terrain fournies (photos, exports) : un sous-dossier par texture, aux
+/// cartes nommées [`TEXTURE_COLOR`], [`TEXTURE_HEIGHT`]…
 pub fn terrain_texture_dir() -> PathBuf {
     AppDirs::get().res().join("textures/terrain_textures")
+}
+
+/// Textures du terrain écrites par la commande `texgen`, même disposition.
+pub fn generated_texture_dir() -> PathBuf {
+    AppDirs::get().work().join("texgen/terrain_textures")
 }
 /// Albédo, sRGB.
 pub const TEXTURE_COLOR: &str = "color.png";
@@ -31,9 +36,69 @@ pub const TEXTURE_NORMAL: &str = "normal.png";
 /// Occlusion ambiante (blanc = non occulté).
 pub const TEXTURE_AO: &str = "ao.png";
 
-/// Chemin de la carte `file` de la texture `texture`.
-pub fn terrain_texture_path(texture: &str, file: &str) -> PathBuf {
-    terrain_texture_dir().join(texture).join(file)
+/// Les 4 cartes lues par le moteur.
+pub const TEXTURE_MAPS: [&str; 4] = [TEXTURE_COLOR, TEXTURE_HEIGHT, TEXTURE_NORMAL, TEXTURE_AO];
+
+/// `dir` contient les 4 cartes.
+pub fn has_all_maps(dir: &Path) -> bool {
+    TEXTURE_MAPS.iter().all(|file| dir.join(file).is_file())
+}
+
+/// Origine de la texture d'un matériau : le nom désigne un sous-dossier de cartes. Un
+/// dossier absent n'est pas une erreur de config : repli et avertissement au chargement
+/// (cf. `TerrainTextures`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextureSource {
+    /// Couleur unie.
+    #[default]
+    None,
+    /// Texture fournie : `res/textures/terrain_textures/<nom>/`.
+    Files(String),
+    /// Texture générée par la commande `texgen recipe=<nom>` :
+    /// `work/texgen/terrain_textures/<nom>/`, à défaut le dossier de même nom de `res/`.
+    Generated(String),
+}
+
+impl TextureSource {
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::Files(name) | Self::Generated(name) => Some(name),
+        }
+    }
+
+    /// Dossiers où chercher les cartes, par ordre de préférence.
+    pub fn candidate_dirs(&self) -> Vec<PathBuf> {
+        match self {
+            Self::None => Vec::new(),
+            Self::Files(name) => vec![terrain_texture_dir().join(name)],
+            Self::Generated(name) => vec![
+                generated_texture_dir().join(name),
+                terrain_texture_dir().join(name),
+            ],
+        }
+    }
+
+    /// Le dossier `name` de [`generated_texture_dir`] (`generated`) ou de
+    /// [`terrain_texture_dir`] fait-il partie de [`Self::candidate_dirs`] ? Sert au hot
+    /// reload : un dossier qu'aucune texture ne peut lire ne recharge rien.
+    /// ⚠ Synchronisé avec `candidate_dirs`.
+    pub fn may_read(&self, name: &str, generated: bool) -> bool {
+        match self {
+            Self::None => false,
+            Self::Files(n) => !generated && n == name,
+            Self::Generated(n) => n == name,
+        }
+    }
+}
+
+/// Nom de texture ou de recette, utilisé comme nom de dossier ou de fichier : rien qui
+/// puisse en sortir (`/`, `..`).
+pub fn is_valid_texture_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -55,9 +120,8 @@ pub struct MaterialDef {
     /// Teinte selon les précipitations locales (herbe : verte → paille). `None` :
     /// couleur fixe.
     pub humidity_tint: Option<HumidityTint>,
-    /// Texture : sous-dossier de [`terrain_texture_dir`], partageable entre matériaux.
-    /// `None` : couleur unie.
-    pub texture: Option<String>,
+    /// Texture, partageable entre matériaux. Défaut : couleur unie.
+    pub texture: TextureSource,
     /// Côté d'une répétition de la texture, en unités monde (voxels).
     pub texture_size: f32,
 }
@@ -69,7 +133,7 @@ impl Default for MaterialDef {
             // Magenta : un albédo oublié saute aux yeux.
             albedo: Vec3::new(1.0, 0.0, 1.0),
             humidity_tint: None,
-            texture: None,
+            texture: TextureSource::None,
             texture_size: 10.0,
         }
     }
@@ -113,25 +177,17 @@ impl MaterialsConfig {
         (self.materials.len() + 1) as u16
     }
 
-    /// Textures distinctes, dans l'ordre de première apparition : la couche `i` du
-    /// texture array est `textures()[i]`.
-    pub fn textures(&self) -> Vec<&str> {
+    /// Textures distinctes (hors couleur unie), dans l'ordre de première apparition.
+    /// Leurs couches dans le texture array : `TerrainTextures`, qui sait lesquelles
+    /// ont pu être chargées.
+    pub fn textures(&self) -> Vec<&TextureSource> {
         let mut textures = Vec::new();
-        for t in self.materials.iter().filter_map(|m| m.texture.as_deref()) {
-            if !textures.contains(&t) {
-                textures.push(t);
+        for m in &self.materials {
+            if m.texture != TextureSource::None && !textures.contains(&&m.texture) {
+                textures.push(&m.texture);
             }
         }
         textures
-    }
-
-    /// Couche du texture array de `def`, `None` s'il n'est pas texturé.
-    pub fn texture_layer(&self, def: &MaterialDef) -> Option<u32> {
-        let texture = def.texture.as_deref()?;
-        self.textures()
-            .iter()
-            .position(|&t| t == texture)
-            .map(|i| i as u32)
     }
 }
 
@@ -172,16 +228,13 @@ impl ConfigFile for MaterialsConfig {
                 "{} : texture_size doit être > 0",
                 m.name
             );
-            if let Some(t) = &m.texture {
-                for file in [TEXTURE_COLOR, TEXTURE_HEIGHT, TEXTURE_NORMAL, TEXTURE_AO] {
-                    let path = terrain_texture_path(t, file);
-                    ensure!(
-                        path.is_file(),
-                        "{} : {} introuvable",
-                        m.name,
-                        path.display()
-                    );
-                }
+            // Fichiers absents : pas une erreur (repli au chargement), seul le nom compte.
+            if let Some(name) = m.texture.name() {
+                ensure!(
+                    is_valid_texture_name(name),
+                    "{} : nom de texture invalide \"{name}\" (attendu : [a-z0-9_-])",
+                    m.name
+                );
             }
         }
         Ok(())

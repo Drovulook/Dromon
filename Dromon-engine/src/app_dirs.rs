@@ -55,8 +55,8 @@ impl AppDirs {
         &self.res
     }
 
-    /// Sorties intermédiaires pour l'humain ou l'agent (exports PNG…) : jetables, jamais
-    /// lues par le moteur.
+    /// Sorties intermédiaires (exports PNG, textures générées…) : jetables, régénérables.
+    /// Le moteur peut les lire, avec un repli si elles manquent.
     pub fn work(&self) -> &Path {
         &self.work
     }

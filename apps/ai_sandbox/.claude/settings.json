@@ -6,7 +6,9 @@
     "allow": [
       "mcp__dromon__*",
       "Edit(/config/**)",
-      "Edit(/dev_res/**)"
+      "Edit(/dev_res/**)",
+      "Read(//home/drovulok/Documents/Dromon/Dromon-engine/dev_res/shaders/procgen/**)",
+      "Read(//home/drovulok/Documents/Dromon/Dromon-engine/dev_res/shaders/common/noise.slang)"
     ],
     "deny": [
       "Bash",

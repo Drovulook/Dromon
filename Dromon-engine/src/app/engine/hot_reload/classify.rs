@@ -191,11 +191,17 @@ pub(crate) fn reload(
     })
 }
 
-/// Rechargements d'un fichier de texture du terrain modifié (sous-dossier `texture`) :
-/// vide si aucun matériau ne l'utilise.
-pub(crate) fn texture_reloads(engine: &EngineConfig, texture: &str) -> Reloads {
+/// Rechargements d'un fichier de texture du terrain modifié (sous-dossier `texture` des
+/// textures générées si `generated`, fournies sinon) : vide si aucune texture utilisée
+/// ne peut lire ce dossier (cf. `TextureSource::may_read`).
+pub(crate) fn texture_reloads(engine: &EngineConfig, texture: &str, generated: bool) -> Reloads {
     let mut reloads = Reloads::default();
-    if engine.materials.textures().contains(&texture) {
+    let used = engine
+        .materials
+        .textures()
+        .iter()
+        .any(|s| s.may_read(texture, generated));
+    if used {
         reloads.check("fichiers de texture", &false, &true, Reload::TerrainTextures);
     }
     reloads
@@ -209,7 +215,7 @@ fn materials_reloads(old: &MaterialsConfig, new: &MaterialsConfig, out: &mut Rel
     let (old_names, new_names): (Vec<String>, Vec<String>) = (names(old), names(new));
     out.check("noms / ordre", &old_names, &new_names, Reload::Terrain);
     out.check("noms / ordre", &old_names, &new_names, Reload::Materials);
-    // Couche du texture array = rang de la texture dans cette liste.
+    // Couches du texture array = textures de cette liste (moins celles non chargées).
     out.check("textures", &old.textures(), &new.textures(), Reload::TerrainTextures);
 
     for (old_def, new_def) in materials.iter().zip(&new.materials) {

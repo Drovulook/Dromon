@@ -6,7 +6,7 @@
     latitude_deg: 25.0,
 
     clock: (
-        day_length_secs: 600, // durée d'un jour de jeu en secondes réelles (lent : profiter de la lumière)
+        day_length_secs: 6000, // durée d'un jour de jeu en secondes réelles (lent : profiter de la lumière)
         time_scale: 1.0,       // 0 = pause, 60 = accéléré
         start_hour: 16.9,      // heure de départ, dans [0, 24[ (6.7 : soleil à ~8°) ; fin d'après-midi dorée
     ),
@@ -78,7 +78,7 @@
         ground_bounce: 0.25,         // part de l'ambiant renvoyée par le sol
         sky_gradient_exponent: 0.75, // < 1 = dégradé resserré près de l'horizon
         // 0.00035 délavait tout ; trop bas → bord de chargement (~8 000) visible.
-        fog_density: 0.00022,         // σ₀ de Beer-Lambert
+        fog_density: 0.00012,         // σ₀ de Beer-Lambert
         fog_scale_height: 1200.0,    // H ≈ 3 × étendue verticale du terrain
         fog_anisotropy: 0.9,         // g de Henyey-Greenstein, dans [0, 1[
         halo_strength: 0.003,        // halo solaire (ciel et brouillard)

@@ -51,6 +51,9 @@ pub struct LogsState {
     list_state: ListState,
     auto_scroll: bool,
     viewport_height: usize,
+    /// Lignes d'écran après retour à la ligne (unité du défilement). Dépend de la
+    /// largeur : recalculé à chaque rendu.
+    rows: usize,
     pub input: CommandInput,
 }
 
@@ -61,21 +64,20 @@ impl LogsState {
             list_state: ListState::default(),
             auto_scroll: true,
             viewport_height: 1,
+            rows: 0,
             input: CommandInput::default(),
         }
     }
 
-    /// Ajoute une ligne et suit le bas si le défilement automatique est actif.
+    /// Ajoute une ligne. Le suivi du bas se fait au rendu, qui connaît le nombre de
+    /// lignes d'écran.
     pub fn push_line(&mut self, line: Line<'static>) {
         self.logs.push(line);
-        if self.auto_scroll {
-            *self.list_state.offset_mut() = self.bottom_offset();
-        }
     }
 
-    /// Offset qui place la dernière ligne en bas de la zone visible.
+    /// Offset qui place la dernière ligne d'écran en bas de la zone visible.
     fn bottom_offset(&self) -> usize {
-        self.logs.len().saturating_sub(self.viewport_height)
+        self.rows.saturating_sub(self.viewport_height)
     }
 
     pub fn scroll_up(&mut self) {
@@ -111,18 +113,20 @@ pub fn render(frame: &mut Frame, state: &mut LogsState, area: Rect) {
         Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(area);
     render_input(frame, &state.input, input_area);
 
-    // La hauteur visible dépend de la zone allouée (moins les 2 lignes de
-    // bordure) ; on la met à jour ici puis on recolle la vue au bas si besoin.
+    // Taille visible = zone allouée moins les bordures. Les lignes longues sont
+    // découpées à cette largeur ; on recolle ensuite la vue au bas si besoin.
+    let width = (area.width as usize).saturating_sub(4);
+    let items: Vec<ListItem> = state
+        .logs
+        .iter()
+        .flat_map(|l| wrap(l, width))
+        .map(ListItem::new)
+        .collect();
+    state.rows = items.len();
     state.viewport_height = (area.height as usize).saturating_sub(2).max(1);
     if state.auto_scroll {
         *state.list_state.offset_mut() = state.bottom_offset();
     }
-
-    let items: Vec<ListItem> = state
-        .logs
-        .iter()
-        .map(|l| ListItem::new(l.clone()))
-        .collect();
 
     let title = if state.auto_scroll {
         "(↑↓ scroll  g/G haut/bas  : commande  q quitter)"
@@ -137,6 +141,42 @@ pub fn render(frame: &mut Frame, state: &mut LogsState, area: Rect) {
         .style(Style::default().bg(BG).fg(FG));
 
     frame.render_stateful_widget(List::new(items).block(block), area, &mut state.list_state);
+}
+
+/// Retrait des lignes de suite d'un message trop long.
+const WRAP_INDENT: &str = "  ";
+
+/// Découpe `line` en lignes d'au plus `width` colonnes, couleurs conservées. Coupure
+/// au caractère (les chemins, lignes longues typiques, n'ont pas d'espace) ; 1
+/// caractère = 1 colonne, faux seulement pour les caractères larges (emoji, CJK).
+fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+    // Trop étroit pour progresser après le retrait : on laisse ratatui couper.
+    if width <= WRAP_INDENT.len() {
+        return vec![line.clone()];
+    }
+    let mut rows = Vec::new();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut used = 0;
+    for span in &line.spans {
+        let mut chunk = String::new();
+        for c in span.content.chars() {
+            if used >= width {
+                if !chunk.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut chunk), span.style));
+                }
+                rows.push(Line::from(std::mem::take(&mut spans)).style(line.style));
+                spans.push(Span::raw(WRAP_INDENT));
+                used = WRAP_INDENT.len();
+            }
+            chunk.push(c);
+            used += 1;
+        }
+        if !chunk.is_empty() {
+            spans.push(Span::styled(chunk, span.style));
+        }
+    }
+    rows.push(Line::from(spans).style(line.style));
+    rows
 }
 
 const PROMPT: &str = "> ";

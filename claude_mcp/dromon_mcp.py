@@ -20,7 +20,7 @@ from typing import Any, Literal
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from dromon_client import request
+from dromon_client import TIMEOUT_SECS, request
 from log_listener import LogListener
 
 INSTRUCTIONS = """\
@@ -37,12 +37,12 @@ APP = ""
 LOGS: LogListener | None = None
 
 
-def call(cmd: str, **args: Any) -> Any:
+def call(cmd: str, timeout: float = TIMEOUT_SECS, **args: Any) -> Any:
     """Envoie `cmd` (les args à `None` sont omis : valeur actuelle conservée) et rend le
     résultat. Échec → `ToolError`, que l'agent reçoit comme message d'erreur."""
     args = {key: value for key, value in args.items() if value is not None}
     try:
-        reply = request(APP, cmd, args)
+        reply = request(APP, cmd, args, timeout)
     except OSError as e:  # socket absent, connexion refusée, pas de réponse
         raise ToolError(f"moteur « {APP} » injoignable ou figé : {e}") from e
     if not reply["ok"]:
@@ -111,6 +111,19 @@ def screenshot(wait_s: float = 0.0) -> list:
     time.sleep(min(max(wait_s, 0.0), 30.0))
     path = call("screenshot")["path"]
     return [f"capture : {path}", Image(path=path)]
+
+
+@mcp.tool()
+def texgen(recipe: str, size: int = 2048, seed: int = 0) -> dict[str, Any]:
+    """Génère les textures (couleur, hauteur, normale, AO) de la recette
+    `dev_res/texgen/<recipe>.slang` et les écrit dans `work/texgen/terrain_textures/
+    <recipe>/` (PNG lisibles). Les matériaux en `texture: Generated("<recipe>")` de
+    `config/materials.ron` les rechargent aussitôt. `size` : puissance de 2 de 64 à 4096
+    (2048 = taille des autres textures du terrain, sinon le matériau repasse en couleur
+    unie) ; `seed` : graine passée à la recette. Rend le dossier, la plage de hauteur
+    brute (unités de tuile) et les durées. Erreur de compilation → message de slangc
+    (fichier, ligne). Gèle le jeu le temps de la génération (~1 s)."""
+    return call("texgen", timeout=60.0, recipe=recipe, size=size, seed=seed)
 
 
 @mcp.tool()

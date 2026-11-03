@@ -22,7 +22,9 @@ impl Engine {
         for change in watcher.poll() {
             match change {
                 FileChange::Config(file) => self.reload_config(&file),
-                FileChange::TerrainTexture(texture) => self.reload_texture(&texture),
+                FileChange::TerrainTexture { name, generated } => {
+                    self.reload_texture(&name, generated)
+                }
             }
         }
     }
@@ -49,14 +51,17 @@ impl Engine {
         }
     }
 
-    /// Fichiers d'une texture du terrain modifiés. Ignorés si aucun matériau ne l'utilise.
-    fn reload_texture(&mut self, texture: &str) {
-        let reloads = classify::texture_reloads(&self.config, texture);
+    /// Fichiers d'une texture du terrain modifiés (dossier `texture` des textures
+    /// générées si `generated`, fournies sinon). Ignorés si aucun matériau ne lit ce
+    /// dossier.
+    fn reload_texture(&mut self, texture: &str, generated: bool) {
+        let reloads = classify::texture_reloads(&self.config, texture, generated);
         if reloads.is_empty() {
             return;
         }
         let world_gen = self.world_gen().cloned();
-        self.apply_reloads(&format!("texture {texture}"), world_gen.as_ref(), &reloads);
+        let what = if generated { "texture générée" } else { "texture" };
+        self.apply_reloads(&format!("{what} {texture}"), world_gen.as_ref(), &reloads);
     }
 
     /// Config de génération du monde : celle du terrain de la fenêtre principale.

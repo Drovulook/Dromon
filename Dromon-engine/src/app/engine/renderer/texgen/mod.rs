@@ -1,14 +1,15 @@
 //! **Texgen** : textures générées par compute shader depuis une recette Slang de l'app
 //! (`<app>/dev_res/texgen/<nom>.slang`, harnais `dev_res/shaders/procgen/texgen.slang`).
-//! [`run`] : compilation (`slangc`) → 2 passes GPU → PNG dans `work/texgen/<nom>/`.
+//! [`run`] : compilation (`slangc`) → 2 passes GPU → PNG dans
+//! `work/texgen/terrain_textures/<nom>/`, lu par les matériaux en `Generated("<nom>")`.
 
 mod compile;
 mod export;
 mod gpu;
 
-use crate::AppDirs;
 use crate::app::engine::rendering_context::RenderingContext;
-use anyhow::{Result, ensure};
+use crate::config::{generated_texture_dir, is_valid_texture_name};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,10 +29,7 @@ pub(super) fn run(
 ) -> Result<Value> {
     // Le nom devient un chemin : rien qui puisse sortir de dev_res/texgen/.
     ensure!(
-        !recipe.is_empty()
-            && recipe
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-'),
+        is_valid_texture_name(recipe),
         "nom de recette invalide : `{recipe}` (attendu : [a-z0-9_-])"
     );
     ensure!(
@@ -39,12 +37,16 @@ pub(super) fn run(
         "taille {size} invalide : puissance de 2 entre {MIN_SIZE} et {MAX_SIZE}"
     );
 
+    // Créé avant la compilation : à la 1re génération, le file watcher doit avoir
+    // installé sa surveillance sur ce nouveau dossier avant que les PNG y arrivent.
+    let dir = generated_texture_dir().join(recipe);
+    std::fs::create_dir_all(&dir).with_context(|| format!("création de {}", dir.display()))?;
+
     let start = Instant::now();
     let shaders = compile::compile(recipe, &context.logger)?;
     let compiled = Instant::now();
     let maps = gpu::generate(context, &shaders, size, seed)?;
     let generated = Instant::now();
-    let dir = AppDirs::get().work().join("texgen").join(recipe);
     let range = export::export(&maps, &dir)?;
     let exported = Instant::now();
 

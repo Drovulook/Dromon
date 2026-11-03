@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 from claude_mcp.dromon_client import cli_socket
@@ -35,6 +36,17 @@ def send_to_cli(socket_path: str, text: str):
                     s.sendall((line + "\n").encode())
     except Exception:
         pass
+
+
+def forward_output(stream, socket_path: str):
+    """Sortie brute de l'engine (stdout + stderr fusionnés) → CLI, ligne par ligne.
+
+    En mode CLI le terminal appartient à l'interface : tout ce qui n'est pas passé par
+    le logger (erreur rendue par `main`, driver Vulkan, `eprintln!` d'une dépendance)
+    s'imprimerait par-dessus. Tourne jusqu'à la fin du flux (engine arrêté)."""
+    for line in stream:
+        if line.strip():
+            send_to_cli(socket_path, "[STDERR] " + line.rstrip("\n"))
 
 
 def cargo_run(
@@ -125,8 +137,19 @@ def main():
                 sys.exit(1)
 
             binary = os.path.join(WORKSPACE, "target", PROFILE, target)
-            engine = subprocess.Popen([binary] + engine_args(), cwd=WORKSPACE)
+            engine = subprocess.Popen(
+                [binary] + engine_args(),
+                cwd=WORKSPACE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",  # octets non UTF-8 : remplacés, pas d'exception
+            )
             processes.append(engine)
+            # daemon : ne retient pas le launcher à la sortie.
+            threading.Thread(
+                target=forward_output, args=(engine.stdout, str(cli_sock)), daemon=True
+            ).start()
 
             engine_running = True
             while cli.poll() is None:

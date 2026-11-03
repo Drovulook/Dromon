@@ -189,7 +189,8 @@ fn gpu_table(config: &MaterialsConfig, textures: &TerrainTextures) -> Vec<GpuMat
     let debug = GpuMaterial::plain(Vec4::new(1.0, 0.0, 1.0, 0.0));
     let materials: Vec<GpuMaterial> = std::iter::once(air)
         .chain(config.materials.iter().map(|m| {
-            let texture = config.texture_layer(m).map(|l| (l, textures.mean(l)));
+            // Texture non chargée (introuvable, illisible) : couleur unie.
+            let texture = textures.layer_of(&m.texture).map(|l| (l, textures.mean(l)));
             GpuMaterial::new(m, texture)
         }))
         .chain(std::iter::once(debug))
