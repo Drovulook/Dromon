@@ -51,6 +51,12 @@ ConstantBuffer<UniformBuffer> ubo;
 struct PushConstants {
     float4x4 model;
     float4x4 normalMatrix;
+#ifdef TERRAIN_SEAMS
+    // Coutures du chunk dessiné : `ChunkSeams` côté Rust.
+    float2 chunkOrigin;
+    float chunkStep;
+    uint chunkSeamBits; // bits 0–3 : faces à dalle ; bits 4–11 : atténuations
+#endif
 };
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pc;

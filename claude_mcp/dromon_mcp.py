@@ -15,6 +15,7 @@ Usage : uv run --script claude_mcp/dromon_mcp.py --app <binaire>
 
 import argparse
 import time
+from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
@@ -31,6 +32,8 @@ Si un outil répond « moteur injoignable », demander à l'utilisateur de (re)l
 """
 
 mcp = MCPServer("dromon", instructions=INSTRUCTIONS)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Binaire ciblé (`--app`) et écoute de ses logs, fixés dans `main` avant de servir.
 APP = ""
@@ -124,6 +127,22 @@ def texgen(recipe: str, size: int = 2048, seed: int = 0) -> dict[str, Any]:
     brute (unités de tuile) et les durées. Erreur de compilation → message de slangc
     (fichier, ligne). Gèle le jeu le temps de la génération (~1 s)."""
     return call("texgen", timeout=60.0, recipe=recipe, size=size, seed=seed)
+
+
+@mcp.tool()
+def texgen_delete(path: str) -> str:
+    """Supprime définitivement un fichier de `dev_res/texgen/`. `path` : relatif à ce
+    dossier, ex. "seamtest.slang" ou "lib/old.slang". Ne supprime ni dossier, ni fichier
+    hors de `dev_res/texgen/`. Sans effet sur les PNG déjà générés dans `work/`."""
+    root = (REPO_ROOT / "apps" / APP / "dev_res" / "texgen").resolve()
+    # Résolu avant le contrôle : `..` et liens symboliques ne peuvent pas en sortir.
+    target = (root / path).resolve()
+    if not target.is_relative_to(root):
+        raise ToolError(f"hors de dev_res/texgen/ : {path}")
+    if not target.is_file():
+        raise ToolError(f"fichier introuvable : {path}")
+    target.unlink()
+    return f"supprimé : {target.relative_to(root)}"
 
 
 @mcp.tool()

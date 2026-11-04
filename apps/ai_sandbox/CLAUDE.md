@@ -37,6 +37,7 @@ Action refusée → ne cherche pas de contournement : dis à l'utilisateur ce qu
 | `logs_tail` | derniers logs du moteur, filtrables par niveau |
 | `screenshot` | capture de la fenêtre du jeu (image + chemin du PNG temporaire) |
 | `texgen` | génère les textures d'une recette (cf. « Textures procédurales ») |
+| `texgen_delete` | supprime définitivement un fichier de `dev_res/texgen/` (chemin relatif à ce dossier) |
 
 « Moteur injoignable » → demande à l'utilisateur de lancer `./launch.py --ai_sandbox` (à la
 racine du dépôt).

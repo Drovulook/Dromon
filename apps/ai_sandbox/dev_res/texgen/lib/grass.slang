@@ -9,6 +9,7 @@ struct Blade {
   float cover;  // couverture 0..1, bords adoucis
   float3 id;    // aléas propres au brin (teinte…)
   float t;      // position le long du brin : 0 base → 1 pointe
+  float across; // 0 sur la nervure → 1 au bord du brin
 };
 
 // `count` brins par cellule (`period` par côté), chacun avec probabilité `density` :
@@ -20,7 +21,7 @@ Blade scatterBlades(float2 p, int period, int count, float density, float len,
   float2 x = p * float(period);
   int2 i = int2(floor(x));
   float2 f = x - floor(x);
-  Blade b = { 0.0, 0.0, float3(0.0), 0.0 };
+  Blade b = { 0.0, 0.0, float3(0.0), 0.0, 0.0 };
   for (int y = -1; y <= 1; y++) {
     for (int xo = -1; xo <= 1; xo++) {
      for (int k = 0; k < count; k++) {
@@ -51,6 +52,7 @@ Blade scatterBlades(float2 p, int period, int count, float density, float len,
         b.cover = smoothstep(1.0, 0.5, s) * smoothstep(1.0, 0.85, abs(u));
         b.id = id;
         b.t = t;
+        b.across = s;
       }
      }
     }

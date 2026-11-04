@@ -3,12 +3,16 @@
 #include "procgen/texgen.slang"
 #include "lib/grass.slang"
 #include "lib/ground.slang"
+#include "lib/detail.slang"
+#include "lib/scale.slang"
 
 Surface surface(float2 p, uint seed) {
   // Variations douces : zones plus jaunes / plus vertes, plus ou moins denses.
   // Pas de grandes taches (répétition visible de loin) : périodes ≥ 8.
   float hue = fbmP(p, 8, 4, seed);
   float lush = fbmP(p, 10, 3, seed + 1u);
+  // Touffes de ~30 cm : relief et lumière qui se lisent à distance moyenne.
+  float tuft = fbmR(p, 30, 3, 0.5, seed + 3u);
 
   // --- Fond : canopée sombre (herbe profonde), terre dans de rares trous ---
   float under = fbmP(p, 48, 4, seed + 2u);
@@ -29,7 +33,7 @@ Surface surface(float2 p, uint seed) {
   Blade g2 = scatterBlades(p, 135, 3, 0.8 + 0.15 * lush, 0.6, 0.2, 0.0018, seed + 30u);
   if (g2.height > g.height) g = g2;
   // Brins posés au-dessus du chaume (décalage de hauteur).
-  float gh = g.height > 0.0 ? 0.0004 + g.height : 0.0;
+  float gh = g.height > 0.0 ? 0.0004 + g.height + cm(0.5) * (tuft + 0.5) : 0.0;
 
   float3 deep = float3(0.05, 0.11, 0.018);
   float3 bright = float3(0.15, 0.28, 0.04);
@@ -42,6 +46,9 @@ Surface surface(float2 p, uint seed) {
   // Jeunes pousses vert vif et quelques brins secs parmi les verts.
   if (g.id.z < 0.08) blade = float3(0.20, 0.38, 0.045) * (1.0 + 0.2 * g.t);
   if (g.id.z > 0.97) blade = float3(0.20, 0.18, 0.09);
+  // Nervure plus claire, bords plus sombres : le brin reste lisible sans cerne d'AO.
+  blade *= 1.25 - 0.5 * g.across;
+  blade *= 1.0 + 0.7 * tuft;
 
   if (gh > height) {
     albedo = lerp(albedo, blade, g.cover);
@@ -49,10 +56,11 @@ Surface surface(float2 p, uint seed) {
   }
 
   // --- Trèfles : petites feuilles rondes, rares, par grappes ---
-  float cloverZone = smoothstep(0.28, 0.42, fbmP(p, 12, 3, seed + 50u));
-  Stones leaf = scatterStones(p, 120, 0.6 * cloverZone, float2(0.35, 0.5), 0.5, 0.15,
+  float cloverZone = smoothstep(0.32, 0.46, fbmP(p, 12, 3, seed + 50u));
+  Stones leaf = scatterStones(p, 150, 0.5 * cloverZone, float2(0.3, 0.45), 0.5, 0.15,
                               seed + 60u);
-  float lh = leaf.height > 0.0 ? 0.0022 + leaf.height : 0.0;
+  // Pas plus haut que les brins : sinon le trèfle l'emporte sur la roche au mélange.
+  float lh = leaf.height > 0.0 ? 0.0012 + leaf.height : 0.0;
   if (lh > height) {
     float3 cl = float3(0.09, 0.17, 0.035) * (0.8 + 0.4 * leaf.id.y);
     albedo = lerp(albedo, cl, leaf.cover);

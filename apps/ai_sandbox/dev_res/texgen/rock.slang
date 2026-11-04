@@ -1,44 +1,57 @@
-// Recette : roche sombre en écailles qui se chevauchent (marches aux bords usés, liserés
-// clairs), taches et veines fines. Inspirée de res/…/rock (photo), mais isotrope et sans
-// motif plus grand que ~1/5 de tuile : rien ne trahit la répétition de loin.
-// Contrat : procgen/lib/texgen.slang.
+// Recette : roche sombre fracturée, inspirée de res/…/rock (photo). Bosses séparées de
+// plis, écailles aux bords déchiquetés, fissures ramifiées à liseré minéral clair.
+// Contrat : procgen/lib/texgen.slang. Tailles en cm : lib/scale.slang.
 #include "procgen/texgen.slang"
 #include "lib/rock.slang"
 
 Surface surface(float2 p, uint seed) {
-  // --- Relief : grandes écailles + lobes plus petits, veines fines ---
-  // Marches hautes et nettes, rainure le long des joints : l'AO (calculée par le moteur
-  // depuis la hauteur) assombrit les creux.
-  Terrace big = terraces(p, 5, 0.05, 0.02, 0.025, 0.02, seed);
-  Terrace lobe = terraces(p, 13, 0.02, 0.008, 0.008, 0.03, seed + 100u);
-  Plates vein = crackedPlates(p, 11, 0.03, 0.02, 0.45, seed + 200u);
+  // Fissures allongées selon y (fréquence ×2 en x), sinueuses, comme sur la photo.
+  FractureStyle style = {
+    2, int2(2, 0), int2(0, 1),
+    45.0,  // bend
+    26.0,  // jag
+    1.6,   // width
+    9.0,   // depth
+    22.0,  // valley
+    5.0,   // scarp
+  };
+  Fracture f = fracture(p, style, seed);
 
-  float height = big.height + lobe.height;
-  height -= 0.005 * (1.0 - smoothstep(0.0, 0.06, big.edge));
-  height -= 0.002 * (1.0 - smoothstep(0.0, 0.08, lobe.edge));
-  height -= 0.0015 * vein.crack;
-  height += 0.0008 * fbmP(p, 48, 4, seed + 10u);           // surface irrégulière
-  height += 0.0003 * gradientNoiseP(p, 240, seed + 11u);   // grain
+  // --- Relief : du mètre au centimètre ---
+  // Warp fort : bosses aux contours irréguliers.
+  float2 w = cm(35.0) * float2(fbmR(p, 5, 4, 0.55, seed + 100u),
+                               fbmR(p, 5, 4, 0.55, seed + 101u));
+  float2 wp = p + w;
+  float lumps = fbmR(wp, 3, 3, 0.5, seed + 102u);             // masse, ~3 m
+  float billow = billowR(wp, 6, 4, 0.5, seed + 103u);         // bosses et plis, ~1,5 m
+  float scales = ledges(4.0 * fbmR(wp, 7, 6, 0.6, seed + 104u) + 8.0, 0.14); // écailles
+  float rough = ridgedR(p, 28, 5, 0.6, seed + 105u);          // rugosité, 35 cm → 1,5 cm
+  float grit = gradientNoiseP(p, 330, seed + 106u);           // grain, 3 cm
+
+  float height = f.height + cm(16.0) * lumps + cm(14.0) * billow + cm(2.6) * scales
+                 + cm(3.2) * rough + cm(0.35) * grit;
 
   // --- Couleur ---
-  // Contrastes modérés aux échelles moyennes : vus de loin, ils dessinent la grille de
-  // répétition. Les détails fins (taches, grain) se fondent, eux.
-  float3 base = float3(0.115, 0.105, 0.095) * (0.94 + 0.12 * big.id.z);
-  base *= 0.94 + 0.12 * lobe.id.z;
-  // Taches sombres (altération) et pâles (lichen gris), petites.
-  float darkSpot = smoothstep(0.05, 0.25, fbmP(p, 32, 4, seed + 20u));
-  base = lerp(base, base * 0.75, 0.6 * darkSpot);
-  float paleSpot = smoothstep(0.3, 0.45, fbmP(p, 40, 3, seed + 21u));
-  base = lerp(base, float3(0.16, 0.155, 0.15), 0.5 * paleSpot);
-  base *= 1.0 + 0.15 * gradientNoiseP(p, 180, seed + 22u);
+  float3 albedo = float3(0.118, 0.106, 0.096) * (0.90 + 0.20 * f.tint);
+  albedo *= 0.92 + 0.45 * (billow - 0.3);
+  // Taches d'altération à bord net, fines, au contour haché par `rough`.
+  // Petites (≲ 50 cm) : plus grandes, elles dessineraient la grille de répétition.
+  float blotch = fbmR(wp, 19, 5, 0.6, seed + 110u) + 0.25 * (rough - 0.7);
+  albedo = lerp(albedo, albedo * 0.80, smoothstep(0.05, 0.12, blotch));
+  float lichen = fbmR(wp, 29, 5, 0.6, seed + 111u) + 0.3 * (rough - 0.7);
+  albedo = lerp(albedo, float3(0.15, 0.145, 0.135), 0.4 * smoothstep(0.26, 0.31, lichen));
+  // Grain minéral net : c'est lui qui se lit de près.
+  albedo *= 1.0 + 1.1 * (rough - 0.7);
+  albedo *= 1.0 + 0.18 * grit;
 
-  // Liserés clairs ocre sur le bord usé des écailles (variation de matière : pierre
-  // fraîchement cassée, pas un éclairage).
-  // Liseré fin : de loin, il se fond dans la teinte moyenne au lieu de faire tache.
-  float3 tan = float3(0.36, 0.26, 0.16);
-  float3 albedo = lerp(base, tan, 0.5 * big.rim + 0.25 * lobe.rim);
-  // Veines minérales claires.
-  albedo = lerp(albedo, float3(0.22, 0.20, 0.18), 0.5 * vein.crack);
+  // Calcite claire dans les fissures, halo très léger autour des principales.
+  // Remplissage irrégulier : un trait de couleur uni ferait dessiné.
+  // Discret : ×2 en jeu (albédo du matériau / moyenne), et un trait clair vu de loin
+  // dessine la répétition de la tuile. La fissure se lit surtout par son relief.
+  float3 calcite = float3(0.22, 0.175, 0.13) * (0.6 + 0.8 * saturate(rough + 0.3 * grit - 0.3));
+  albedo = lerp(albedo, calcite, 0.7 * f.main);
+  albedo = lerp(albedo, calcite, 0.6 * f.branch);
+  albedo = lerp(albedo, calcite * 0.8, 0.5 * f.hair);
 
   Surface s = { height, saturate(albedo) };
   return s;
