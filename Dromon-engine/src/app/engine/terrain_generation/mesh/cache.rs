@@ -16,15 +16,11 @@
 //! cache absorbe les **allers-retours de moyenne amplitude** — avancer de 300 unités puis
 //! revenir, où les deux seuils ont réellement été franchis.
 //!
-//! ## La clé inclut les coutures
-//! `(coord, lod, faces, taper)` et non `(coord, lod)` : la géométrie dépend aussi du
-//! rétrécissement demi-pas imposé par les faces de transition, et de son atténuation aux
-//! extrémités. Ressortir une maille aux mauvaises coutures rouvrirait une fissure. Un
-//! même `(coord, lod)` peut donc exister en plusieurs variantes, ce qui abaisse un peu le
-//! taux de réutilisation.
+//! ## La clé ignore les coutures
+//! `(coord, lod)` suffit : un mesh contient ses 4 dalles et ne dépend pas de ses voisins,
+//! qui n'interviennent qu'au rendu (`ChunkSeam`).
 
 use crate::app::engine::renderer::render_resources::MeshData;
-use crate::app::engine::terrain_generation::lod::TransitionFaces;
 use glam::IVec2;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
@@ -41,9 +37,6 @@ const EVICT_DOWN_TO: f32 = 0.9;
 pub struct MeshKey {
     pub coord: IVec2,
     pub lod: u8,
-    pub faces: TransitionFaces,
-    /// Atténuations aux extrémités des faces à dalle (cf. `LodGrid::taper`).
-    pub taper: u8,
 }
 
 struct Entry {

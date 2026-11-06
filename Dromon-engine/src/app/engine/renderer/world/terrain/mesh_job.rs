@@ -341,7 +341,7 @@ impl MeshJob {
     }
 
     /// Configuration LOD du lot.
-    pub(super) fn grid(&self) -> &LodGrid {
+    pub(super) fn grid(&self) -> &Arc<LodGrid> {
         &self.grid
     }
 
@@ -431,7 +431,7 @@ fn dispatch(
             let i = next.fetch_add(1, Ordering::Relaxed);
             let Some(&coord) = todo.get(i) else { return };
             let t = Instant::now();
-            let data = mesh_chunk(&snapshot, &grid, coord);
+            let data = mesh_chunk(&snapshot, grid.lod(coord), coord);
             // Récepteur détruit (terrain régénéré entre-temps) : le reste du lot ne
             // servirait plus à rien.
             if sender.send((coord, data, t.elapsed())).is_err() {

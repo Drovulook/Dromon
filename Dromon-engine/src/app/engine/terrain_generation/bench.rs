@@ -11,7 +11,7 @@ use anyhow::Result;
 use glam::IVec2;
 
 use super::{
-    CHUNK_SIZE, ChunkStore, LodGrid, MacroMap, TerrainSnapshot, TerrainSource, macro_map_cache,
+    CHUNK_SIZE, ChunkStore, MacroMap, TerrainSnapshot, TerrainSource, macro_map_cache,
     mesh_chunk,
 };
 use crate::config::{
@@ -27,7 +27,8 @@ pub fn mesh_bench(per_lod: usize) -> Result<String> {
     let max_lod = RenderConfig::load()?.terrain.lod.max_lod();
     let (macro_map, _) = MacroMap::load_or_build(&config, &macro_map_cache())?;
     let source = Arc::new(TerrainSource::new(&config, &materials, &rules, macro_map)?);
-    let snapshot = TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default());
+    let snapshot =
+        TerrainSnapshot::new(&source, &ChunkStore::default(), MeshDebug::default(), max_lod);
 
     let chunks = land_sample(&source, config.macro_.world.sea_level as f32, per_lod);
     let n = chunks.len().max(1);
@@ -36,23 +37,20 @@ pub fn mesh_bench(per_lod: usize) -> Result<String> {
 
     profiling::set_enabled(true);
     for lod in 0..=max_lod {
-        // Chaque chunk seul dans sa grille : aucun voisin, donc aucune transition.
-        let grids: Vec<LodGrid> = chunks.iter().map(|&c| single(c, lod)).collect();
-
         // Temps nu d'abord : c'est le chiffre de référence, le profilage ajoutant
         // ~100 ns par bloc mesuré.
         profiling::set_recording(false);
         let start = Instant::now();
         let mut vertices = 0;
-        for (&c, grid) in chunks.iter().zip(&grids) {
-            vertices += mesh_chunk(&snapshot, grid, c).vertices.len();
+        for &c in &chunks {
+            vertices += mesh_chunk(&snapshot, lod, c).vertices.len();
         }
         let bare = start.elapsed();
 
         // Même travail, profilé : la répartition entre postes.
         profiling::set_recording(true);
-        for (&c, grid) in chunks.iter().zip(&grids) {
-            mesh_chunk(&snapshot, grid, c);
+        for &c in &chunks {
+            mesh_chunk(&snapshot, lod, c);
         }
         profiling::set_recording(false);
 
@@ -84,14 +82,6 @@ fn land_sample(source: &TerrainSource, sea_level: f32, n: usize) -> Vec<IVec2> {
     // fausserait la moyenne.
     let stride = (land.len() / n.max(1)).max(1);
     land.into_iter().step_by(stride).take(n).collect()
-}
-
-/// Grille réduite au seul chunk `c`, au niveau `lod`.
-fn single(c: IVec2, lod: u8) -> LodGrid {
-    let mut grid = LodGrid::new(vec![c]);
-    grid.set_raw_lods(|_, _| lod);
-    grid.rebalance();
-    grid
 }
 
 /// Arbre de profilage (format de `profiling::serialize_and_clear`, parcours en

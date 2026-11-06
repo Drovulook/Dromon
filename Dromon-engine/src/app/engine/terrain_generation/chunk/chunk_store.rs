@@ -61,6 +61,8 @@ pub struct TerrainSnapshot {
     edits: FxHashMap<IVec2, Arc<ChunkData>>,
     /// Options de maillage (`debug.ron`), lues par les workers.
     mesh_debug: MeshDebug,
+    /// LOD maximal : un tel chunk n'a jamais de voisin plus grossier, donc pas de dalle.
+    max_lod: u8,
 }
 
 impl TerrainSnapshot {
@@ -68,12 +70,19 @@ impl TerrainSnapshot {
         source: &Arc<TerrainSource>,
         store: &ChunkStore,
         mesh_debug: MeshDebug,
+        max_lod: u8,
     ) -> TerrainSnapshot {
         TerrainSnapshot {
             source: source.clone(),
             edits: store.chunks.clone(),
             mesh_debug,
+            max_lod,
         }
+    }
+
+    /// LOD maximal de la configuration.
+    pub fn max_lod(&self) -> u8 {
+        self.max_lod
     }
 
     /// Options de maillage de debug.

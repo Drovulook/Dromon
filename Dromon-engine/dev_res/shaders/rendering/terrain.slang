@@ -5,12 +5,17 @@
 #include "lib/water.slang"
 #include "lib/materials.slang"
 #include "lib/tonemap.slang"
+#include "lib/chunk_seam.slang"
+
+// ⚠ Même disposition que le bloc poussé par `TerrainRenderSystem`.
+[[vk::push_constant]]
+ConstantBuffer<ChunkSeam> chunkSeam;
 
 // Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0 à 3).
 struct VSInput {
-  float3 inPosition;  // location 0
+  float3 inPosition;  // location 0 — coordonnées monde, avant couture
   float3 inNormal;    // location 1 — normale lissée (gradient de densité)
-  uint4 inMaterials;  // location 2 — IDs dans la table des matériaux (w inutilisé)
+  uint4 inMaterialIdsAndSeamRole;  // location 2 — xyz : IDs dans la table des matériaux ; w : rôle de couture
   float4 inWeights;   // location 3 — poids associés, somme 1 (w inutilisé)
 }
 
@@ -38,15 +43,13 @@ struct VSOutput {
 [shader("vertex")]
 VSOutput terrainVertMain(VSInput input) {
   VSOutput output;
-  float4 worldPos = mul(pc.model, float4(input.inPosition, 1.0));
-  output.pos = mul(ubo.proj, mul(ubo.view, worldPos));
-  // model = identité pour le terrain, mais on applique la normalMatrix par
-  // cohérence (gère un éventuel scale non uniforme).
-  output.worldNormal = mul((float3x3)pc.normalMatrix, input.inNormal);
+  float3 worldPos = seamDisplace(chunkSeam, input.inPosition, input.inMaterialIdsAndSeamRole.w);
+  output.pos = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
+  output.worldNormal = input.inNormal;
   output.rain = precipitation(worldPos.xy) + coastMoisture(worldPos.xy);
-  output.materialIds = input.inMaterials;
+  output.materialIds = input.inMaterialIdsAndSeamRole;
   output.materialWeights = input.inWeights;
-  output.worldPos = worldPos.xyz;
+  output.worldPos = worldPos;
   return output;
 }
 
@@ -54,15 +57,14 @@ VSOutput terrainVertMain(VSInput input) {
 // 8 bits (1/255 ≈ 4e-3), marge pour l'exposition du tone mapping.
 static const float MIN_SEABED_VISIBILITY = 1e-3;
 
-// Vertex shader « depth-only » de la passe d'ombre. Entrée minimale (position
-// seule) → la pipeline d'ombre du terrain n'exige que la location 0.
+// Vertex shader « depth-only » de la passe d'ombre. Position seule : elle ne dessine que
+// le corps des chunks, sans couture (écart ≤ step/2, loin de la caméra).
 struct ShadowVSInput {
   float3 inPosition; // location 0
 }
 [shader("vertex")]
 float4 terrainShadowVertMain(ShadowVSInput input) : SV_Position {
-  float4 worldPos = mul(pc.model, float4(input.inPosition, 1.0));
-  return mul(ubo.lightViewProj, worldPos);
+  return mul(ubo.lightViewProj, float4(input.inPosition, 1.0));
 }
 
 [shader("fragment")]

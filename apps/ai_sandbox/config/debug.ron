@@ -10,6 +10,6 @@
     mesh: (
         world_walls: true,        // parois verticales au bord du monde
         world_bottom: true,       // face du dessous des chunks
-        transition_color: false,  // cellules de transition Transvoxel en magenta
+        transition_color: true,  // cellules de transition Transvoxel en magenta
     ),
 )

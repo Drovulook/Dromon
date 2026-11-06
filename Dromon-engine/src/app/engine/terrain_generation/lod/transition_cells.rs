@@ -23,13 +23,12 @@ use glam::{IVec2, IVec3, Vec3};
 use rustc_hash::FxHashMap;
 
 use crate::app::engine::{
-    renderer::render_resources::TerrainVertex,
+    renderer::render_resources::{SEAM_VERTEX_FIXED, SEAM_VERTEX_SLAB_HIGH, TerrainVertex},
     terrain_generation::{
         chunk::{CHUNK_SIZE, ISO_LEVEL},
         generation::DensityField,
         lod::{
             Face,
-            transition_shrink::HalfStepShrink,
             transvoxel_tables::{
                 TRANSITION_CASE_BITS, TRANSITION_CELL_CLASS, TRANSITION_CELL_DATA,
                 TRANSITION_CORNER_UV, transition_edge,
@@ -92,7 +91,6 @@ pub fn add_transition_cells(
     coord: IVec2,
     face: Face,
     step: i32,
-    shrink: HalfStepShrink,
     bounds_z: (i32, i32),
     vertices: &mut Vec<TerrainVertex>,
     indices: &mut Vec<u32>,
@@ -159,12 +157,12 @@ pub fn add_transition_cells(
             }
 
             // Sommets de la cellule (≤ 12), puis triangles par triplets d'indices LOCAUX
-            // à cette liste. On retient les positions pour orienter comme en MC.
+            // à cette liste. On retient les positions d'orientation (cf. `transition_vertex`).
             let mut vi = [0u32; 12];
             let mut vp = [Vec3::ZERO; 12];
             for k in 0..vertex_count {
                 let (c0, c1) = transition_edge(case, k);
-                let (idx, p, _) = transition_vertex(
+                let (idx, p) = transition_vertex(
                     c0 as usize,
                     c1 as usize,
                     &plane,
@@ -172,7 +170,6 @@ pub fn add_transition_cells(
                     step,
                     frame.inward,
                     face,
-                    shrink,
                     field,
                     vertices,
                     trans_map,
@@ -205,6 +202,10 @@ pub fn add_transition_cells(
 /// normale/matériaux mémoïsés — mais en **demi-unités monde** : les positions y sont
 /// entières malgré le rentrement d'un demi-pas, donc utilisables telles quelles comme
 /// clé exacte (cf. [`transition_point`]).
+///
+/// Le sommet est émis **sur le plan frontière** ; le shader rentre ceux de la face haute
+/// réso de l'épaisseur locale de la dalle. Rend son index et sa **position d'orientation**,
+/// rentrée de l'épaisseur nominale `step/2` : une dalle plate n'a pas d'enroulement.
 #[allow(clippy::too_many_arguments)]
 fn transition_vertex(
     c0: usize,
@@ -214,17 +215,22 @@ fn transition_vertex(
     step: i32,
     inward: IVec3,
     face: Face,
-    shrink: HalfStepShrink,
     field: &DensityField,
     vertices: &mut Vec<TerrainVertex>,
     trans_map: &mut FxHashMap<EdgeKey, u32>,
     normal_cache: &mut NormalCache,
     surface_materials: &mut MaterialCache,
-) -> (u32, Vec3, Vec3) {
+) -> (u32, Vec3) {
     // Aucune arête de la table ne relie la face haute réso à la basse (vérifié sur les 512
     // cas) : un sommet appartient donc entièrement à l'une ou à l'autre. C'est ce qui rend
-    // le test de `side` sur le seul `c0` légitime plus bas.
+    // le test sur le seul `c0` légitime.
     debug_assert_eq!(TRANSITION_CORNER_UV[c0][2], TRANSITION_CORNER_UV[c1][2]);
+    let high_res = TRANSITION_CORNER_UV[c0][2] == 0;
+    let nominal_inset = if high_res {
+        inward.as_vec3() * 0.5 * step as f32
+    } else {
+        Vec3::ZERO
+    };
     let ha = transition_point(c0, plane, step, inward);
     let hb = transition_point(c1, plane, step, inward);
     // Clé canonique : les deux extrémités triées (indépendante de l'ordre dans la table).
@@ -234,25 +240,9 @@ fn transition_vertex(
         (hb.x, hb.y, hb.z, ha.x, ha.y, ha.z)
     };
     if let Some(&idx) = trans_map.get(&key) {
-        let v = vertices[idx as usize];
-        return (idx, v.pos, v.normal);
+        return (idx, vertices[idx as usize].pos + nominal_inset);
     }
 
-    // Positions réelles des deux extrémités : le point du plan, rentré dans le chunk de
-    // l'épaisseur LOCALE de la dalle (atténuée près des bords, nulle sur la face basse
-    // réso — qui doit rester sur le plan pour épouser le voisin). Les demi-unités `ha/hb`
-    // ne servaient qu'à la clé de mutualisation.
-    let inward_f = inward.as_vec3();
-    let corner = |k: usize| -> Vec3 {
-        let p = plane[k].as_vec3();
-        if TRANSITION_CORNER_UV[k][2] == 0 {
-            p + inward_f * shrink.inset_at(face, p)
-        } else {
-            p
-        }
-    };
-    let pa = corner(c0);
-    let pb = corner(c1);
     let (da, db) = (dens[c0], dens[c1]);
     let denom = db - da;
     let t = if denom.abs() < 1e-6 {
@@ -260,36 +250,30 @@ fn transition_vertex(
     } else {
         (ISO_LEVEL - da) / denom
     };
-    // Point d'échantillonnage : l'interpolé sur le PLAN FRONTIÈRE, sans le retrait — c'est
-    // lui qui est sur l'iso-surface (même raison qu'en MC, cf. [`edge_vertex`]), et c'est
-    // exactement le point que calcule le sommet MC jumeau ⇒ normale et matériaux identiques
-    // des deux côtés de la soudure.
+    // Interpolé sur le PLAN FRONTIÈRE : c'est le point de l'iso-surface, exactement celui
+    // que calcule le sommet MC jumeau ⇒ normale et matériaux identiques des deux côtés de
+    // la soudure. Aucune correction tangentielle au rendu : avec l'atténuation, la surface
+    // MC ne bouge plus DANS le plan d'une face de transition.
     let pf = |k: usize| plane[k].as_vec3();
-    let p_field = pf(c0) + (pf(c1) - pf(c0)) * t;
-
-    // Position émise : simplement l'interpolé sur les points déjà rentrés. Aucune correction
-    // tangentielle — avec l'atténuation, la surface MC ne bouge plus DANS le plan d'une face
-    // de transition (l'amplitude de l'axe tangent y est nulle), donc la dalle n'a rien à
-    // suivre latéralement.
-    let p = pa + (pb - pa) * t;
+    let p = pf(c0) + (pf(c1) - pf(c0)) * t;
 
     // Pochoir de la face où vit le sommet : celui du chunk sur la face haute réso (jumeau
     // MC dans ce chunk), celui du voisin grossier sur la face basse réso (jumeau MC chez
     // lui) ⇒ normales et matériaux identiques des deux côtés de chaque soudure, et
     // l'éclairage passe d'une échelle à l'autre à travers la dalle, sans rupture.
-    let stencil = if TRANSITION_CORNER_UV[c0][2] == 0 {
-        step
+    let (stencil, role) = if high_res {
+        (step, SEAM_VERTEX_SLAB_HIGH + face as u16)
     } else {
-        2 * step
+        (2 * step, SEAM_VERTEX_FIXED)
     };
     let normal = vertex_normal(field, normal_cache, plane[c0], plane[c1], t, stencil);
     // Teinte de debug (`debug.ron`) appliquée après coup par `mesh_chunk`.
-    let material = cached_material(surface_materials, p_field, stencil, |q| {
+    let material = cached_material(surface_materials, p, stencil, |q| {
         let gradient = field.edge_macro_gradient(plane[c0], plane[c1], t, stencil);
         field.surface_material(q, normal, gradient)
     });
     let idx = vertices.len() as u32;
-    vertices.push(TerrainVertex::new(p, normal, material));
+    vertices.push(TerrainVertex::new(p, normal, material).with_seam_role(role));
     trans_map.insert(key, idx);
-    (idx, p, normal)
+    (idx, p + nominal_inset)
 }

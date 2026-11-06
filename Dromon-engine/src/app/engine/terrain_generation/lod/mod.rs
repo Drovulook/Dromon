@@ -11,6 +11,7 @@
 //! assez bougé.
 
 pub mod grid;
+pub mod shown_lods;
 pub mod transition_cells;
 pub mod transition_shrink;
 mod transvoxel_tables;
@@ -175,15 +176,10 @@ impl TransitionFaces {
         self.0 & (1 << f as u8) != 0
     }
 
-    /// Aucune face à coudre (cas courant : intérieur d'un anneau de LOD).
+    /// Le masque brut, un bit par [`Face`] dans l'ordre de [`Face::ALL`].
     #[inline]
-    pub fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    /// Itère les faces actives (consommé par le mailleur aux étapes suivantes).
-    pub fn iter(self) -> impl Iterator<Item = Face> {
-        Face::ALL.into_iter().filter(move |&f| self.contains(f))
+    pub fn bits(self) -> u8 {
+        self.0
     }
 
     #[inline]

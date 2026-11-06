@@ -6,7 +6,6 @@ use crate::app::engine::{
     terrain_generation::{
         chunk::ISO_LEVEL,
         generation::DensityField,
-        lod::transition_shrink::HalfStepShrink,
         marching_cubes::mc_tables::{CORNERS, EDGE_CORNERS},
         mesh::vertex::{EdgeKey, MaterialCache, NormalCache, cached_material, vertex_normal},
     },
@@ -22,7 +21,6 @@ pub fn edge_vertex(
     e: usize,
     base: [i32; 3],
     step: i32,
-    shrink: HalfStepShrink,
     corner_d: &[f32; 8],
     field: &DensityField,
     vertices: &mut Vec<TerrainVertex>,
@@ -65,19 +63,13 @@ pub fn edge_vertex(
     } else {
         (ISO_LEVEL - da) / denom
     };
-    // Deux positions distinctes, et c'est volontaire : `p_field` est le point interpolé,
-    // donc SUR l'iso-surface ; `p` est ce point comprimé, donc décollé d'elle. Normale et
-    // matériaux s'évaluent sur l'arête non comprimée (`ia → ib` à `t`, soit `p_field`),
-    // exactement comme le fait la dalle ⇒ les deux côtés de la couture évaluent le même
-    // point, aucune rupture d'éclairage ni de matériau.
-    // La clé de mutualisation, elle, reste les coins entiers d'origine : le sommet partagé
-    // avec le cube voisin garde le même index.
-    let p_field = pa + (pb - pa) * t;
-    let p = shrink.apply(p_field);
+    // Le sommet reste sur l'iso-surface : la compression de la couture se fait au rendu
+    // (`lib/chunk_seam.slang`).
+    let p = pa + (pb - pa) * t;
 
     let (a, b) = (IVec3::from_array(ia), IVec3::from_array(ib));
     let normal = vertex_normal(field, normal_cache, a, b, t, step);
-    let material = cached_material(surface_materials, p_field, step, |q| {
+    let material = cached_material(surface_materials, p, step, |q| {
         field.surface_material(q, normal, field.edge_macro_gradient(a, b, t, step))
     });
     let idx = vertices.len() as u32;

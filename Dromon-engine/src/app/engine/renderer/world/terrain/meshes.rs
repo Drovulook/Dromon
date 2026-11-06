@@ -1,18 +1,50 @@
+use bytemuck::{Pod, Zeroable};
 use glam::IVec2;
 use rustc_hash::FxHashMap;
 
 use crate::app::engine::renderer::render_resources::TerrainMesh;
+use crate::app::engine::terrain_generation::{CHUNK_SIZE, LodGrid};
+
+/// Couture d'un chunk, poussée à chaque draw. ⚠ Même disposition que `ChunkSeam`
+/// (`lib/chunk_seam.slang`).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ChunkSeam {
+    /// Coin `(x, y)` du chunk, en voxels.
+    pub origin: IVec2,
+    /// Pas du chunk (`1 << lod`).
+    pub lod_step: f32,
+    /// Bits 0-3 : faces à dalle ; bits 4-11 : atténuations.
+    pub bits: u32,
+}
+
+impl ChunkSeam {
+    /// Couture du chunk `coord` sous la configuration `grid`.
+    pub fn new(grid: &LodGrid, coord: IVec2) -> ChunkSeam {
+        ChunkSeam {
+            origin: coord * CHUNK_SIZE as i32,
+            lod_step: (1u32 << grid.lod(coord)) as f32,
+            bits: grid.faces(coord).bits() as u32 | (grid.taper(coord) as u32) << 4,
+        }
+    }
+
+    /// La dalle de la face d'index `face` dans `Face::ALL` est-elle à dessiner ?
+    #[inline]
+    pub fn has_slab(&self, face: usize) -> bool {
+        self.bits & (1 << face) != 0
+    }
+}
 
 /// Tout ce qu'un chunk **installé** possède côté rendu. Purement *dérivé* : reconstructible
 /// depuis `(graine, coord, LOD)`, donc jetable sans autre forme de procès au déchargement.
 /// Les données du joueur, elles, vivent dans le
 /// [`ChunkStore`](crate::app::engine::terrain_generation::ChunkStore) et lui survivent.
 ///
-/// N'a qu'un champ aujourd'hui ; c'est ici que viendront les instances de props
-/// (arbres, rochers) et la géométrie de collision, qui suivent exactement le même
-/// cycle de vie.
+/// C'est ici que viendront les instances de props (arbres, rochers) et la géométrie de
+/// collision, qui suivent exactement le même cycle de vie.
 pub struct InstalledChunk {
     pub mesh: TerrainMesh,
+    pub seam: ChunkSeam,
 }
 
 /// Les chunks **installés** (mesh présent sur le GPU), plus la liste **compacte** de
@@ -54,8 +86,13 @@ impl InstalledChunks {
 
     /// Renvoie le mesh remplacé, le cas échéant. Un **remplacement** (cas courant du
     /// LOD) ne touche pas `coords` : la coordonnée y est déjà.
-    pub fn insert(&mut self, coord: IVec2, mesh: TerrainMesh) -> Option<TerrainMesh> {
-        let previous = self.chunks.insert(coord, InstalledChunk { mesh });
+    pub fn insert(
+        &mut self,
+        coord: IVec2,
+        mesh: TerrainMesh,
+        seam: ChunkSeam,
+    ) -> Option<TerrainMesh> {
+        let previous = self.chunks.insert(coord, InstalledChunk { mesh, seam });
         if previous.is_none() {
             self.coords.push(coord);
         }

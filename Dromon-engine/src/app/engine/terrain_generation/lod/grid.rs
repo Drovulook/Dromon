@@ -232,7 +232,7 @@ impl LodGrid {
         for i in 0..self.coords.len() {
             let c = self.coords[i];
             let Some(idx) = self.index(c) else { continue };
-            let taper = taper_bits(self, c);
+            let taper = taper_bits(c, |n| self.lod(n), |n| self.faces(n));
             if let Some(cell) = self.cells[idx].as_mut() {
                 cell.taper = taper;
             }

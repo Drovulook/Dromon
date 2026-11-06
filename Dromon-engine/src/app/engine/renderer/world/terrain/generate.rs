@@ -241,7 +241,7 @@ impl Terrain {
         // Vue figée du terrain pour ce lot : le relief plus les édits du moment (aucun
         // ici, mais la génération initiale suit le même chemin que le re-maillage).
         let store = ChunkStore::default();
-        let snapshot = TerrainSnapshot::new(&source, &store, debug.mesh);
+        let snapshot = TerrainSnapshot::new(&source, &store, debug.mesh, params.lod.max_lod());
 
         // Aucun maillage ici : le monde se construit en fond, frame après frame, pendant
         //    que le jeu tourne. Du plus proche au plus lointain de la caméra, pour que le

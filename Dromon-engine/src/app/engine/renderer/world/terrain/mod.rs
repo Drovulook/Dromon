@@ -19,7 +19,7 @@ use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
 use crate::app::engine::renderer::world::terrain::loaded_mask::LoadedMask;
 use crate::app::engine::renderer::world::terrain::mesh_job::MeshJob;
-use crate::app::engine::renderer::world::terrain::meshes::InstalledChunks;
+use crate::app::engine::renderer::world::terrain::meshes::{ChunkSeam, InstalledChunks};
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::{
     ChunkStore, ChunkStreamer, LodFocus, LodGrid, MeshCache, MeshKey, TerrainSnapshot,
@@ -121,7 +121,8 @@ impl Terrain {
         // Instantané du terrain pour ce lot : relief immuable + `Arc` des chunks édités
         // tels qu'ils sont maintenant. Le joueur peut creuser pendant le maillage sans
         // que les workers voient la modification à mi-lot — même garantie que la `grid`.
-        let snapshot = TerrainSnapshot::new(&self.source, &self.store, self.debug.mesh);
+        let snapshot =
+            TerrainSnapshot::new(&self.source, &self.store, self.debug.mesh, self.max_lod);
         // Du plus proche au plus lointain : les workers suivent cet ordre, donc les
         // groupes proches de la caméra s'affichent en premier.
         update.dirty.sort_by(|&a, &b| {
@@ -151,7 +152,8 @@ impl Terrain {
         job.collect();
         let complete = job.build(&mut self.mesh_cache, &self.context)?;
         let built = job.take_built();
-        self.install(built);
+        let grid = job.grid().clone();
+        self.install(built, &grid);
         if !complete {
             return Ok(());
         }
@@ -174,7 +176,7 @@ impl Terrain {
 
     /// Bascule des meshes bâtis. Ne fait que déplacer des `TerrainMesh` déjà construits;
     /// quelques microsecondes, donc sans risque pour la frame.
-    fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>) {
+    fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>, grid: &LodGrid) {
         if built.is_empty() {
             return;
         }
@@ -183,7 +185,8 @@ impl Terrain {
             match mesh {
                 // Remplacement : `insert` rend l'ancien, la coordonnée ne bouge pas.
                 Some(mesh) => {
-                    if let Some(old) = self.chunks.insert(coord, mesh) {
+                    let seam = ChunkSeam::new(grid, coord);
+                    if let Some(old) = self.chunks.insert(coord, mesh, seam) {
                         self.graveyard.bury(old);
                     }
                     self.loaded_mask.set(coord, true);
@@ -314,7 +317,5 @@ fn mesh_key(grid: &LodGrid, coord: IVec2) -> MeshKey {
     MeshKey {
         coord,
         lod: grid.lod(coord),
-        faces: grid.faces(coord),
-        taper: grid.taper(coord),
     }
 }

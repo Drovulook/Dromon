@@ -7,40 +7,61 @@ use ash::vk;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use std::mem::offset_of;
+use std::ops::Range;
 use std::sync::Arc;
 
 /// Canaux de matériau d'un sommet : 4 et non [`VOXEL_MATERIALS`] (3), car Vulkan ne
-/// garantit les formats de sommet 8/16 bits qu'en 4 composantes. Le 4ᵉ reste à zéro.
+/// garantit les formats de sommet 8/16 bits qu'en 4 composantes. Le 4ᵉ porte le rôle de
+/// couture ; son poids reste à zéro.
 const VERTEX_MATERIAL_CHANNELS: usize = 4;
+
+// Rôle d'un sommet dans la couture. ⚠ Synchronisés avec `lib/chunk_seam.slang`.
+/// Surface MC : comprimée près d'une face à dalle.
+const SEAM_VERTEX_BODY: u16 = 0;
+/// Jamais déplacé : dalle côté voisin, fond et parois.
+pub const SEAM_VERTEX_FIXED: u16 = 1;
+/// Dalle côté chunk : `+ i` pour la face d'index `i` dans `Face::ALL`.
+pub const SEAM_VERTEX_SLAB_HIGH: u16 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct TerrainVertex {
+    /// Coordonnées monde, avant la déformation de la couture.
     pub pos: Vec3,
     pub normal: Vec3, // normale lissée (gradient de densité), pour l'éclairage
-    /// IDs de matériau (`R16G16B16A16_UINT`), indices dans la table GPU.
-    pub materials: [u16; VERTEX_MATERIAL_CHANNELS],
+    /// `R16G16B16A16_UINT` : 3 IDs de matériau (indices dans la table GPU), puis le rôle
+    /// de couture.
+    pub material_ids_and_seam_role: [u16; VERTEX_MATERIAL_CHANNELS],
     /// Poids associés (`R8G8B8A8_UNORM` : 255 → 1.0), somme 255.
     pub weights: [u8; VERTEX_MATERIAL_CHANNELS],
 }
 
 impl TerrainVertex {
+    /// Sommet de rôle [`SEAM_VERTEX_BODY`]. Autre rôle : [`TerrainVertex::with_seam_role`].
     pub fn new(pos: Vec3, normal: Vec3, voxel: Voxel) -> TerrainVertex {
-        let mut materials = [0; VERTEX_MATERIAL_CHANNELS];
+        let mut material_ids_and_seam_role = [0; VERTEX_MATERIAL_CHANNELS];
         let mut weights = [0; VERTEX_MATERIAL_CHANNELS];
-        materials[..VOXEL_MATERIALS].copy_from_slice(&voxel.materials);
+        material_ids_and_seam_role[..VOXEL_MATERIALS].copy_from_slice(&voxel.materials);
+        material_ids_and_seam_role[VOXEL_MATERIALS] = SEAM_VERTEX_BODY;
         weights[..VOXEL_MATERIALS].copy_from_slice(&voxel.weights);
         TerrainVertex {
             pos,
             normal,
-            materials,
+            material_ids_and_seam_role,
             weights,
         }
     }
 
-    /// Remplace les matériaux par `material` seul (teintes de debug).
+    pub fn with_seam_role(mut self, role: u16) -> TerrainVertex {
+        self.material_ids_and_seam_role[VOXEL_MATERIALS] = role;
+        self
+    }
+
+    /// Remplace les matériaux par `material` seul (teintes de debug), sans toucher au rôle.
     pub fn set_material(&mut self, material: u16) {
-        *self = TerrainVertex::new(self.pos, self.normal, Voxel::solid(material));
+        let role = self.material_ids_and_seam_role[VOXEL_MATERIALS];
+        *self = TerrainVertex::new(self.pos, self.normal, Voxel::solid(material))
+            .with_seam_role(role);
     }
 
     pub fn get_binding_description() -> vk::VertexInputBindingDescription {
@@ -69,7 +90,7 @@ impl TerrainVertex {
                 binding: 0,
                 location: 2,
                 format: vk::Format::R16G16B16A16_UINT,
-                offset: offset_of!(TerrainVertex, materials) as u32,
+                offset: offset_of!(TerrainVertex, material_ids_and_seam_role) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding: 0,
@@ -89,10 +110,18 @@ impl TerrainVertex {
 /// (2–10 ms).
 pub struct MeshData {
     pub vertices: Vec<TerrainVertex>,
+    /// Le corps du chunk (surface, fond, parois), puis les dalles, à la suite.
     pub indices: Vec<u32>,
+    /// Plage d'`indices` de la dalle de chaque face, dans l'ordre de `Face::ALL`.
+    pub slabs: [Range<u32>; 4],
 }
 
 impl MeshData {
+    /// Nombre d'index du corps : tout ce qui précède la première dalle.
+    pub fn body_index_count(&self) -> u32 {
+        self.slabs[0].start
+    }
+
     /// Chunk sans géométrie (entièrement plein ou entièrement vide). Vulkan interdit les
     /// buffers de taille 0 : ces chunks n'ont pas de [`TerrainMesh`] du tout.
     pub fn is_empty(&self) -> bool {
@@ -144,10 +173,16 @@ impl TerrainMesh {
         })
     }
 
-    /// Nombre d'index à dessiner.
+    /// Nombre d'index du corps du chunk, placés en tête de l'index buffer.
     #[inline]
-    pub fn index_count(&self) -> u32 {
-        self.data.indices.len() as u32
+    pub fn body_index_count(&self) -> u32 {
+        self.data.body_index_count()
+    }
+
+    /// Plage d'index de la dalle de la face d'index `face` dans `Face::ALL`.
+    #[inline]
+    pub fn slab_indices(&self, face: usize) -> Range<u32> {
+        self.data.slabs[face].clone()
     }
 
     /// Crée la paire (buffer de staging host-visible, buffer device-local) et y

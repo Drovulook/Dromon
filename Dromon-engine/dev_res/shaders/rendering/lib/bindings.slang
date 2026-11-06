@@ -1,6 +1,6 @@
-// Ressources liées au pipeline, communes à tous les shaders : UBO (set 0) et
-// push constants. ⚠ Doit rester synchronisé avec `UniformBufferObject`
-// (uniform_buffer.rs) : même ordre de champs.
+// UBO (set 0), commun à tous les shaders. Les push constants sont propres à chaque
+// shader. ⚠ Doit rester synchronisé avec `UniformBufferObject` (uniform_buffer.rs) :
+// même ordre de champs.
 #pragma once
 
 // Nombre de vagues de la houle. ⚠ Synchronisé avec `WAVE_COUNT` (world/water/waves.rs).
@@ -45,18 +45,3 @@ struct UniformBuffer {
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;
-
-// Push constant : matrice « model » + matrice normale (inverse-transposée de la
-// 3x3 du model, calculée côté CPU), poussées par objet / par chunk de terrain.
-struct PushConstants {
-    float4x4 model;
-    float4x4 normalMatrix;
-#ifdef TERRAIN_SEAMS
-    // Coutures du chunk dessiné : `ChunkSeams` côté Rust.
-    float2 chunkOrigin;
-    float chunkStep;
-    uint chunkSeamBits; // bits 0–3 : faces à dalle ; bits 4–11 : atténuations
-#endif
-};
-[[vk::push_constant]]
-ConstantBuffer<PushConstants> pc;

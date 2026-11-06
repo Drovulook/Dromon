@@ -1,8 +1,16 @@
 // Shader des render objects (modèles 3D texturés).
-// UBO caméra et push constants : lib/bindings.slang ; shadow map et
-// computeShadow : lib/shadow.slang.
+// UBO caméra : lib/bindings.slang ; shadow map et computeShadow : lib/shadow.slang.
 #include "lib/shadow.slang"
 #include "lib/tonemap.slang"
+
+// Push constant : matrice « model » + matrice normale (inverse-transposée de la 3x3 du
+// model, calculée côté CPU), poussées par objet.
+struct PushConstants {
+  float4x4 model;
+  float4x4 normalMatrix;
+};
+[[vk::push_constant]]
+ConstantBuffer<PushConstants> pc;
 
 struct VSInput {
   float3 inPosition;

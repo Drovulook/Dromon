@@ -2,7 +2,7 @@ use glam::{IVec2, Vec3};
 
 use crate::config::MeshDebug;
 use crate::app::engine::{
-    renderer::render_resources::TerrainVertex,
+    renderer::render_resources::{SEAM_VERTEX_FIXED, TerrainVertex},
     terrain_generation::{
         chunk::CHUNK_SIZE,
         generation::DensityField,
@@ -142,7 +142,7 @@ fn push_tri(
     for p in [p0, p1, p2] {
         let material =
             cached_material(volume_materials, p, step, |q| field.volume_material(q, step));
-        vertices.push(TerrainVertex::new(p, normal, material));
+        vertices.push(TerrainVertex::new(p, normal, material).with_seam_role(SEAM_VERTEX_FIXED));
     }
     indices.extend_from_slice(&[start, start + 1, start + 2]);
 }

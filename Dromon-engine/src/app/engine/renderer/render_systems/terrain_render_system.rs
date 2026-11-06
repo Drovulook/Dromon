@@ -9,13 +9,12 @@ use crate::{
             descriptors::DescriptorHandler,
             pipelines,
             render_resources::{MaterialBuffer, TerrainVertex, WorldMaps},
-            world::terrain::meshes::InstalledChunks,
+            world::terrain::meshes::{ChunkSeam, InstalledChunks},
         },
         rendering_context::RenderingContext,
     },
     profile,
 };
-use glam::Mat4;
 
 pub(crate) struct TerrainRenderSystem {
     context: Arc<RenderingContext>,
@@ -41,13 +40,11 @@ impl TerrainRenderSystem {
         unsafe {
             let vertex_shader = pipelines::load_shader_module(&context.device,"terrain_vert.spv")?;
             let fragment_shader = pipelines::load_shader_module(&context.device,"terrain_frag.spv")?;
-            // 2 matrices poussées par objet. La 1re est la matrice
-            // « model » ; la 2de est la matrice normale (inverse-transposée de
-            // model, calculée côté CPU car Slang n'a pas inverse()).
+            // Couture du chunk, poussée à chaque draw. La passe d'ombre ne la lit pas.
             let push_constant_ranges = [vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
-                .size(2 * std::mem::size_of::<glam::Mat4>() as u32)];
+                .size(std::mem::size_of::<ChunkSeam>() as u32)];
 
             let pipeline_layout = context.device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
@@ -173,41 +170,39 @@ impl TerrainRenderSystem {
                 &[],
             );
 
-            // Les sommets du terrain sont déjà en coordonnées monde → `model` =
-            // identité. La matrice normale n'est pas utilisée (le frag shader
-            // recalcule la normale depuis les dérivées d'écran), mais le push
-            // constant range en attend une : on pousse l'identité.
-            let identity = Mat4::IDENTITY;
-            self.context.device.cmd_push_constants(
-                command_buffer,
-                self.pipeline_layout,
-                vk::ShaderStageFlags::VERTEX,
-                0,
-                bytemuck::bytes_of(&identity),
-            );
-            self.context.device.cmd_push_constants(
-                command_buffer,
-                self.pipeline_layout,
-                vk::ShaderStageFlags::VERTEX,
-                std::mem::size_of::<Mat4>() as u32,
-                bytemuck::bytes_of(&identity),
-            );
-
             for coord in visible_chunks {
                 {
-                    let Some(mesh) = chunks.get(coord).map(|c| &c.mesh) else {
+                    let Some(chunk) = chunks.get(coord) else {
                         continue;
                     };
                     profile!("bind + draw command - terrain mesh");
-                    mesh.bind(command_buffer);
+                    self.context.device.cmd_push_constants(
+                        command_buffer,
+                        self.pipeline_layout,
+                        vk::ShaderStageFlags::VERTEX,
+                        0,
+                        bytemuck::bytes_of(&chunk.seam),
+                    );
+                    chunk.mesh.bind(command_buffer);
                     self.context.device.cmd_draw_indexed(
                         command_buffer,
-                        mesh.index_count(),
+                        chunk.mesh.body_index_count(),
                         1,
                         0,
                         0,
                         0,
                     );
+                    for face in (0..4).filter(|&face| chunk.seam.has_slab(face)) {
+                        let slab = chunk.mesh.slab_indices(face);
+                        self.context.device.cmd_draw_indexed(
+                            command_buffer,
+                            slab.end - slab.start,
+                            1,
+                            slab.start,
+                            0,
+                            0,
+                        );
+                    }
                 }
             }
         }
@@ -241,24 +236,15 @@ impl TerrainRenderSystem {
                 &[],
             );
 
-            // model = identité (sommets déjà en coordonnées monde).
-            let identity = Mat4::IDENTITY;
-            self.context.device.cmd_push_constants(
-                command_buffer,
-                self.pipeline_layout,
-                vk::ShaderStageFlags::VERTEX,
-                0,
-                bytemuck::bytes_of(&identity),
-            );
-
             for coord in shadow_chunks {
                 let Some(mesh) = chunks.get(coord).map(|c| &c.mesh) else {
                     continue;
                 };
                 mesh.bind(command_buffer);
+                // Corps seul : les dalles ne projettent rien (cf. `terrainShadowVertMain`).
                 self.context.device.cmd_draw_indexed(
                     command_buffer,
-                    mesh.index_count(),
+                    mesh.body_index_count(),
                     1,
                     0,
                     0,
