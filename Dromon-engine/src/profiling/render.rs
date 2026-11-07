@@ -17,7 +17,7 @@ use ash::vk;
 use crate::app::logger::Logger;
 
 const MAX_QUERIES_PER_SLOT: u32 = 64; // 32 scopes max par frame
-const FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Une région mesurée : paire de queries (begin, end) + place dans l'arbre.
 struct Region {

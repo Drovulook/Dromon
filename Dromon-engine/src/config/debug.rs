@@ -7,10 +7,10 @@ use super::ConfigFile;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DebugConfig {
-    /// Une ligne par lot de re-maillage : chunks installés, part du cache, coût par LOD.
+    /// Bilan du re-maillage chaque seconde : chunks installés, part du cache, coût par LOD.
     /// Seule façon de savoir si le cache est rentable pour un style de déplacement.
     pub log_batch_stats: bool,
-    /// Occupation et fragmentation de l'allocateur GPU, à chaque lot installé.
+    /// Occupation et fragmentation de l'allocateur GPU, avec le bilan du re-maillage.
     pub log_gpu_usage: bool,
     /// `false` : tout est éclairé (la passe d'ombre tourne quand même, seul son résultat
     /// est ignoré).

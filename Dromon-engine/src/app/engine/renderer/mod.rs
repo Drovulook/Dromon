@@ -380,8 +380,8 @@ impl Renderer {
             self.swapchain.extent.width as f32 / self.swapchain.extent.height.max(1) as f32;
         self.world.update_world_data(timer, input_state, aspect);
         // Terrain vivant : le LOD suit la caméra qu'on vient de déplacer. Le gros du
-        // travail (re-maillage) part sur le pool rayon ; ici on ne fait qu'échantillonner
-        // l'avancement et, le cas échéant, basculer un lot terminé.
+        // travail (re-maillage) part sur le pool rayon ; ici on ne fait que récolter les
+        // résultats et installer ceux que le budget de la frame autorise.
         self.world.update_terrain()?;
         // La logique de jeu (déplacement/rotation des objets) est déléguée à la scène.
         scene.update(&mut self.world, timer);

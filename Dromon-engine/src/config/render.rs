@@ -164,7 +164,7 @@ pub struct TerrainRenderParams {
     /// oscille sur le bord chargerait et déchargerait la même rangée en boucle.
     pub unload_margin_chunks: f32,
     pub lod: LodParams,
-    /// Temps autorisé **par frame** pour bâtir les buffers d'un lot, et autant pour
+    /// Temps autorisé **par frame** pour bâtir les buffers des chunks, et autant pour
     /// détruire les anciens (allocations Vulkan : ~100 µs–1 ms chacune). En temps plutôt
     /// qu'en nombre de meshes : le coût varie selon le driver. Au moins un mesh est
     /// toujours traité.

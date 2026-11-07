@@ -1,14 +1,7 @@
-//! **Grille plate des niveaux de LOD** : ensemble des chunks chargés + niveau de chaque
-//! chunk + masque de coutures. C'est la *configuration* que lit le mailleur. Recentrée
-//! sur la caméra à chaque lot par le [`ChunkStreamer`](super::super::streaming::ChunkStreamer).
-//!
-//! ## Pourquoi séparée du [`ChunkManager`](super::super::ChunkManager)
-//! Le LOD vivait autrefois sur le `Chunk`, donc dans le manager. Le re-maillage de fond
-//! l'interdit : un thread worker doit voir une configuration **figée** pendant tout son
-//! lot, alors que la caméra continue d'en produire de nouvelles. En sortant le LOD, on
-//! obtient deux objets aux durées de vie opposées — un `ChunkManager` immuable partagé
-//! par tous (le relief, qui ne bouge pas) et une `LodGrid` bon marché à cloner (~40 Ko),
-//! dont chaque lot emporte sa version dans un `Arc`.
+//! **Grille plate des niveaux de LOD visés** : ensemble des chunks chargés + niveau voulu
+//! pour chacun. Recentrée sur la caméra par le
+//! [`ChunkStreamer`](super::super::streaming::ChunkStreamer). Ce qui est réellement à
+//! l'écran, et donc les coutures, vit dans [`ShownLods`](super::shown_lods::ShownLods).
 //!
 //! ## Grille plate plutôt que `HashMap`
 //! Le LOD se recalcule sur les ~8000 chunks à chaque fois que la caméra franchit le
@@ -18,13 +11,12 @@
 //!
 //! ## Deux niveaux par chunk : `raw` et `lod`
 //! `raw` est le niveau **brut** issu de la distance seule ; c'est lui, et lui seul, que
-//! relit l'hystérésis. `lod` est le niveau **après équilibrage 2:1**, ce que maille le
-//! chunk. Confondre les deux fait dériver l'hystérésis (cf. `LOD-Dynamique.md`, piège 2) :
-//! un chunk que la relaxation abaisse verrait sa bande morte glisser à chaque passe et ne
+//! relit l'hystérésis. `lod` est le niveau **après équilibrage 2:1**, la cible du chunk.
+//! Confondre les deux fait dériver l'hystérésis (cf. `LOD-Dynamique.md`, piège 2) : un
+//! chunk que la relaxation abaisse verrait sa bande morte glisser à chaque passe et ne
 //! remonterait jamais. L'équilibrage se réapplique **à neuf** depuis `raw` à chaque passe.
 
-use super::transition_shrink::taper_bits;
-use super::{Face, MAX_LOD_STEP, TransitionFaces, transition_faces};
+use super::{Face, MAX_LOD_STEP};
 use glam::IVec2;
 
 /// État LOD d'un chunk chargé. `Copy` : la grille se manipule par valeur.
@@ -32,13 +24,8 @@ use glam::IVec2;
 struct Cell {
     /// Niveau brut (distance seule + hystérésis). Source de vérité de l'hystérésis.
     raw: u8,
-    /// Niveau effectif après équilibrage 2:1. Ce que lit le mailleur.
+    /// Niveau visé après équilibrage 2:1.
     lod: u8,
-    /// Faces bordant un voisin plus grossier (dérivé de `lod` des 4 voisins).
-    faces: TransitionFaces,
-    /// Atténuations aux extrémités des faces à dalle (dérivé des `faces` voisines, cf.
-    /// [`taper_bits`]).
-    taper: u8,
 }
 
 /// Niveaux de LOD de tous les chunks chargés, sur une grille rectangulaire dont les
@@ -127,23 +114,10 @@ impl LodGrid {
         self.cell(c).map(|x| x.raw)
     }
 
-    /// Niveau effectif (équilibré) du chunk `c`. **0 si absent** : un chunk non chargé
-    /// n'est jamais « plus grossier », donc ne déclenche jamais de fausse couture au bord.
+    /// Niveau visé (équilibré) du chunk `c`, 0 s'il n'est pas chargé.
     #[inline]
     pub fn lod(&self, c: IVec2) -> u8 {
         self.cell(c).map_or(0, |x| x.lod)
-    }
-
-    /// Faces du chunk `c` portant une cellule de transition Transvoxel (vide si absent).
-    #[inline]
-    pub fn faces(&self, c: IVec2) -> TransitionFaces {
-        self.cell(c).map_or(TransitionFaces::default(), |x| x.faces)
-    }
-
-    /// Bits d'atténuation du chunk `c` (0 si absent), cf. [`taper_bits`].
-    #[inline]
-    pub fn taper(&self, c: IVec2) -> u8 {
-        self.cell(c).map_or(0, |x| x.taper)
     }
 
     /// Recalcule le niveau **brut** de chaque chunk chargé : `f(coord, raw_courant)`.
@@ -159,8 +133,8 @@ impl LodGrid {
         }
     }
 
-    /// Reconstruit `lod` et `faces` **depuis zéro** à partir des `raw` : équilibrage 2:1
-    /// puis détection des coutures. À appeler après tout changement de `raw`.
+    /// Reconstruit `lod` **depuis zéro** à partir des `raw` : équilibrage 2:1. À appeler
+    /// après tout changement de `raw`.
     ///
     /// L'équilibrage n'est jamais une source de vérité — il repart des `raw` à chaque
     /// fois, sinon les niveaux dériveraient vers le bas passe après passe.
@@ -169,7 +143,6 @@ impl LodGrid {
             cell.lod = cell.raw;
         }
         self.balance();
-        self.refresh_faces();
     }
 
     /// Relaxation 2:1 en place : tant qu'un chunk dépasse `voisin + MAX_LOD_STEP`, on le
@@ -186,9 +159,9 @@ impl LodGrid {
     /// garde parce qu'il sort en une passe quand rien ne viole (~40 µs sur 8000 chunks,
     /// une fois par franchissement de seuil) et que l'invariant tient par coïncidence de
     /// paramètres, pas par construction : resserrer un rayon, ajouter un palier, forcer un
-    /// chunk fin parce qu'il est édité, ou passer au quadtree le casse en silence. En
-    /// release le `debug_assert_eq!` de `mesh_chunk` ne rattrape rien : on obtient une
-    /// fissure permanente, pas un crash.
+    /// chunk fin parce qu'il est édité, ou passer au quadtree le casse en silence. Or
+    /// [`ShownLods::next_lod`](super::shown_lods::ShownLods::next_lod) a besoin d'une cible
+    /// équilibrée pour que la file aboutisse.
     fn balance(&mut self) {
         loop {
             let mut changed = false;
@@ -215,52 +188,13 @@ impl LodGrid {
         }
     }
 
-    /// Masque de coutures de chaque chunk, dérivé des `lod` du voisinage. Doit venir
-    /// **après** [`LodGrid::balance`] : le masque d'un chunk dépend de ses voisins.
-    fn refresh_faces(&mut self) {
-        for i in 0..self.coords.len() {
-            let c = self.coords[i];
-            let Some(idx) = self.index(c) else { continue };
-            let my_lod = self.lod(c);
-            let neighbors = Face::ALL.map(|f| self.lod(c + f.offset()));
-            let faces = transition_faces(my_lod, neighbors);
-            if let Some(cell) = self.cells[idx].as_mut() {
-                cell.faces = faces;
-            }
-        }
-        // Seconde passe : l'atténuation lit les `faces` des voisins, toutes à jour ici.
-        for i in 0..self.coords.len() {
-            let c = self.coords[i];
-            let Some(idx) = self.index(c) else { continue };
-            let taper = taper_bits(c, |n| self.lod(n), |n| self.faces(n));
-            if let Some(cell) = self.cells[idx].as_mut() {
-                cell.taper = taper;
-            }
-        }
-    }
-
-    /// Chunks à re-mailler pour passer de `prev` à `self` : ceux dont le triplet
-    /// **`(lod, faces, taper)`** a changé, plus ceux qui viennent d'être chargés.
-    ///
-    /// Ce triplet est **tout** ce que le mesh lit de la grille. Le masque compte autant
-    /// que le niveau : quand A change de niveau, son voisin B garde le sien mais leur
-    /// face commune devient (ou cesse d'être) une transition, donc **la géométrie de B
-    /// change**. Idem pour l'atténuation, que modifie un changement en diagonale.
-    ///
-    /// Corollaire dont dépend l'installation progressive (cf. `MeshJob`) : un chunk
-    /// **non** sale a le même mesh sous `prev` et sous `self`, donc se raccorde à ses
-    /// voisins des deux configurations.
-    pub fn dirty_against(&self, prev: &LodGrid) -> Vec<IVec2> {
+    /// Un chunk a-t-il un autre niveau visé que dans `prev`, ou vient-il d'être chargé ?
+    pub fn lods_differ(&self, prev: &LodGrid) -> bool {
         self.coords
             .iter()
-            .copied()
-            .filter(|&c| match (self.cell(c), prev.cell(c)) {
-                (Some(now), Some(old)) => {
-                    (now.lod, now.faces, now.taper) != (old.lod, old.faces, old.taper)
-                }
-                // Chunk nouvellement chargé (streaming) : rien à comparer, tout à mailler.
+            .any(|&c| match (self.cell(c), prev.cell(c)) {
+                (Some(now), Some(old)) => now.lod != old.lod,
                 _ => true,
             })
-            .collect()
     }
 }

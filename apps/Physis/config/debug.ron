@@ -2,8 +2,8 @@
 // (cf. `DebugConfig`). Un champ absent prend sa valeur par défaut ; un champ inconnu
 // est une erreur.
 (
-    log_batch_stats: true, // une ligne par lot de re-maillage (cache, coût par LOD)
-    log_gpu_usage: true,   // occupation / fragmentation de l'allocateur GPU par lot
+    log_batch_stats: true, // bilan du re-maillage chaque seconde (cache, coût par LOD)
+    log_gpu_usage: true,   // occupation / fragmentation de l'allocateur GPU avec ce bilan
     shadows: true,         // false : ombres ignorées (la passe d'ombre tourne quand même)
     camera_unbounded: false, // true : la caméra peut sortir du disque du monde
 

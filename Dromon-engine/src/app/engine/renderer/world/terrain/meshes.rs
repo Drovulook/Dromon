@@ -3,10 +3,13 @@ use glam::IVec2;
 use rustc_hash::FxHashMap;
 
 use crate::app::engine::renderer::render_resources::TerrainMesh;
-use crate::app::engine::terrain_generation::{CHUNK_SIZE, LodGrid};
+use crate::app::engine::terrain_generation::{CHUNK_SIZE, ShownLods};
 
 /// Couture d'un chunk, poussée à chaque draw. ⚠ Même disposition que `ChunkSeam`
 /// (`lib/chunk_seam.slang`).
+///
+/// Dépend de ce que les voisins **affichent** : un voisin qui change de LOD ne modifie que
+/// ces 16 octets, pas le mesh.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ChunkSeam {
@@ -19,12 +22,12 @@ pub struct ChunkSeam {
 }
 
 impl ChunkSeam {
-    /// Couture du chunk `coord` sous la configuration `grid`.
-    pub fn new(grid: &LodGrid, coord: IVec2) -> ChunkSeam {
+    /// Couture du chunk `coord` d'après les LOD affichés.
+    pub fn new(shown: &ShownLods, coord: IVec2) -> ChunkSeam {
         ChunkSeam {
             origin: coord * CHUNK_SIZE as i32,
-            lod_step: (1u32 << grid.lod(coord)) as f32,
-            bits: grid.faces(coord).bits() as u32 | (grid.taper(coord) as u32) << 4,
+            lod_step: (1u32 << shown.get(coord).unwrap_or(0)) as f32,
+            bits: shown.seam_bits(coord),
         }
     }
 
@@ -45,6 +48,8 @@ impl ChunkSeam {
 pub struct InstalledChunk {
     pub mesh: TerrainMesh,
     pub seam: ChunkSeam,
+    /// Rang dans [`InstalledChunks::coords`], pour un retrait sans parcours.
+    index: usize,
 }
 
 /// Les chunks **installés** (mesh présent sur le GPU), plus la liste **compacte** de
@@ -92,18 +97,29 @@ impl InstalledChunks {
         mesh: TerrainMesh,
         seam: ChunkSeam,
     ) -> Option<TerrainMesh> {
-        let previous = self.chunks.insert(coord, InstalledChunk { mesh, seam });
+        let index = self.chunks.get(&coord).map_or(self.coords.len(), |c| c.index);
+        let previous = self.chunks.insert(coord, InstalledChunk { mesh, seam, index });
         if previous.is_none() {
             self.coords.push(coord);
         }
         previous.map(|c| c.mesh)
     }
 
-    /// O(n) sur `coords`, mais n'arrive que pour un chunk devenu **vide** ou déchargé.
+    /// Remplace la couture d'un chunk installé, sans effet s'il ne l'est pas.
+    pub fn set_seam(&mut self, coord: IVec2, seam: ChunkSeam) {
+        if let Some(chunk) = self.chunks.get_mut(&coord) {
+            chunk.seam = seam;
+        }
+    }
+
+    /// `swap_remove` met le dernier chunk de `coords` à la place libérée : on corrige son rang.
     pub fn remove(&mut self, coord: &IVec2) -> Option<TerrainMesh> {
         let chunk = self.chunks.remove(coord)?;
-        if let Some(i) = self.coords.iter().position(|c| c == coord) {
-            self.coords.swap_remove(i);
+        self.coords.swap_remove(chunk.index);
+        if let Some(moved) = self.coords.get(chunk.index)
+            && let Some(moved) = self.chunks.get_mut(moved)
+        {
+            moved.index = chunk.index;
         }
         Some(chunk.mesh)
     }

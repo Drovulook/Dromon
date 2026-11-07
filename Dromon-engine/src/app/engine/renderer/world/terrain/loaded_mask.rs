@@ -9,8 +9,8 @@ use glam::IVec2;
 /// le chunk `c` tombe sur le texel `c mod size`.
 ///
 /// `size` ≥ **deux** fenêtres : les shaders lisent le masque dans le disque de portée
-/// autour de la *caméra*, alors que la fenêtre chargée est centrée sur le point focal du
-/// dernier lot, en retard en déplacement rapide. Avec une seule fenêtre, un point devant
+/// autour de la *caméra*, alors que la fenêtre chargée est centrée sur le dernier point
+/// focal évalué, en retard en déplacement rapide. Avec une seule fenêtre, un point devant
 /// la caméra, hors fenêtre, tomberait sur le texel d'un chunk chargé 256 chunks derrière
 /// dès 2 chunks de retard (mer fantôme à l'horizon).
 pub(crate) struct LoadedMask {

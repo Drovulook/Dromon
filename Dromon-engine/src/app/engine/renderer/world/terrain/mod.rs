@@ -2,14 +2,15 @@ pub(crate) mod culling;
 mod generate;
 mod graveyard;
 mod loaded_mask;
-mod mesh_job;
+mod mesh_queue;
 pub(crate) mod meshes;
 
 use anyhow::Result;
 use ash::vk;
 use glam::IVec2;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::render_resources::TerrainMesh;
@@ -18,12 +19,11 @@ use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
 use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
 use crate::app::engine::renderer::world::terrain::loaded_mask::LoadedMask;
-use crate::app::engine::renderer::world::terrain::mesh_job::MeshJob;
+use crate::app::engine::renderer::world::terrain::mesh_queue::MeshQueue;
 use crate::app::engine::renderer::world::terrain::meshes::{ChunkSeam, InstalledChunks};
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::{
-    ChunkStore, ChunkStreamer, LodFocus, LodGrid, MeshCache, MeshKey, TerrainSnapshot,
-    TerrainSource, chunk_distance,
+    ChunkStore, ChunkStreamer, LodFocus, MeshCache, ShownLods, TerrainSnapshot, TerrainSource,
 };
 use crate::app::logger::Logger;
 use crate::config::{DebugConfig, WorldGenConfig};
@@ -37,17 +37,23 @@ use crate::profile;
 /// ces champs rend l'invariant structurel : il n'y avait aucun moyen d'avoir un
 /// streamer sans relief quand les deux étaient deux `Option` séparées sur `World`.
 pub struct Terrain {
+    /// Début du chargement initial tant qu'il n'est pas terminé.
+    loading_since: Option<Instant>,
+    /// Dernier bilan de maillage écrit dans les logs.
+    last_report: Instant,
     /// Config de génération reçue de la scène : référence du hot reload.
     pub(crate) world_gen: WorldGenConfig,
     /// Le relief procédural. Immuable, partagé en `Arc` avec les threads de maillage.
     source: Arc<TerrainSource>,
-    /// Les édits du joueur : la seule donnée du monde qui ne se recalcule pas. Chaque lot
-    /// de maillage en emporte un instantané figé plutôt que la version vivante.
+    /// Les édits du joueur : la seule donnée du monde qui ne se recalcule pas. Les workers
+    /// en reçoivent un instantané figé plutôt que la version vivante.
     pub store: ChunkStore,
     /// Un `InstalledChunk` par chunk **non vide**, indexé par coordonnée : c'est ce qui
     /// permet de remplacer le mesh d'un chunk précis quand son LOD change (un `Vec`
     /// n'avait aucun lien avec les positions, les chunks vides décalant même les index).
     pub chunks: InstalledChunks,
+    /// LOD affiché de chaque chunk, vides compris : source des coutures.
+    shown: ShownLods,
     /// Les mêmes, en masque pour les shaders de la mer.
     loaded_mask: LoadedMask,
     /// Chunks chargés et leur LOD, suivant la caméra.
@@ -57,17 +63,15 @@ pub struct Terrain {
     reference_z: f32,
     /// Géométries déjà calculées, gardées pour les allers-retours de caméra.
     mesh_cache: MeshCache,
-    /// Lot de re-maillage en cours, s'il y en a un.
-    mesh_job: Option<MeshJob>,
+    /// Rapproche ce qui est affiché de ce qui est voulu.
+    mesh_queue: MeshQueue,
     /// Chunks dont les buffers attendent leur copie staging → device.
     pending_uploads: Vec<IVec2>,
     /// Meshes remplacés, détruits une fois qu'aucune frame en vol ne peut plus les lire.
     graveyard: Graveyard,
     /// Chunks retenus par le frustum culling, recalculés à chaque frame.
     pub visible: VisibleSet,
-    /// Temps de construction de buffers autorisé par frame (`render.ron`). 1 ms sur les
-    /// 16 d'une frame à 60 fps : un lot met quelques frames de plus à apparaître, ce qui
-    /// ne se voit pas.
+    /// Temps de construction de buffers autorisé par frame (`render.ron`).
     frame_budget: Duration,
     /// LOD maximal (nombre de rayons de `render.ron`), pour les statistiques par niveau.
     max_lod: u8,
@@ -81,111 +85,92 @@ impl Terrain {
     /// **Point d'accroche unique du terrain qui suit la caméra**, appelé une fois par
     /// frame : niveau de détail, chargement des chunks qui entrent dans la portée et
     /// retrait de ceux qui en sortent — un seul pipeline (calculer une configuration
-    /// cible → mailler en fond → basculer le lot d'un coup).
+    /// cible → mailler en fond → installer chunk par chunk).
     ///
     /// Ne fait presque rien la plupart du temps : le premier filtre est une comparaison
     /// de distances au carré (cf. `ChunkStreamer::update`).
     pub fn update(&mut self, camera: &Camera) -> Result<()> {
         profile!();
         self.graveyard.tick();
-        self.start_mesh_job(camera);
-        self.advance_mesh_job()
+        self.retarget(camera);
+        self.advance_queue()
     }
 
-    /// Réévalue fenêtre et LOD : retire aussitôt les chunks sortis de la fenêtre et, si
-    /// des chunks changent de géométrie, lance un lot.
-    ///
-    /// **Un seul lot à la fois** : deux lots concurrents mélangeraient deux
-    /// configurations LOD au moment du commit, donc rouvriraient des fissures. Tant
-    /// qu'un lot est en vol on ne touche même pas à l'updater, qui garde son point focal
-    /// de référence — le prochain appel repartira de là.
-    fn start_mesh_job(&mut self, camera: &Camera) {
-        if self.mesh_job.is_some() {
-            return;
-        }
+    /// Réévalue fenêtre et LOD : retire aussitôt les chunks sortis de la fenêtre et donne
+    /// la nouvelle cible à la file.
+    fn retarget(&mut self, camera: &Camera) {
         let focus = LodFocus::new(camera.position, self.reference_z);
-        let Some(mut update) = self.streamer.update(focus) else {
+        let Some(update) = self.streamer.update(focus) else {
             return;
         };
         profile!();
-        // Les sortants n'attendent pas le lot : ils sont à la portée de chargement, donc
-        // au loin, et leurs voisins encore affichés bordent alors du vide — un trou à
-        // l'horizon, pas une fissure. Leurs voisins sont re-maillés dans le lot.
-        for coord in update.removed {
+        // Ils sont à la portée de chargement, donc au loin : leurs voisins bordent du vide,
+        // un trou à l'horizon, pas une fissure.
+        for &coord in &update.removed {
             self.remove(coord);
+            self.shown.remove(coord);
         }
-        if update.dirty.is_empty() {
-            return;
-        }
+        self.refresh_seams(&update.removed);
 
-        // Instantané du terrain pour ce lot : relief immuable + `Arc` des chunks édités
-        // tels qu'ils sont maintenant. Le joueur peut creuser pendant le maillage sans
-        // que les workers voient la modification à mi-lot — même garantie que la `grid`.
+        // Instantané du terrain : relief immuable + `Arc` des chunks édités tels qu'ils sont
+        // maintenant.
         let snapshot =
             TerrainSnapshot::new(&self.source, &self.store, self.debug.mesh, self.max_lod);
-        // Du plus proche au plus lointain : les workers suivent cet ordre, donc les
-        // groupes proches de la caméra s'affichent en premier.
-        update.dirty.sort_by(|&a, &b| {
-            chunk_distance(a, focus.pos).total_cmp(&chunk_distance(b, focus.pos))
-        });
-        self.mesh_job = Some(MeshJob::start(
-            update.grid,
-            update.dirty,
-            &self.chunks,
-            &mut self.mesh_cache,
-            snapshot,
-            self.frame_budget,
-        ));
+        self.mesh_queue.retarget(update.grid, focus, snapshot);
     }
 
-    /// Fait avancer le lot en vol d'une frame et installe ses groupes complets.
+    /// Fait avancer la file d'une frame et installe ce qu'elle a construit.
     ///
-    /// Les trois emprunts (`mesh_job`, `mesh_cache`, `context`) portent sur des **champs
-    /// distincts** de `self` : le borrow checker les accepte simultanément, ce qu'il
-    /// refuserait à travers des méthodes prenant `&mut self`. C'est toute la raison pour
-    /// laquelle les phases vivent sur `MeshJob` et non sur `Terrain`.
-    fn advance_mesh_job(&mut self) -> Result<()> {
-        let Some(job) = self.mesh_job.as_mut() else {
-            return Ok(());
-        };
+    /// Les emprunts (`mesh_queue`, `shown`, `mesh_cache`, `context`) portent sur des
+    /// **champs distincts** de `self` : le borrow checker les accepte simultanément, ce
+    /// qu'il refuserait à travers des méthodes prenant `&mut self`.
+    fn advance_queue(&mut self) -> Result<()> {
         profile!();
-        job.collect();
-        let complete = job.build(&mut self.mesh_cache, &self.context)?;
-        let built = job.take_built();
-        let grid = job.grid().clone();
-        self.install(built, &grid);
-        if !complete {
-            return Ok(());
+        let built = self.mesh_queue.advance(
+            &mut self.shown,
+            &mut self.mesh_cache,
+            &self.context,
+        )?;
+        self.install(built);
+        if self.mesh_queue.is_settled()
+            && let Some(start) = self.loading_since.take()
+        {
+            self.finish_initial_load(start);
         }
-        let job = self
-            .mesh_job
-            .take()
-            .expect("présent : `build` vient de signaler le lot complet");
-        if job.is_initial() {
-            self.logger.info(&format!(
-                "Génération du monde terminée : {} chunks en {:.2} s",
-                job.gathered().len(),
-                job.elapsed().as_secs_f32(),
-            ));
-            log_terrain_stats(&self.logger, job.grid(), job.gathered(), self.max_lod);
-        }
-        self.log_batch_stats(&job);
-        self.log_gpu_usage();
+        self.log_progress();
         Ok(())
     }
 
-    /// Bascule des meshes bâtis. Ne fait que déplacer des `TerrainMesh` déjà construits;
-    /// quelques microsecondes, donc sans risque pour la frame.
-    fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>, grid: &LodGrid) {
+    /// Le monde est affiché : bilan et retour au budget de jeu.
+    fn finish_initial_load(&mut self, start: Instant) {
+        self.mesh_queue.set_budget(self.frame_budget);
+        let meshed: Vec<_> = self
+            .chunks
+            .coords()
+            .iter()
+            .filter_map(|c| self.chunks.get(c).map(|chunk| (*c, chunk.mesh.data.clone())))
+            .collect();
+        self.logger.info(&format!(
+            "Génération du monde terminée : {} chunks en {:.2} s",
+            meshed.len(),
+            start.elapsed().as_secs_f32(),
+        ));
+        log_terrain_stats(&self.logger, &self.streamer.grid(), &meshed, self.max_lod);
+    }
+
+    /// Installe les meshes bâtis et rafraîchit les coutures autour d'eux. Ne fait que
+    /// déplacer des `TerrainMesh` déjà construits : sans risque pour la frame.
+    fn install(&mut self, built: Vec<(IVec2, Option<TerrainMesh>)>) {
         if built.is_empty() {
             return;
         }
         profile!();
+        let coords: Vec<IVec2> = built.iter().map(|&(coord, _)| coord).collect();
         for (coord, mesh) in built {
             match mesh {
                 // Remplacement : `insert` rend l'ancien, la coordonnée ne bouge pas.
                 Some(mesh) => {
-                    let seam = ChunkSeam::new(grid, coord);
+                    let seam = ChunkSeam::new(&self.shown, coord);
                     if let Some(old) = self.chunks.insert(coord, mesh, seam) {
                         self.graveyard.bury(old);
                     }
@@ -195,6 +180,28 @@ impl Terrain {
                 // Le chunk devient vide : vraie suppression.
                 None => self.remove(coord),
             }
+        }
+        self.refresh_seams(&coords);
+    }
+
+    /// Recalcule la couture des chunks de `changed` et de leurs 8 voisins. Les 4 voisins
+    /// directs changent de faces ; les diagonales, d'atténuation (cf. `taper_bits`).
+    fn refresh_seams(&mut self, changed: &[IVec2]) {
+        if changed.is_empty() {
+            return;
+        }
+        profile!();
+        let mut around = FxHashSet::default();
+        for &coord in changed {
+            for x in -1..=1 {
+                for y in -1..=1 {
+                    around.insert(coord + IVec2::new(x, y));
+                }
+            }
+        }
+        for coord in around {
+            self.chunks
+                .set_seam(coord, ChunkSeam::new(&self.shown, coord));
         }
     }
 
@@ -231,7 +238,7 @@ impl Terrain {
             }
         }
 
-        // Une seule barrière pour tout le lot : les copies doivent être visibles de
+        // Une seule barrière pour toutes les copies : elles doivent être visibles de
         // l'étage d'assemblage des sommets avant le premier draw de la frame.
         unsafe {
             self.context.device.cmd_pipeline_barrier(
@@ -256,15 +263,6 @@ impl Terrain {
         self.visible.update(&self.chunks, camera, light, max_height);
     }
 
-    /// Trace de contrôle d'un lot : valide les estimations de charge (combien de chunks
-    /// deviennent sales à chaque franchissement de seuil) et donne le taux de réutilisation
-    /// du cache, seule façon de savoir s'il est rentable pour un style de déplacement
-    /// donné, la réponse allant de ~0 % en exploration rectiligne à très rentable pour un
-    /// joueur qui tourne autour d'une base.
-    ///
-    /// Donne aussi le découpage en groupes de bascule : leur taille est la latence
-    /// d'affichage (un groupe attend son membre le plus lent).
-    ///
     /// Hot reload : seules les traces changent à chaud, les options de maillage
     /// (`debug.mesh`) demandent de regénérer le terrain.
     pub(crate) fn hot_reload(&mut self, debug: &DebugConfig) {
@@ -272,28 +270,30 @@ impl Terrain {
         self.debug.log_gpu_usage = debug.log_gpu_usage;
     }
 
-    /// Une ligne par lot peut noyer le reste des logs : `log_batch_stats` de `debug.ron`.
-    fn log_batch_stats(&self, job: &MeshJob) {
-        if !self.debug.log_batch_stats {
+    /// Bilan du maillage, au plus une ligne par seconde (`log_batch_stats` de `debug.ron`) :
+    /// la charge réelle et le taux de réutilisation du cache, seule façon de savoir s'il
+    /// est rentable pour un style de déplacement donné.
+    fn log_progress(&mut self) {
+        if self.last_report.elapsed() < REPORT_PERIOD {
             return;
         }
-        let batch = job.gathered().len();
-        let meshed = job.meshed_count();
-        let (groups, largest) = job.group_stats();
-        let (hits, misses) = self.mesh_cache.stats();
-        let (bytes, entries) = self.mesh_cache.usage();
-        self.logger.info(&format!(
-            "LOD : {batch} chunks installés ({meshed} maillés, {} repris du cache) en {groups} groupes (max {largest}), {} — cache {hits}/{} accès, {entries} entrées, {} Mo",
-            batch.saturating_sub(meshed),
-            job.mesh_report(),
-            hits + misses,
-            bytes / (1024 * 1024),
-        ));
+        self.last_report = Instant::now();
+        let Some(report) = self.mesh_queue.take_report() else {
+            return;
+        };
+        if self.debug.log_batch_stats {
+            let (hits, misses) = self.mesh_cache.stats();
+            let (bytes, entries) = self.mesh_cache.usage();
+            self.logger.info(&format!(
+                "LOD : {report} — cache {hits}/{} accès, {entries} entrées, {} Mo",
+                hits + misses,
+                bytes / (1024 * 1024),
+            ));
+        }
+        self.log_gpu_usage();
     }
 
-    /// Surveillance de la fragmentation externe de l'allocateur GPU, à l'installation
-    /// d'un lot : il vient de libérer les anciens meshes et d'en allouer autant de
-    /// nouveaux, c'est le moment où les trous apparaissent.
+    /// Surveillance de la fragmentation externe de l'allocateur GPU.
     fn log_gpu_usage(&self) {
         if !self.debug.log_gpu_usage {
             return;
@@ -312,10 +312,5 @@ impl Terrain {
     }
 }
 
-/// Clé de cache d'un chunk sous une configuration LOD donnée.
-fn mesh_key(grid: &LodGrid, coord: IVec2) -> MeshKey {
-    MeshKey {
-        coord,
-        lod: grid.lod(coord),
-    }
-}
+/// Intervalle entre deux bilans de maillage.
+const REPORT_PERIOD: Duration = Duration::from_secs(1);

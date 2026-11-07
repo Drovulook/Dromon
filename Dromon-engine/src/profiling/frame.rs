@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::app::logger::Logger;
 
-const FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 
 thread_local! {
     static LAST_FLUSH: Cell<Option<Instant>> = const { Cell::new(None) };

@@ -34,7 +34,7 @@
     ),
 
     terrain: (
-        load_radius_chunks: 125,     // portée de chargement autour de la caméra (~20 000 chunks)
+        load_radius_chunks: 125,     // portée de chargement autour de la caméra (~49 000 chunks)
         unload_margin_chunks: 2.0,  // un chunk ne sort qu'au-delà de portée + marge
         lod: (
             // Distances (unités monde) de passage au niveau suivant. Leur nombre fixe le

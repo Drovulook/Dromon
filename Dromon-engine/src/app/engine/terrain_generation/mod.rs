@@ -13,6 +13,7 @@ pub use generation::macro_map::{
     GridShape, MacroGrid, MacroMap, macro_map_cache, macro_map_export_dir,
 };
 pub use lod::grid::LodGrid;
+pub use lod::shown_lods::ShownLods;
 pub use lod::{LodFocus, chunk_distance};
 pub use streaming::ChunkStreamer;
 pub use mesh::cache::{MeshCache, MeshKey};

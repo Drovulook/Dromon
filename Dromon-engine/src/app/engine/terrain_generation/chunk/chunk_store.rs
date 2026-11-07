@@ -26,9 +26,8 @@ fn split_world_coord(world: IVec3) -> (IVec2, IVec3) {
 ///
 /// ## Copie à l'écriture
 /// Chaque chunk est derrière son propre `Arc` : éditer clone **le seul chunk touché**,
-/// et les lots de maillage déjà partis continuent de lire l'ancienne version sans
-/// verrou. C'est le patron déjà employé pour la [`LodGrid`](super::super::lod::grid::LodGrid);
-/// un worker doit voir une configuration figée pendant tout son lot.
+/// et les listes de maillage déjà publiées continuent de lire l'ancienne version sans
+/// verrou : un worker doit voir un terrain figé pendant toute sa liste.
 ///
 #[derive(Default)]
 pub struct ChunkStore {
@@ -40,7 +39,7 @@ impl ChunkStore {
     pub fn edit(&mut self, world: IVec3, density: f32) {
         let (coord, local) = split_world_coord(world);
         let data = self.chunks.entry(coord).or_default();
-        // `make_mut` clone si et seulement si un lot en vol détient encore l'ancienne
+        // `make_mut` clone si et seulement si une liste en cours détient encore l'ancienne
         // version, sinon il écrit en place.
         Arc::make_mut(data).set_edit(local, density);
     }
@@ -52,7 +51,7 @@ impl ChunkStore {
 }
 
 /// Vue **figée** du terrain confiée aux threads de maillage : le relief (immuable) et
-/// les édits tels qu'ils étaient à la soumission du lot.
+/// les édits tels qu'ils étaient au dernier changement de cible.
 ///
 /// Le clone est bon marché — des `Arc`, et seulement pour les chunks édités.
 #[derive(Clone)]

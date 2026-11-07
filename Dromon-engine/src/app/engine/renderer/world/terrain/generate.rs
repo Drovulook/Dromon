@@ -13,7 +13,7 @@ use crate::{
                 world::{
                     terrain::{
                         Terrain, culling::VisibleSet, graveyard::Graveyard,
-                        loaded_mask::LoadedMask, mesh_job::MeshJob, meshes::InstalledChunks,
+                        loaded_mask::LoadedMask, mesh_queue::MeshQueue, meshes::InstalledChunks,
                     },
                     water::Water,
                 },
@@ -21,7 +21,7 @@ use crate::{
             rendering_context::RenderingContext,
             terrain_generation::{
                 CHUNK_SIZE, ChunkStore, ChunkStreamer, LodFocus, LodGrid, MacroMap, MeshCache,
-                TerrainSnapshot, TerrainSource, chunk_distance, macro_map_cache,
+                ShownLods, TerrainSnapshot, TerrainSource, macro_map_cache,
                 macro_map_export_dir,
             },
         },
@@ -238,34 +238,27 @@ impl Terrain {
         let streamer = ChunkStreamer::new(source.world(), params, focus);
         let grid = streamer.grid();
 
-        // Vue figée du terrain pour ce lot : le relief plus les édits du moment (aucun
-        // ici, mais la génération initiale suit le même chemin que le re-maillage).
+        // Vue figée du terrain : le relief plus les édits du moment (aucun ici, mais la
+        // génération initiale suit le même chemin que le re-maillage).
         let store = ChunkStore::default();
         let snapshot = TerrainSnapshot::new(&source, &store, debug.mesh, params.lod.max_lod());
 
         // Aucun maillage ici : le monde se construit en fond, frame après frame, pendant
         //    que le jeu tourne. Du plus proche au plus lointain de la caméra, pour que le
         //    terrain apparaisse en cercles concentriques autour du joueur.
-        let mut coords = grid.coords().to_vec();
-        coords.sort_by(|&a, &b| {
-            chunk_distance(a, focus.pos).total_cmp(&chunk_distance(b, focus.pos))
-        });
-        let mut mesh_cache = MeshCache::new(params.mesh_cache_mb * 1024 * 1024);
+        let mesh_cache = MeshCache::new(params.mesh_cache_mb * 1024 * 1024);
         let ms = |v: f32| Duration::from_secs_f32(v / 1000.0);
         let frame_budget = ms(params.frame_budget_ms);
-        let initial_load = MeshJob::start_initial_load(
-            grid,
-            coords,
-            &mut mesh_cache,
-            snapshot,
-            ms(params.initial_load_budget_ms),
-        );
+        let mesh_queue = MeshQueue::new(grid, focus, snapshot, ms(params.initial_load_budget_ms));
 
         Ok(Terrain {
+            loading_since: Some(Instant::now()),
+            last_report: Instant::now(),
             world_gen: config.clone(),
             source,
             store,
             chunks: InstalledChunks::new(),
+            shown: ShownLods::default(),
             // Fenêtre : disque de rayon `portée + marge` chunks, soit au plus
             // ⌈2·rayon⌉ + 1 chunks sur un axe.
             loaded_mask: LoadedMask::new(
@@ -276,7 +269,7 @@ impl Terrain {
             streamer,
             reference_z,
             mesh_cache,
-            mesh_job: Some(initial_load),
+            mesh_queue,
             pending_uploads: Vec::new(),
             graveyard: Graveyard::new(frames_in_flight, frame_budget),
             visible: VisibleSet::default(),
