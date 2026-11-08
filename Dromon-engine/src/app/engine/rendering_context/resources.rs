@@ -1,6 +1,6 @@
 use super::RenderingContext;
 use crate::app::engine::{
-    renderer::device_memory::DeviceMemoryAllocator, rendering_context::SwapchainSurface,
+    renderer::gpu_memory::device_memory::DeviceMemoryAllocator, rendering_context::SwapchainSurface,
 };
 use anyhow::Result;
 use ash::vk;

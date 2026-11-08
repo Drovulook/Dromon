@@ -14,6 +14,7 @@ use std::{
 use crate::{
     app::engine::{
         renderer::render_resources::{MeshData, TerrainMesh},
+        renderer::world::terrain::arenas::TerrainArenas,
         rendering_context::RenderingContext,
         terrain_generation::{
             LodFocus, LodGrid, MeshCache, MeshKey, ShownLods, TerrainSnapshot, chunk_distance,
@@ -120,6 +121,8 @@ impl Ord for Ready {
 struct QueueStats {
     installed: usize,
     reused: usize,
+    /// Chunks non construits faute de place dans une arène.
+    arena_full: usize,
     /// Par LOD : chunks maillés et temps CPU cumulé. Agrandi à la demande.
     mesh_cost: Vec<(u32, Duration)>,
 }
@@ -183,6 +186,7 @@ impl MeshQueue {
         &mut self,
         shown: &mut ShownLods,
         cache: &mut MeshCache,
+        arenas: &mut TerrainArenas,
         context: &Arc<RenderingContext>,
     ) -> Result<Vec<(IVec2, Option<TerrainMesh>)>> {
         self.collect(shown, cache);
@@ -190,7 +194,7 @@ impl MeshQueue {
         if exhausted || self.target_changed {
             self.publish(shown, cache);
         }
-        self.build(shown, context)
+        self.build(shown, arenas, context)
     }
 
     /// Ramasse les résultats des workers. Tout va au cache ; seuls ceux de la liste en
@@ -286,9 +290,13 @@ impl MeshQueue {
     ///
     /// `shown` est mis à jour à chaque chunk : deux voisins construits dans la même frame
     /// doivent respecter la règle l'un envers l'autre.
+    ///
+    /// Arène pleine : le chunk garde son mesh actuel et sa géométrie reste au cache ; on
+    /// arrête là pour cette frame, les suivants échoueraient aussi.
     fn build(
         &mut self,
         shown: &mut ShownLods,
+        arenas: &mut TerrainArenas,
         context: &Arc<RenderingContext>,
     ) -> Result<Vec<(IVec2, Option<TerrainMesh>)>> {
         profile!();
@@ -307,7 +315,13 @@ impl MeshQueue {
             let mesh = if item.data.is_empty() {
                 None
             } else {
-                Some(TerrainMesh::new(context.clone(), item.data)?)
+                match TerrainMesh::new(context.clone(), item.data, arenas)? {
+                    Some(mesh) => Some(mesh),
+                    None => {
+                        self.stats.arena_full += 1;
+                        break;
+                    }
+                }
             };
             shown.set(item.coord, item.lod);
             built.push((item.coord, mesh));
@@ -338,7 +352,7 @@ impl MeshQueue {
 
     /// Bilan depuis le dernier appel, `None` si rien n'a été installé.
     pub(super) fn take_report(&mut self) -> Option<String> {
-        if self.stats.installed == 0 {
+        if self.stats.installed == 0 && self.stats.arena_full == 0 {
             return None;
         }
         let stats = std::mem::take(&mut self.stats);
@@ -350,8 +364,13 @@ impl MeshQueue {
             .map(|(lod, (n, t))| format!("L{lod} {} µs ×{n}", t.as_micros() / *n as u128))
             .collect();
         let meshed: u32 = stats.mesh_cost.iter().map(|(n, _)| n).sum();
+        let refused = if stats.arena_full > 0 {
+            format!(", {} refusés : arène pleine", stats.arena_full)
+        } else {
+            String::new()
+        };
         Some(format!(
-            "{} chunks installés ({meshed} maillés, {} repris du cache) [{}]",
+            "{} chunks installés ({meshed} maillés, {} repris du cache) [{}]{refused}",
             stats.installed,
             stats.reused,
             per_lod.join(", "),

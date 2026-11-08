@@ -1,5 +1,5 @@
 use crate::app::engine::{
-    renderer::device_memory::Allocation, rendering_context::RenderingContext,
+    renderer::gpu_memory::device_memory::Allocation, rendering_context::RenderingContext,
 };
 use anyhow::{Context as _, Result};
 use ash::vk;

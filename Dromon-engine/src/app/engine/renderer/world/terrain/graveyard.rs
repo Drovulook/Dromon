@@ -1,13 +1,14 @@
 //! **Destruction différée des meshes remplacés.**
 //!
-//! `Buffer::drop` appelle `vkDestroyBuffer` + `vkFreeMemory` **immédiatement** : libérer
-//! un mesh encore référencé par une frame en vol produirait une erreur de validation,
-//! voire un crash. Le cimetière retient donc les meshes retirés le temps que toutes les
-//! frames qui ont pu les enregistrer soient terminées.
+//! Un mesh retiré peut encore être lu par une frame en vol : ses stagings ne doivent
+//! pas être détruits (erreur de validation, voire crash), ni ses tranches d'arène
+//! réattribuées (un autre chunk écraserait sa géométrie à l'écran). Le cimetière le
+//! retient donc le temps que toutes les frames qui ont pu l'enregistrer soient terminées.
 
 use std::time::{Duration, Instant};
 
 use crate::app::engine::renderer::render_resources::TerrainMesh;
+use crate::app::engine::renderer::world::terrain::arenas::TerrainArenas;
 use crate::profile;
 
 /// Meshes en attente de destruction, datés de leur mise au rebut.
@@ -41,12 +42,11 @@ impl Graveyard {
         self.pending.push((mesh, self.frame));
     }
 
-    /// Avance d'une frame et détruit ce que plus aucune frame en vol ne peut lire,
-    /// **sous le même budget de temps** que la construction : 4 opérations noyau par
-    /// mesh — libérer 200 anciens meshes d'un coup coûterait exactement le pic qu'on a
-    /// éliminé côté construction. Garder un mesh mort quelques frames de plus ne coûte
-    /// que de la mémoire.
-    pub(super) fn tick(&mut self) {
+    /// Avance d'une frame et libère ce que plus aucune frame en vol ne peut lire,
+    /// **sous le même budget de temps** que la construction : détruire les deux stagings
+    /// d'un mesh passe par le driver, et en libérer 200 d'un coup ferait un pic. Garder
+    /// un mesh mort quelques frames de plus ne coûte que de la mémoire.
+    pub(super) fn tick(&mut self, arenas: &mut TerrainArenas) {
         self.frame += 1;
         if self.pending.is_empty() {
             return;
@@ -60,9 +60,10 @@ impl Graveyard {
                 i += 1;
                 continue;
             }
-            // `swap_remove` rend l'élément, qui est droppé ici : c'est la destruction
-            // Vulkan effective. L'ordre du cimetière n'a aucune importance.
-            self.pending.swap_remove(i);
+            // `release` rend les tranches puis droppe les stagings. L'ordre du cimetière
+            // n'a aucune importance, d'où `swap_remove`.
+            let (mesh, _) = self.pending.swap_remove(i);
+            mesh.release(arenas);
             if Instant::now() >= deadline {
                 return;
             }

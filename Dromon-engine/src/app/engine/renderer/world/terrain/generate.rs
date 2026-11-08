@@ -12,7 +12,7 @@ use crate::{
                 render_resources::{MaterialBuffer, MeshData, WorldMaps},
                 world::{
                     terrain::{
-                        Terrain, culling::VisibleSet, graveyard::Graveyard,
+                        Terrain, arenas::TerrainArenas, culling::VisibleSet, graveyard::Graveyard,
                         loaded_mask::LoadedMask, mesh_queue::MeshQueue, meshes::InstalledChunks,
                     },
                     water::Water,
@@ -258,6 +258,7 @@ impl Terrain {
             source,
             store,
             chunks: InstalledChunks::new(),
+            arenas: TerrainArenas::new(&context)?,
             shown: ShownLods::default(),
             // Fenêtre : disque de rayon `portée + marge` chunks, soit au plus
             // ⌈2·rayon⌉ + 1 chunks sur un axe.

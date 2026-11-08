@@ -59,6 +59,7 @@ impl Renderer {
                     command_buffer,
                     frame_index,
                     &terrain.chunks,
+                    terrain.arenas(),
                     &terrain.visible.shadow,
                 );
             }
@@ -163,6 +164,7 @@ impl Renderer {
                     frame.command_buffer,
                     self.frame_index,
                     &terrain.chunks,
+                    terrain.arenas(),
                     &terrain.visible.camera,
                     world_maps,
                     materials,

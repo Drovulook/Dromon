@@ -1,3 +1,4 @@
+pub(crate) mod arenas;
 pub(crate) mod culling;
 mod generate;
 mod graveyard;
@@ -14,7 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::render_resources::TerrainMesh;
+use crate::app::engine::renderer::gpu_memory::arena::ArenaUsage;
 use crate::app::engine::renderer::world::light::DirectionalLight;
+use crate::app::engine::renderer::world::terrain::arenas::TerrainArenas;
 use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
 use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
@@ -52,6 +55,8 @@ pub struct Terrain {
     /// permet de remplacer le mesh d'un chunk précis quand son LOD change (un `Vec`
     /// n'avait aucun lien avec les positions, les chunks vides décalant même les index).
     pub chunks: InstalledChunks,
+    /// Vertex et index buffers partagés par tous les meshes de `chunks`.
+    arenas: TerrainArenas,
     /// LOD affiché de chaque chunk, vides compris : source des coutures.
     shown: ShownLods,
     /// Les mêmes, en masque pour les shaders de la mer.
@@ -91,7 +96,7 @@ impl Terrain {
     /// de distances au carré (cf. `ChunkStreamer::update`).
     pub fn update(&mut self, camera: &Camera) -> Result<()> {
         profile!();
-        self.graveyard.tick();
+        self.graveyard.tick(&mut self.arenas);
         self.retarget(camera);
         self.advance_queue()
     }
@@ -121,7 +126,7 @@ impl Terrain {
 
     /// Fait avancer la file d'une frame et installe ce qu'elle a construit.
     ///
-    /// Les emprunts (`mesh_queue`, `shown`, `mesh_cache`, `context`) portent sur des
+    /// Les emprunts (`mesh_queue`, `shown`, `mesh_cache`, `arenas`…) portent sur des
     /// **champs distincts** de `self` : le borrow checker les accepte simultanément, ce
     /// qu'il refuserait à travers des méthodes prenant `&mut self`.
     fn advance_queue(&mut self) -> Result<()> {
@@ -129,6 +134,7 @@ impl Terrain {
         let built = self.mesh_queue.advance(
             &mut self.shown,
             &mut self.mesh_cache,
+            &mut self.arenas,
             &self.context,
         )?;
         self.install(built);
@@ -214,6 +220,11 @@ impl Terrain {
         self.loaded_mask.set(coord, false);
     }
 
+    /// Buffers à binder avant de dessiner les chunks.
+    pub(crate) fn arenas(&self) -> &TerrainArenas {
+        &self.arenas
+    }
+
     /// Côté du masque des chunks installés (texels), pour créer sa texture.
     pub(crate) fn loaded_mask_size(&self) -> u32 {
         self.loaded_mask.size()
@@ -234,7 +245,7 @@ impl Terrain {
         profile!();
         for coord in std::mem::take(&mut self.pending_uploads) {
             if let Some(chunk) = self.chunks.get(&coord) {
-                chunk.mesh.record_upload(&command_buffer);
+                chunk.mesh.record_upload(&command_buffer, &self.arenas);
             }
         }
 
@@ -308,6 +319,21 @@ impl Terrain {
             gpu.reserved / MB,
             gpu.holes,
             gpu.largest_free / 1024,
+        ));
+        // En éléments : un gros mesh L0 compte ~60 000 sommets.
+        let arena = |usage: ArenaUsage| {
+            format!(
+                "{}/{} k ({} trous, plus grand {} k)",
+                usage.used / 1000,
+                usage.capacity / 1000,
+                usage.holes,
+                usage.largest_free / 1000,
+            )
+        };
+        self.logger.info(&format!(
+            "Arènes : sommets {}, index {}",
+            arena(self.arenas.vertices.usage()),
+            arena(self.arenas.indices.usage()),
         ));
     }
 }

@@ -1,8 +1,8 @@
 mod buffer;
 pub(crate) mod camera;
 mod descriptors;
-pub(crate) mod device_memory;
 mod frustum_culling;
+pub(crate) mod gpu_memory;
 pub mod image_layout_state;
 mod pipelines;
 pub(crate) mod render_resources;

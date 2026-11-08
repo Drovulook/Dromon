@@ -1,13 +1,8 @@
+use super::suballocator::Suballocator;
 use crate::app::engine::rendering_context::RenderingContext;
 use anyhow::{Context, Result};
 use ash::vk;
 use std::collections::HashMap;
-
-#[derive(Clone, Copy)]
-struct FreeRange {
-    start: u64,
-    end: u64,
-}
 
 /// Base d'un bloc host-visible, mappée à sa création et jamais démappée.
 ///
@@ -18,9 +13,9 @@ unsafe impl Send for MappedPtr {}
 
 struct MemoryBlock {
     memory: vk::DeviceMemory,
-    size: u64,
     pub mapped: Option<MappedPtr>,
-    free: Vec<FreeRange>,
+    /// Découpage du bloc, en octets.
+    ranges: Suballocator,
 }
 /// Taille d'un bloc demandé au driver. Un mesh LOD0 fait ~2 Mo : un bloc en tient
 /// une trentaine, et le monde entier quelques blocs au lieu de ~31 000 allocations.
@@ -54,77 +49,9 @@ impl MemoryBlock {
 
         Ok(Self {
             memory,
-            size,
             mapped,
-            free: vec![FreeRange {
-                start: 0,
-                end: size,
-            }],
+            ranges: Suballocator::new(size),
         })
-    }
-
-    /// surveiller la fragmentation
-    fn free_bytes(&self) -> u64 {
-        self.free.iter().map(|r| r.end - r.start).sum()
-    }
-
-    /// Le masque suppose `a` puissance de deux — ce que la spec Vulkan garantit pour
-    /// `MemoryRequirements::alignment`.
-    fn align_up(x: u64, a: u64) -> u64 {
-        debug_assert!(a.is_power_of_two());
-        (x + a - 1) & !(a - 1)
-    }
-
-    fn try_alloc(&mut self, size: u64, align: u64) -> Option<u64> {
-        // Une tranche vide passerait tous les tests et fausserait la libération.
-        debug_assert!(size > 0);
-        for i in 0..self.free.len() {
-            let hole = self.free[i];
-            let start = Self::align_up(hole.start, align);
-            if start <= hole.end && hole.end - start >= size {
-                // résidu à l'arrière
-                if start + size < hole.end {
-                    self.free.insert(
-                        i + 1,
-                        FreeRange {
-                            start: start + size,
-                            end: hole.end,
-                        },
-                    );
-                }
-                // résidu à l'avant
-                if start == hole.start {
-                    self.free.remove(i);
-                } else {
-                    self.free[i].end = start;
-                }
-                return Some(start);
-            }
-        }
-        None
-    }
-
-    /// Rend la tranche `[offset, offset + size)` et refusionne avec ses voisins
-    /// immédiats.
-    fn dealloc(&mut self, offset: u64, size: u64) {
-        let range = FreeRange {
-            start: offset,
-            end: offset + size,
-        };
-        let i = self.free.partition_point(|r| r.start < offset);
-        // il ne doit pas y avoir de chevauchement
-        debug_assert!(i == 0 || self.free[i - 1].end <= range.start);
-        debug_assert!(i == self.free.len() || range.end <= self.free[i].start);
-        self.free.insert(i, range);
-
-        if i + 1 < self.free.len() && self.free[i].end == self.free[i + 1].start {
-            self.free[i].end = self.free[i + 1].end;
-            self.free.remove(i + 1);
-        }
-        if i > 0 && self.free[i - 1].end == self.free[i].start {
-            self.free[i - 1].end = self.free[i].end;
-            self.free.remove(i);
-        }
     }
 }
 
@@ -175,6 +102,7 @@ impl DeviceMemoryAllocator {
         // repartir dans l'`Allocation` : c'est lui qui permettra de la rendre.
         let hit = blocks.iter_mut().enumerate().find_map(|(i, block)| {
             block
+                .ranges
                 .try_alloc(req.size, req.alignment)
                 .map(|offset| (i, offset))
         });
@@ -188,6 +116,7 @@ impl DeviceMemoryAllocator {
                 blocks.push(MemoryBlock::new(context, memory_type, size)?);
                 let index = blocks.len() - 1;
                 let offset = blocks[index]
+                    .ranges
                     .try_alloc(req.size, req.alignment)
                     .context("un bloc neuf doit servir la demande qui l'a créé")?;
                 (index, offset)
@@ -224,12 +153,12 @@ impl DeviceMemoryAllocator {
         // `values()` donne les `Vec` par memory type, `flatten` les parcourt d'affilée :
         // on agrège tout, staging host-visible et device-local confondus.
         for block in self.blocks.values().flatten() {
+            let ranges = &block.ranges;
             usage.blocks += 1;
-            usage.reserved += block.size;
-            usage.used += block.size - block.free_bytes();
-            usage.holes += block.free.len();
-            let largest = block.free.iter().map(|r| r.end - r.start).max();
-            usage.largest_free = usage.largest_free.max(largest.unwrap_or(0));
+            usage.reserved += ranges.capacity();
+            usage.used += ranges.capacity() - ranges.free_total();
+            usage.holes += ranges.holes();
+            usage.largest_free = usage.largest_free.max(ranges.largest_free());
         }
         usage
     }
@@ -241,7 +170,7 @@ impl DeviceMemoryAllocator {
             .and_then(|blocks| blocks.get_mut(allocation.block));
         debug_assert!(block.is_some(), "allocation étrangère à cet allocateur");
         if let Some(block) = block {
-            block.dealloc(allocation.offset, allocation.size);
+            block.ranges.dealloc(allocation.offset, allocation.size);
         }
     }
 

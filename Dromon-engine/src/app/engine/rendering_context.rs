@@ -12,7 +12,7 @@ mod commands;
 mod resources;
 
 use super::debug_messenger::DebugMessenger;
-use crate::app::engine::renderer::device_memory::DeviceMemoryAllocator;
+use crate::app::engine::renderer::gpu_memory::device_memory::DeviceMemoryAllocator;
 use crate::app::logger::Logger;
 use anyhow::Result;
 use ash::vk;

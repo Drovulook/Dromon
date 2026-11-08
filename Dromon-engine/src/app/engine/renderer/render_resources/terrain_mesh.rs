@@ -1,4 +1,6 @@
 use crate::app::engine::renderer::buffer::Buffer;
+use crate::app::engine::renderer::gpu_memory::arena::ArenaSlice;
+use crate::app::engine::renderer::world::terrain::arenas::TerrainArenas;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::{VOXEL_MATERIALS, Voxel};
 use crate::profile;
@@ -135,128 +137,130 @@ impl MeshData {
     }
 }
 
-/// Le mesh d'un chunk de terrain, côté GPU. Même structure que `ObjectMesh`
-/// (staging host-visible + buffer device-local), mais sur des `TerrainVertex`.
+/// Le mesh d'un chunk de terrain, côté GPU : deux tranches des arènes du terrain, plus
+/// leurs stagings host-visible le temps de l'envoi.
+///
+/// Pas de `Drop` : les tranches se rendent par [`TerrainMesh::release`], qui a accès
+/// aux arènes. Un mesh simplement droppé laisse ses tranches occupées.
 pub struct TerrainMesh {
     context: Arc<RenderingContext>,
     /// Géométrie source, partagée avec le cache multi-LOD.
     pub data: Arc<MeshData>,
 
-    pub vertex_staging_buffer: Buffer,
-    pub vertex_buffer: Buffer,
+    vertex_staging_buffer: Buffer,
+    vertices: ArenaSlice,
 
-    pub index_staging_buffer: Buffer,
-    pub index_buffer: Buffer,
+    index_staging_buffer: Buffer,
+    indices: ArenaSlice,
 }
 
 impl TerrainMesh {
-    /// Alloue les buffers et copie les données dans le staging (host-visible).
+    /// Réserve les tranches et copie les données dans le staging (host-visible).
     /// L'upload vers le device se fait plus tard via [`TerrainMesh::record_upload`],
     /// dans la passe de transfert du démarrage ou en tête d'une frame.
-    pub fn new(context: Arc<RenderingContext>, data: Arc<MeshData>) -> Result<TerrainMesh> {
+    ///
+    /// `Ok(None)` : une arène est pleine, rien n'est réservé.
+    pub fn new(
+        context: Arc<RenderingContext>,
+        data: Arc<MeshData>,
+        arenas: &mut TerrainArenas,
+    ) -> Result<Option<TerrainMesh>> {
         profile!();
-        let (vertex_staging_buffer, vertex_buffer) = Self::staging_and_device(
-            &context,
-            &data.vertices,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-        )?;
-        let (index_staging_buffer, index_buffer) =
-            Self::staging_and_device(&context, &data.indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
+        let Some(vertices) = arenas.vertices.allocate(data.vertices.len() as u32) else {
+            return Ok(None);
+        };
+        let Some(indices) = arenas.indices.allocate(data.indices.len() as u32) else {
+            arenas.vertices.free(vertices);
+            return Ok(None);
+        };
+        let vertex_staging_buffer = Self::staging(&context, &data.vertices)?;
+        let index_staging_buffer = Self::staging(&context, &data.indices)?;
 
-        Ok(TerrainMesh {
+        Ok(Some(TerrainMesh {
             context,
             data,
             vertex_staging_buffer,
-            vertex_buffer,
+            vertices,
             index_staging_buffer,
-            index_buffer,
-        })
+            indices,
+        }))
     }
 
-    /// Nombre d'index du corps du chunk, placés en tête de l'index buffer.
-    #[inline]
-    pub fn body_index_count(&self) -> u32 {
-        self.data.body_index_count()
+    /// Rend les tranches aux arènes. ⚠ Aucune frame en vol ne doit plus les lire
+    /// (cf. `Graveyard`).
+    pub fn release(self, arenas: &mut TerrainArenas) {
+        arenas.vertices.free(self.vertices);
+        arenas.indices.free(self.indices);
     }
 
-    /// Plage d'index de la dalle de la face d'index `face` dans `Face::ALL`.
-    #[inline]
-    pub fn slab_indices(&self, face: usize) -> Range<u32> {
-        self.data.slabs[face].clone()
+    /// Draw du corps du chunk, placé en tête de ses index.
+    pub fn body_draw(&self) -> vk::DrawIndexedIndirectCommand {
+        self.draw(0..self.data.body_index_count())
     }
 
-    /// Crée la paire (buffer de staging host-visible, buffer device-local) et y
-    /// copie `data`. `role` est l'usage final (VERTEX_BUFFER ou INDEX_BUFFER).
-    fn staging_and_device<T: Copy>(
-        context: &Arc<RenderingContext>,
-        data: &[T],
-        role: vk::BufferUsageFlags,
-    ) -> Result<(Buffer, Buffer)> {
-        let size = std::mem::size_of_val(data) as u64;
+    /// Draw de la dalle de la face d'index `face` dans `Face::ALL`.
+    pub fn slab_draw(&self, face: usize) -> vk::DrawIndexedIndirectCommand {
+        self.draw(self.data.slabs[face].clone())
+    }
+
+    /// `indices` : plage relative au chunk. `vertex_offset` est ajouté à chaque index
+    /// lu : les index du mailleur, relatifs au chunk, restent valides dans l'arène.
+    fn draw(&self, indices: Range<u32>) -> vk::DrawIndexedIndirectCommand {
+        vk::DrawIndexedIndirectCommand {
+            index_count: indices.end - indices.start,
+            instance_count: 1,
+            first_index: self.indices.first + indices.start,
+            vertex_offset: self.vertices.first as i32,
+            first_instance: 0,
+        }
+    }
+
+    /// Buffer de staging host-visible, rempli avec `data`.
+    fn staging<T: Copy>(context: &Arc<RenderingContext>, data: &[T]) -> Result<Buffer> {
         let staging = Buffer::new(
             context.clone(),
-            size,
+            std::mem::size_of_val(data) as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
         staging.upload(data)?;
-
-        let device = Buffer::new(
-            context.clone(),
-            size,
-            vk::BufferUsageFlags::TRANSFER_DST | role,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
-        Ok((staging, device))
+        Ok(staging)
     }
 
-    pub fn bind(&self, command_buffer: vk::CommandBuffer) {
-        unsafe {
-            self.context.device.cmd_bind_vertex_buffers2(
-                command_buffer,
-                0,
-                &[self.vertex_buffer.buffer],
-                &[0],
-                None,
-                None,
-            );
-            self.context.device.cmd_bind_index_buffer(
-                command_buffer,
-                self.index_buffer.buffer,
-                0,
-                vk::IndexType::UINT32,
-            );
-        }
-    }
-
-    /// Enregistre la copie staging → device. Utilisable dans la passe de transfert
+    /// Enregistre la copie staging → arènes. Utilisable dans la passe de transfert
     /// initiale **comme** en tête d'une frame de jeu (LOD dynamique) : dans ce second
     /// cas, l'appelant doit poser derrière une barrière
     /// `TRANSFER_WRITE → VERTEX_ATTRIBUTE_READ | INDEX_READ`
-    /// (cf. `World::record_terrain_uploads`) — la passe initiale, elle, est suivie d'une
+    /// (cf. `Terrain::record_uploads`) — la passe initiale, elle, est suivie d'une
     /// attente complète de la queue.
-    pub fn record_upload(&self, command_buffer: &vk::CommandBuffer) {
-        unsafe {
-            self.context.device.cmd_copy_buffer(
-                *command_buffer,
-                self.vertex_staging_buffer.buffer,
-                self.vertex_buffer.buffer,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 0,
-                    size: std::mem::size_of_val(self.data.vertices.as_slice()) as u64,
-                }],
-            );
-            self.context.device.cmd_copy_buffer(
-                *command_buffer,
-                self.index_staging_buffer.buffer,
-                self.index_buffer.buffer,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 0,
-                    size: std::mem::size_of_val(self.data.indices.as_slice()) as u64,
-                }],
-            );
+    pub fn record_upload(&self, command_buffer: &vk::CommandBuffer, arenas: &TerrainArenas) {
+        let copies = [
+            (
+                &self.vertex_staging_buffer,
+                &arenas.vertices,
+                &self.vertices,
+                std::mem::size_of_val(self.data.vertices.as_slice()),
+            ),
+            (
+                &self.index_staging_buffer,
+                &arenas.indices,
+                &self.indices,
+                std::mem::size_of_val(self.data.indices.as_slice()),
+            ),
+        ];
+        for (staging, arena, slice, size) in copies {
+            unsafe {
+                self.context.device.cmd_copy_buffer(
+                    *command_buffer,
+                    staging.buffer,
+                    arena.buffer(),
+                    &[vk::BufferCopy {
+                        src_offset: 0,
+                        dst_offset: arena.byte_offset(slice),
+                        size: size as u64,
+                    }],
+                );
+            }
         }
     }
 }

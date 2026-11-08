@@ -9,7 +9,10 @@ use crate::{
             descriptors::DescriptorHandler,
             pipelines,
             render_resources::{MaterialBuffer, TerrainVertex, WorldMaps},
-            world::terrain::meshes::{ChunkSeam, InstalledChunks},
+            world::terrain::{
+                arenas::TerrainArenas,
+                meshes::{ChunkSeam, InstalledChunks},
+            },
         },
         rendering_context::RenderingContext,
     },
@@ -38,8 +41,9 @@ impl TerrainRenderSystem {
         polygon_mode: vk::PolygonMode,
     ) -> Result<Self> {
         unsafe {
-            let vertex_shader = pipelines::load_shader_module(&context.device,"terrain_vert.spv")?;
-            let fragment_shader = pipelines::load_shader_module(&context.device,"terrain_frag.spv")?;
+            let vertex_shader = pipelines::load_shader_module(&context.device, "terrain_vert.spv")?;
+            let fragment_shader =
+                pipelines::load_shader_module(&context.device, "terrain_frag.spv")?;
             // Couture du chunk, poussée à chaque draw. La passe d'ombre ne la lit pas.
             let push_constant_ranges = [vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
@@ -84,7 +88,8 @@ impl TerrainRenderSystem {
 
             // Pipeline d'ombre du terrain : réutilise shadow_vert.spv (ne lit que la
             // position, donc compatible avec TerrainVertex) + le pipeline_layout.
-            let shadow_vertex_shader = pipelines::load_shader_module(&context.device,"terrain_shadow_vert.spv")?;
+            let shadow_vertex_shader =
+                pipelines::load_shader_module(&context.device, "terrain_shadow_vert.spv")?;
             let shadow_pipeline = pipelines::create_shadow_pipeline(
                 &context.device,
                 shadow_vertex_shader,
@@ -113,6 +118,7 @@ impl TerrainRenderSystem {
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
         chunks: &InstalledChunks,
+        arenas: &TerrainArenas,
         visible_chunks: &[IVec2],
         world_maps: &WorldMaps,
         materials: &MaterialBuffer,
@@ -170,39 +176,22 @@ impl TerrainRenderSystem {
                 &[],
             );
 
+            self.bind_arenas(command_buffer, arenas);
             for coord in visible_chunks {
-                {
-                    let Some(chunk) = chunks.get(coord) else {
-                        continue;
-                    };
-                    profile!("bind + draw command - terrain mesh");
-                    self.context.device.cmd_push_constants(
-                        command_buffer,
-                        self.pipeline_layout,
-                        vk::ShaderStageFlags::VERTEX,
-                        0,
-                        bytemuck::bytes_of(&chunk.seam),
-                    );
-                    chunk.mesh.bind(command_buffer);
-                    self.context.device.cmd_draw_indexed(
-                        command_buffer,
-                        chunk.mesh.body_index_count(),
-                        1,
-                        0,
-                        0,
-                        0,
-                    );
-                    for face in (0..4).filter(|&face| chunk.seam.has_slab(face)) {
-                        let slab = chunk.mesh.slab_indices(face);
-                        self.context.device.cmd_draw_indexed(
-                            command_buffer,
-                            slab.end - slab.start,
-                            1,
-                            slab.start,
-                            0,
-                            0,
-                        );
-                    }
+                let Some(chunk) = chunks.get(coord) else {
+                    continue;
+                };
+                profile!("draw command - terrain mesh");
+                self.context.device.cmd_push_constants(
+                    command_buffer,
+                    self.pipeline_layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    0,
+                    bytemuck::bytes_of(&chunk.seam),
+                );
+                self.draw(command_buffer, chunk.mesh.body_draw());
+                for face in (0..4).filter(|&face| chunk.seam.has_slab(face)) {
+                    self.draw(command_buffer, chunk.mesh.slab_draw(face));
                 }
             }
         }
@@ -213,6 +202,7 @@ impl TerrainRenderSystem {
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
         chunks: &InstalledChunks,
+        arenas: &TerrainArenas,
         shadow_chunks: &[IVec2],
     ) {
         if chunks.is_empty() {
@@ -236,21 +226,48 @@ impl TerrainRenderSystem {
                 &[],
             );
 
+            self.bind_arenas(command_buffer, arenas);
             for coord in shadow_chunks {
                 let Some(mesh) = chunks.get(coord).map(|c| &c.mesh) else {
                     continue;
                 };
-                mesh.bind(command_buffer);
                 // Corps seul : les dalles ne projettent rien (cf. `terrainShadowVertMain`).
-                self.context.device.cmd_draw_indexed(
-                    command_buffer,
-                    mesh.body_index_count(),
-                    1,
-                    0,
-                    0,
-                    0,
-                );
+                self.draw(command_buffer, mesh.body_draw());
             }
+        }
+    }
+
+    /// Un vertex buffer et un index buffer pour tous les chunks : chaque draw y désigne
+    /// sa tranche par `first_index` et `vertex_offset`.
+    fn bind_arenas(&self, command_buffer: vk::CommandBuffer, arenas: &TerrainArenas) {
+        unsafe {
+            self.context.device.cmd_bind_vertex_buffers2(
+                command_buffer,
+                0,
+                &[arenas.vertices.buffer()],
+                &[0],
+                None,
+                None,
+            );
+            self.context.device.cmd_bind_index_buffer(
+                command_buffer,
+                arenas.indices.buffer(),
+                0,
+                vk::IndexType::UINT32,
+            );
+        }
+    }
+
+    fn draw(&self, command_buffer: vk::CommandBuffer, draw: vk::DrawIndexedIndirectCommand) {
+        unsafe {
+            self.context.device.cmd_draw_indexed(
+                command_buffer,
+                draw.index_count,
+                draw.instance_count,
+                draw.first_index,
+                draw.vertex_offset,
+                draw.first_instance,
+            );
         }
     }
 }
