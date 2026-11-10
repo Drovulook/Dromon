@@ -40,4 +40,10 @@ impl TerrainArenas {
             )?,
         })
     }
+
+    /// Vide les deux arènes pour un terrain neuf, sans réallouer. ⚠ GPU à l'arrêt.
+    pub fn clear(&mut self) {
+        self.vertices.clear();
+        self.indices.clear();
+    }
 }

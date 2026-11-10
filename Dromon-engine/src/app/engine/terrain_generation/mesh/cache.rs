@@ -21,6 +21,7 @@
 //! qui n'interviennent qu'au rendu (`ChunkSeam`).
 
 use crate::app::engine::renderer::render_resources::MeshData;
+use crate::profile;
 use glam::IVec2;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
@@ -157,6 +158,7 @@ impl MeshCache {
     /// Quand tout le dépassement vient d'entrées partagées, l'éviction ne peut rien : on
     /// remonte alors `evict_floor` pour ne pas re-trier à chaque insertion suivante.
     fn evict(&mut self) {
+        profile!();
         let target = (self.budget as f32 * EVICT_DOWN_TO) as usize;
         let mut owned: Vec<(u64, MeshKey, usize)> = self
             .entries

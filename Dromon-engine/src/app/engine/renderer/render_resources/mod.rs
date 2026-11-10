@@ -30,7 +30,7 @@ pub use material_buffer::MaterialBuffer;
 pub use object_mesh::{ObjectMesh, ObjectVertex};
 use std::{collections::HashMap, sync::Arc};
 pub use terrain_mesh::{
-    MeshData, SEAM_VERTEX_FIXED, SEAM_VERTEX_SLAB_HIGH, TerrainMesh, TerrainVertex,
+    MeshData, NoRoom, SEAM_VERTEX_FIXED, SEAM_VERTEX_SLAB_HIGH, TerrainMesh, TerrainVertex,
 };
 use texture::Texture;
 pub use transform::Transform;

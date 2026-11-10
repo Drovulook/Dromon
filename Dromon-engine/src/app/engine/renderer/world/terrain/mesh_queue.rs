@@ -13,7 +13,8 @@ use std::{
 
 use crate::{
     app::engine::{
-        renderer::render_resources::{MeshData, TerrainMesh},
+        renderer::gpu_memory::staging_ring::StagingRing,
+        renderer::render_resources::{MeshData, NoRoom, TerrainMesh},
         renderer::world::terrain::arenas::TerrainArenas,
         rendering_context::RenderingContext,
         terrain_generation::{
@@ -44,7 +45,7 @@ const MAX_PUBLISHED: usize = 4096;
 /// ```text
 /// 1. publier    → liste figée (coord, lod) consommée par les workers rayon
 /// 2. récolter   → résultats vers le cache et `ready`
-/// 3. construire → buffers Vulkan, du plus proche au plus lointain, sous budget de temps
+/// 3. construire → tranches d'arène, du plus proche au plus lointain, sous budget d'envoi
 /// ```
 /// La liste est remplacée dès que la cible change : le travail périmé s'arrête au chunk en
 /// cours de chaque worker, et ce qui est déjà maillé reste au cache.
@@ -69,8 +70,6 @@ pub struct MeshQueue {
     target_changed: bool,
     /// Plus rien à faire tant que la cible ne change pas.
     settled: bool,
-    /// Temps de construction de buffers autorisé par frame.
-    budget: Duration,
     stats: QueueStats,
 }
 
@@ -132,7 +131,6 @@ impl MeshQueue {
         target: Arc<LodGrid>,
         focus: LodFocus,
         snapshot: TerrainSnapshot,
-        budget: Duration,
     ) -> MeshQueue {
         let (sender, receiver) = channel();
         MeshQueue {
@@ -151,7 +149,6 @@ impl MeshQueue {
             ready: BinaryHeap::new(),
             target_changed: true,
             settled: false,
-            budget,
             stats: QueueStats::default(),
         }
     }
@@ -170,11 +167,6 @@ impl MeshQueue {
         self.settled = false;
     }
 
-    /// Temps de construction de buffers autorisé par frame.
-    pub(super) fn set_budget(&mut self, budget: Duration) {
-        self.budget = budget;
-    }
-
     /// Tout est affiché à son niveau cible.
     pub(super) fn is_settled(&self) -> bool {
         self.settled
@@ -187,6 +179,7 @@ impl MeshQueue {
         shown: &mut ShownLods,
         cache: &mut MeshCache,
         arenas: &mut TerrainArenas,
+        ring: &mut StagingRing,
         context: &Arc<RenderingContext>,
     ) -> Result<Vec<(IVec2, Option<TerrainMesh>)>> {
         self.collect(shown, cache);
@@ -194,12 +187,13 @@ impl MeshQueue {
         if exhausted || self.target_changed {
             self.publish(shown, cache);
         }
-        self.build(shown, arenas, context)
+        self.build(shown, arenas, ring, context)
     }
 
     /// Ramasse les résultats des workers. Tout va au cache ; seuls ceux de la liste en
     /// cours sont à construire.
     fn collect(&mut self, shown: &ShownLods, cache: &mut MeshCache) {
+        profile!();
         while let Ok(meshed) = self.receiver.try_recv() {
             let lod = meshed.lod as usize;
             if lod >= self.stats.mesh_cost.len() {
@@ -284,41 +278,46 @@ impl MeshQueue {
         }
     }
 
-    /// Bâtit les buffers des géométries prêtes, du plus proche au plus lointain, **sous
-    /// budget de temps**. Un chunk que ses voisins n'autorisent plus reste au cache : la
-    /// prochaine publication le reprendra.
+    /// Bâtit les meshes des géométries prêtes, du plus proche au plus lointain, tant que le
+    /// ring de staging accepte (budget d'envoi par frame). Un chunk que ses voisins
+    /// n'autorisent plus reste au cache : la prochaine publication le reprendra.
     ///
     /// `shown` est mis à jour à chaque chunk : deux voisins construits dans la même frame
     /// doivent respecter la règle l'un envers l'autre.
     ///
-    /// Arène pleine : le chunk garde son mesh actuel et sa géométrie reste au cache ; on
-    /// arrête là pour cette frame, les suivants échoueraient aussi.
+    /// Plus de place (ring ou arène) : le chunk refusé retourne dans `ready` et garde son
+    /// mesh actuel ; on arrête là pour cette frame, les suivants échoueraient aussi.
     fn build(
         &mut self,
         shown: &mut ShownLods,
         arenas: &mut TerrainArenas,
+        ring: &mut StagingRing,
         context: &Arc<RenderingContext>,
     ) -> Result<Vec<(IVec2, Option<TerrainMesh>)>> {
         profile!();
-        let deadline = Instant::now() + self.budget;
         let mut built = Vec::new();
 
         while let Some(item) = self.ready.pop() {
-            if !self.target.contains(item.coord) || shown.get(item.coord) == Some(item.lod) {
+            let stale = !self.target.contains(item.coord)
+                || shown.get(item.coord) == Some(item.lod)
+                || shown.next_lod(item.coord, self.target.lod(item.coord)) != Some(item.lod);
+            if stale {
+                // Mesuré à part : le drop peut libérer la géométrie si le cache l'a évincée.
+                profile!("MeshQueue::build : ignoré");
+                drop(item);
                 continue;
             }
-            let target = self.target.lod(item.coord);
-            if shown.next_lod(item.coord, target) != Some(item.lod) {
-                continue;
-            }
-            // Vulkan interdit un buffer de taille 0.
+            // Un chunk vide n'a pas de mesh : une tranche vide n'a pas de sens.
             let mesh = if item.data.is_empty() {
                 None
             } else {
-                match TerrainMesh::new(context.clone(), item.data, arenas)? {
-                    Some(mesh) => Some(mesh),
-                    None => {
-                        self.stats.arena_full += 1;
+                match TerrainMesh::new(context.clone(), item.data.clone(), arenas, ring)? {
+                    Ok(mesh) => Some(mesh),
+                    Err(no_room) => {
+                        if let NoRoom::Arena = no_room {
+                            self.stats.arena_full += 1;
+                        }
+                        self.ready.push(item);
                         break;
                     }
                 }
@@ -326,11 +325,6 @@ impl MeshQueue {
             shown.set(item.coord, item.lod);
             built.push((item.coord, mesh));
             self.stats.installed += 1;
-
-            // Test après avoir traité un élément : au moins un par frame, toujours.
-            if Instant::now() >= deadline {
-                break;
-            }
         }
         Ok(built)
     }
@@ -338,7 +332,11 @@ impl MeshQueue {
     /// Rang de traitement de `coord` : plus il est faible, plus le chunk est urgent.
     fn rank(&self, coord: IVec2, missing: bool) -> f32 {
         let distance = chunk_distance(coord, self.focus.pos);
-        if missing { distance / HOLE_PRIORITY } else { distance }
+        if missing {
+            distance / HOLE_PRIORITY
+        } else {
+            distance
+        }
     }
 
     fn push_ready(&mut self, rank: f32, coord: IVec2, lod: u8, data: Arc<MeshData>) {

@@ -80,6 +80,12 @@ impl Arena {
         self.ranges.dealloc(slice.first as u64, slice.count as u64);
     }
 
+    /// Rend toutes les tranches d'un coup, en gardant le buffer. ⚠ Le GPU doit être à
+    /// l'arrêt, et les `ArenaSlice` encore détenues ne valent plus rien.
+    pub fn clear(&mut self) {
+        self.ranges = Suballocator::new(self.ranges.capacity());
+    }
+
     pub fn usage(&self) -> ArenaUsage {
         let capacity = self.ranges.capacity();
         ArenaUsage {

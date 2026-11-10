@@ -2,13 +2,14 @@ use anyhow::Result;
 use glam::{IVec2, Vec3};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::{
     World,
     app::{
         engine::{
             renderer::{
+                gpu_memory::staging_ring::StagingRing,
                 render_resources::{MaterialBuffer, MeshData, WorldMaps},
                 world::{
                     terrain::{
@@ -45,7 +46,7 @@ impl World {
             Some(world_radius(config)),
             self.config.debug.camera_unbounded,
         );
-        let terrain = self.new_terrain(config)?;
+        let terrain = self.new_terrain(config, None)?;
         self.water = Some(Water::new(
             self.context.clone(),
             terrain.source.clone(),
@@ -91,10 +92,17 @@ impl World {
             Some(world_radius(config)),
             self.config.debug.camera_unbounded,
         );
-        let mut terrain = self.new_terrain(config)?;
-        // Les frames en vol dessinent peut-être encore l'ancien terrain (buffers libérés
-        // par son remplacement) et lisent les cartes du monde.
+        // Les frames en vol dessinent peut-être encore l'ancien terrain et lisent les cartes
+        // du monde.
         unsafe { self.context.device.device_wait_idle()? };
+        // Ses arènes et son ring passent au nouveau, sans réallocation (3 Gio de VRAM en
+        // double sinon) ; le reste est détruit ici. Ses workers encore en vol s'arrêtent
+        // au premier envoi vers son canal fermé. Échec plus bas → plus de terrain.
+        let reused = self.terrain.take().map(|old| {
+            let Terrain { arenas, staging, .. } = old;
+            ReusedBuffers { arenas, staging }
+        });
+        let mut terrain = self.new_terrain(config, reused)?;
         match self.world_maps.as_mut() {
             Some(world_maps)
                 if macro_changed || world_maps.loaded_mask_size() != terrain.loaded_mask_size() =>
@@ -120,8 +128,6 @@ impl World {
                 &self.config.render.water,
             );
         }
-        // L'ancien terrain est détruit ici ; ses workers encore en vol s'arrêtent au
-        // premier envoi vers son canal fermé.
         self.terrain = Some(terrain);
         Ok(())
     }
@@ -141,7 +147,11 @@ impl World {
             .map(|terrain| world_radius(&terrain.world_gen))
     }
 
-    fn new_terrain(&self, config: &WorldGenConfig) -> Result<Terrain> {
+    fn new_terrain(
+        &self,
+        config: &WorldGenConfig,
+        reused: Option<ReusedBuffers>,
+    ) -> Result<Terrain> {
         Terrain::new(
             config,
             &self.config.materials,
@@ -152,6 +162,7 @@ impl World {
             self.context.clone(),
             self.logger.clone(),
             self.frames_in_flight,
+            reused,
         )
     }
 
@@ -161,6 +172,12 @@ impl World {
         let params = &self.config.render.terrain;
         (params.load_radius_chunks as f32 + params.unload_margin_chunks) * CHUNK_SIZE as f32
     }
+}
+
+/// Buffers GPU d'un terrain remplacé, repris par le suivant (cf. `regenerate_terrain`).
+struct ReusedBuffers {
+    arenas: TerrainArenas,
+    staging: StagingRing,
 }
 
 /// Rayon du monde, en unités monde.
@@ -212,8 +229,28 @@ impl Terrain {
         context: Arc<RenderingContext>,
         logger: Arc<Logger>,
         frames_in_flight: u64,
+        reused: Option<ReusedBuffers>,
     ) -> Result<Terrain> {
         profile!();
+
+        // Buffers GPU : repris de l'ancien terrain et vidés, ou créés.
+        let upload_budget = params.upload_budget_mb as u64 * 1024 * 1024;
+        let new_ring = || StagingRing::new(context.clone(), upload_budget, frames_in_flight);
+        let (arenas, staging) = match reused {
+            Some(ReusedBuffers {
+                mut arenas,
+                mut staging,
+            }) => {
+                arenas.clear();
+                if staging.frame_budget() == upload_budget {
+                    staging.clear();
+                } else {
+                    staging = new_ring()?;
+                }
+                (arenas, staging)
+            }
+            None => (TerrainArenas::new(&context)?, new_ring()?),
+        };
 
         // Relue depuis le cache (cf. exemple `macro_map`), recalculée s'il est périmé.
         let (macro_map, rebuilt) = MacroMap::load_or_build(config, &macro_map_cache())?;
@@ -247,9 +284,7 @@ impl Terrain {
         //    que le jeu tourne. Du plus proche au plus lointain de la caméra, pour que le
         //    terrain apparaisse en cercles concentriques autour du joueur.
         let mesh_cache = MeshCache::new(params.mesh_cache_mb * 1024 * 1024);
-        let ms = |v: f32| Duration::from_secs_f32(v / 1000.0);
-        let frame_budget = ms(params.frame_budget_ms);
-        let mesh_queue = MeshQueue::new(grid, focus, snapshot, ms(params.initial_load_budget_ms));
+        let mesh_queue = MeshQueue::new(grid, focus, snapshot);
 
         Ok(Terrain {
             loading_since: Some(Instant::now()),
@@ -258,7 +293,7 @@ impl Terrain {
             source,
             store,
             chunks: InstalledChunks::new(),
-            arenas: TerrainArenas::new(&context)?,
+            arenas,
             shown: ShownLods::default(),
             // Fenêtre : disque de rayon `portée + marge` chunks, soit au plus
             // ⌈2·rayon⌉ + 1 chunks sur un axe.
@@ -271,10 +306,10 @@ impl Terrain {
             reference_z,
             mesh_cache,
             mesh_queue,
+            staging,
             pending_uploads: Vec::new(),
-            graveyard: Graveyard::new(frames_in_flight, frame_budget),
+            graveyard: Graveyard::new(frames_in_flight),
             visible: VisibleSet::default(),
-            frame_budget,
             max_lod: params.lod.max_lod(),
             debug: debug.clone(),
             context,

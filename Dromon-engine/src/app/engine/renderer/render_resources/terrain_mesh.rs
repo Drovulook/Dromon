@@ -1,5 +1,5 @@
-use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::gpu_memory::arena::ArenaSlice;
+use crate::app::engine::renderer::gpu_memory::staging_ring::StagingRing;
 use crate::app::engine::renderer::world::terrain::arenas::TerrainArenas;
 use crate::app::engine::rendering_context::RenderingContext;
 use crate::app::engine::terrain_generation::{VOXEL_MATERIALS, Voxel};
@@ -137,8 +137,19 @@ impl MeshData {
     }
 }
 
-/// Le mesh d'un chunk de terrain, côté GPU : deux tranches des arènes du terrain, plus
-/// leurs stagings host-visible le temps de l'envoi.
+/// Faute de place, un mesh n'a pas pu être construit ; rien n'est réservé.
+pub enum NoRoom {
+    /// Une arène est pleine : à signaler, il faut l'agrandir.
+    Arena,
+    /// Budget d'envoi de la frame atteint : normal, à retenter à la frame suivante.
+    Staging,
+}
+
+/// Les index suivent les sommets dans le ring, à un offset aligné (cf. `StagingRing`).
+const STAGING_INDEX_ALIGN: u64 = 16;
+
+/// Le mesh d'un chunk de terrain, côté GPU : deux tranches des arènes du terrain. Ses
+/// données transitent par le ring de staging le temps d'une copie.
 ///
 /// Pas de `Drop` : les tranches se rendent par [`TerrainMesh::release`], qui a accès
 /// aux arènes. Un mesh simplement droppé laisse ses tranches occupées.
@@ -146,44 +157,55 @@ pub struct TerrainMesh {
     context: Arc<RenderingContext>,
     /// Géométrie source, partagée avec le cache multi-LOD.
     pub data: Arc<MeshData>,
-
-    vertex_staging_buffer: Buffer,
     vertices: ArenaSlice,
-
-    index_staging_buffer: Buffer,
     indices: ArenaSlice,
+    /// Position des sommets dans le ring, valable jusqu'à [`TerrainMesh::record_upload`]
+    /// de la même frame.
+    staging_offset: u64,
 }
 
 impl TerrainMesh {
-    /// Réserve les tranches et copie les données dans le staging (host-visible).
-    /// L'upload vers le device se fait plus tard via [`TerrainMesh::record_upload`],
-    /// dans la passe de transfert du démarrage ou en tête d'une frame.
-    ///
-    /// `Ok(None)` : une arène est pleine, rien n'est réservé.
+    /// Réserve les tranches et copie les données dans le ring de staging. La copie vers
+    /// les arènes s'enregistre **dans la même frame** via [`TerrainMesh::record_upload`] :
+    /// la zone du ring est recyclée quelques frames plus tard.
     pub fn new(
         context: Arc<RenderingContext>,
         data: Arc<MeshData>,
         arenas: &mut TerrainArenas,
-    ) -> Result<Option<TerrainMesh>> {
+        ring: &mut StagingRing,
+    ) -> Result<Result<TerrainMesh, NoRoom>> {
         profile!();
+        // Arènes d'abord : leurs tranches se rendent aussitôt, pas une réservation du ring.
         let Some(vertices) = arenas.vertices.allocate(data.vertices.len() as u32) else {
-            return Ok(None);
+            return Ok(Err(NoRoom::Arena));
         };
         let Some(indices) = arenas.indices.allocate(data.indices.len() as u32) else {
             arenas.vertices.free(vertices);
-            return Ok(None);
+            return Ok(Err(NoRoom::Arena));
         };
-        let vertex_staging_buffer = Self::staging(&context, &data.vertices)?;
-        let index_staging_buffer = Self::staging(&context, &data.indices)?;
+        let index_start = Self::staging_index_start(&data);
+        let index_bytes = std::mem::size_of_val(data.indices.as_slice()) as u64;
+        let Some(staging_offset) = ring.allocate(index_start + index_bytes) else {
+            arenas.vertices.free(vertices);
+            arenas.indices.free(indices);
+            return Ok(Err(NoRoom::Staging));
+        };
+        ring.write(staging_offset, &data.vertices)?;
+        ring.write(staging_offset + index_start, &data.indices)?;
 
-        Ok(Some(TerrainMesh {
+        Ok(Ok(TerrainMesh {
             context,
             data,
-            vertex_staging_buffer,
             vertices,
-            index_staging_buffer,
             indices,
+            staging_offset,
         }))
+    }
+
+    /// Début des index dans la réservation du ring, après les sommets.
+    fn staging_index_start(data: &MeshData) -> u64 {
+        (std::mem::size_of_val(data.vertices.as_slice()) as u64)
+            .next_multiple_of(STAGING_INDEX_ALIGN)
     }
 
     /// Rend les tranches aux arènes. ⚠ Aucune frame en vol ne doit plus les lire
@@ -215,47 +237,37 @@ impl TerrainMesh {
         }
     }
 
-    /// Buffer de staging host-visible, rempli avec `data`.
-    fn staging<T: Copy>(context: &Arc<RenderingContext>, data: &[T]) -> Result<Buffer> {
-        let staging = Buffer::new(
-            context.clone(),
-            std::mem::size_of_val(data) as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        staging.upload(data)?;
-        Ok(staging)
-    }
-
-    /// Enregistre la copie staging → arènes. Utilisable dans la passe de transfert
-    /// initiale **comme** en tête d'une frame de jeu (LOD dynamique) : dans ce second
-    /// cas, l'appelant doit poser derrière une barrière
-    /// `TRANSFER_WRITE → VERTEX_ATTRIBUTE_READ | INDEX_READ`
-    /// (cf. `Terrain::record_uploads`) — la passe initiale, elle, est suivie d'une
-    /// attente complète de la queue.
-    pub fn record_upload(&self, command_buffer: &vk::CommandBuffer, arenas: &TerrainArenas) {
+    /// Enregistre la copie ring → arènes, **dans la frame qui a construit le mesh**.
+    /// L'appelant pose derrière une barrière `TRANSFER_WRITE → VERTEX_ATTRIBUTE_READ |
+    /// INDEX_READ` (cf. `Terrain::record_uploads`).
+    pub fn record_upload(
+        &self,
+        command_buffer: &vk::CommandBuffer,
+        arenas: &TerrainArenas,
+        ring: &StagingRing,
+    ) {
         let copies = [
             (
-                &self.vertex_staging_buffer,
+                self.staging_offset,
                 &arenas.vertices,
                 &self.vertices,
                 std::mem::size_of_val(self.data.vertices.as_slice()),
             ),
             (
-                &self.index_staging_buffer,
+                self.staging_offset + Self::staging_index_start(&self.data),
                 &arenas.indices,
                 &self.indices,
                 std::mem::size_of_val(self.data.indices.as_slice()),
             ),
         ];
-        for (staging, arena, slice, size) in copies {
+        for (src_offset, arena, slice, size) in copies {
             unsafe {
                 self.context.device.cmd_copy_buffer(
                     *command_buffer,
-                    staging.buffer,
+                    ring.buffer(),
                     arena.buffer(),
                     &[vk::BufferCopy {
-                        src_offset: 0,
+                        src_offset,
                         dst_offset: arena.byte_offset(slice),
                         size: size as u64,
                     }],

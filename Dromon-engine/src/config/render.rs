@@ -109,8 +109,8 @@ impl ConfigFile for RenderConfig {
         ensure!(t.load_radius_chunks > 0, "terrain.load_radius_chunks doit être > 0");
         ensure!(t.unload_margin_chunks >= 0.0, "terrain.unload_margin_chunks doit être ≥ 0");
         ensure!(
-            t.frame_budget_ms > 0.0 && t.initial_load_budget_ms > 0.0,
-            "terrain : les budgets de temps doivent être > 0"
+            t.upload_budget_mb > 0,
+            "terrain.upload_budget_mb doit être > 0"
         );
         let lod = &t.lod;
         ensure!(
@@ -164,14 +164,10 @@ pub struct TerrainRenderParams {
     /// oscille sur le bord chargerait et déchargerait la même rangée en boucle.
     pub unload_margin_chunks: f32,
     pub lod: LodParams,
-    /// Temps autorisé **par frame** pour bâtir les buffers des chunks, et autant pour
-    /// détruire les anciens (allocations Vulkan : ~100 µs–1 ms chacune). En temps plutôt
-    /// qu'en nombre de meshes : le coût varie selon le driver. Au moins un mesh est
-    /// toujours traité.
-    pub frame_budget_ms: f32,
-    /// Même budget pendant le **chargement initial** : des milliers de meshes à bâtir,
-    /// et une fluidité moins critique qu'en jeu.
-    pub initial_load_budget_ms: f32,
+    /// Géométrie envoyée au GPU **par frame**, en Mo : son `memcpy` vers le ring de
+    /// staging est le seul coût d'installation d'un chunk (mesuré ~2 Go/s : ~1,5 ms pour 3 Mo). Au moins un
+    /// mesh passe toujours. Fixe la taille du ring (× `frames_in_flight + 1`).
+    pub upload_budget_mb: u32,
     /// Budget mémoire du cache des géométries de chunks, en Mo (allers-retours de
     /// caméra). En octets et non en entrées : LOD1 ≈ ¼ du LOD0, LOD2 ≈ 6 %…
     pub mesh_cache_mb: usize,
@@ -183,8 +179,7 @@ impl Default for TerrainRenderParams {
             load_radius_chunks: 16,
             unload_margin_chunks: 2.0,
             lod: LodParams::default(),
-            frame_budget_ms: 1.0,
-            initial_load_budget_ms: 1.0,
+            upload_budget_mb: 3,
             mesh_cache_mb: 2000,
         }
     }

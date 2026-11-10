@@ -14,8 +14,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::app::engine::renderer::camera::Camera;
-use crate::app::engine::renderer::render_resources::TerrainMesh;
 use crate::app::engine::renderer::gpu_memory::arena::ArenaUsage;
+use crate::app::engine::renderer::gpu_memory::staging_ring::StagingRing;
+use crate::app::engine::renderer::render_resources::TerrainMesh;
 use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::terrain::arenas::TerrainArenas;
 use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
@@ -70,14 +71,14 @@ pub struct Terrain {
     mesh_cache: MeshCache,
     /// Rapproche ce qui est affiché de ce qui est voulu.
     mesh_queue: MeshQueue,
-    /// Chunks dont les buffers attendent leur copie staging → device.
+    /// Transit CPU → arènes de la géométrie des chunks construits.
+    staging: StagingRing,
+    /// Chunks construits cette frame, dont la copie ring → arènes reste à enregistrer.
     pending_uploads: Vec<IVec2>,
-    /// Meshes remplacés, détruits une fois qu'aucune frame en vol ne peut plus les lire.
+    /// Meshes remplacés, libérés une fois qu'aucune frame en vol ne peut plus les lire.
     graveyard: Graveyard,
     /// Chunks retenus par le frustum culling, recalculés à chaque frame.
     pub visible: VisibleSet,
-    /// Temps de construction de buffers autorisé par frame (`render.ron`).
-    frame_budget: Duration,
     /// LOD maximal (nombre de rayons de `render.ron`), pour les statistiques par niveau.
     max_lod: u8,
     /// Traces et options de maillage (`debug.ron`).
@@ -96,7 +97,6 @@ impl Terrain {
     /// de distances au carré (cf. `ChunkStreamer::update`).
     pub fn update(&mut self, camera: &Camera) -> Result<()> {
         profile!();
-        self.graveyard.tick(&mut self.arenas);
         self.retarget(camera);
         self.advance_queue()
     }
@@ -135,6 +135,7 @@ impl Terrain {
             &mut self.shown,
             &mut self.mesh_cache,
             &mut self.arenas,
+            &mut self.staging,
             &self.context,
         )?;
         self.install(built);
@@ -147,14 +148,17 @@ impl Terrain {
         Ok(())
     }
 
-    /// Le monde est affiché : bilan et retour au budget de jeu.
+    /// Le monde est affiché : bilan du chargement initial.
     fn finish_initial_load(&mut self, start: Instant) {
-        self.mesh_queue.set_budget(self.frame_budget);
         let meshed: Vec<_> = self
             .chunks
             .coords()
             .iter()
-            .filter_map(|c| self.chunks.get(c).map(|chunk| (*c, chunk.mesh.data.clone())))
+            .filter_map(|c| {
+                self.chunks
+                    .get(c)
+                    .map(|chunk| (*c, chunk.mesh.data.clone()))
+            })
             .collect();
         self.logger.info(&format!(
             "Génération du monde terminée : {} chunks en {:.2} s",
@@ -236,16 +240,25 @@ impl Terrain {
         self.loaded_mask.take_changes()
     }
 
-    /// Enregistre les copies staging → device des meshes fraîchement installés.
-    /// À appeler en tête de frame, **hors** de tout rendering scope.
+    /// Enregistre les copies ring → arènes des meshes fraîchement installés. À appeler
+    /// **une fois par frame soumise au GPU**, en tête de frame, hors de tout rendering
+    /// scope : le cimetière et le ring y comptent leurs frames. Une frame sautée
+    /// (fenêtre minimisée) n'avance donc ni l'un ni l'autre, et rien n'est libéré trop tôt.
     pub fn record_uploads(&mut self, command_buffer: vk::CommandBuffer) {
-        if self.pending_uploads.is_empty() {
-            return;
+        if !self.pending_uploads.is_empty() {
+            self.record_copies(command_buffer);
         }
+        self.graveyard.tick(&mut self.arenas);
+        self.staging.end_frame();
+    }
+
+    fn record_copies(&mut self, command_buffer: vk::CommandBuffer) {
         profile!();
         for coord in std::mem::take(&mut self.pending_uploads) {
             if let Some(chunk) = self.chunks.get(&coord) {
-                chunk.mesh.record_upload(&command_buffer, &self.arenas);
+                chunk
+                    .mesh
+                    .record_upload(&command_buffer, &self.arenas, &self.staging);
             }
         }
 

@@ -46,8 +46,7 @@
             hysteresis: 0.08,   // bande morte relative autour de chaque rayon
             height_weight: 1.0, // 1 = distance 3D œil → chunk, 0 = horizontale seule
         ),
-        frame_budget_ms: 1.0,        // construction / destruction de buffers par frame
-        initial_load_budget_ms: 1.0, // idem pendant le chargement initial
+        upload_budget_mb: 3,         // géométrie envoyée au GPU par frame (~1,5 ms de memcpy)
         mesh_cache_mb: 5000,         // cache des géométries (allers-retours de caméra)
     ),
 
