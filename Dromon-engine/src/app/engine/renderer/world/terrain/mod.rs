@@ -1,5 +1,6 @@
 pub(crate) mod arenas;
 pub(crate) mod culling;
+pub(crate) mod draw_buffers;
 mod generate;
 mod graveyard;
 mod loaded_mask;
@@ -20,6 +21,7 @@ use crate::app::engine::renderer::render_resources::TerrainMesh;
 use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::terrain::arenas::TerrainArenas;
 use crate::app::engine::renderer::world::terrain::culling::VisibleSet;
+use crate::app::engine::renderer::world::terrain::draw_buffers::DrawBuffers;
 use crate::app::engine::renderer::world::terrain::generate::log_terrain_stats;
 use crate::app::engine::renderer::world::terrain::graveyard::Graveyard;
 use crate::app::engine::renderer::world::terrain::loaded_mask::LoadedMask;
@@ -79,6 +81,8 @@ pub struct Terrain {
     graveyard: Graveyard,
     /// Chunks retenus par le frustum culling, recalculés à chaque frame.
     pub visible: VisibleSet,
+    /// Commandes de dessin des chunks de `visible`, lues par le GPU (draw indirect).
+    draws: DrawBuffers,
     /// LOD maximal (nombre de rayons de `render.ron`), pour les statistiques par niveau.
     max_lod: u8,
     /// Traces et options de maillage (`debug.ron`).
@@ -285,6 +289,18 @@ impl Terrain {
     pub fn update_visibility(&mut self, camera: &Camera, light: &DirectionalLight) {
         let max_height = self.source.max_height() as f32;
         self.visible.update(&self.chunks, camera, light, max_height);
+    }
+
+    /// Écrit les commandes de dessin des chunks visibles pour `frame_index`. ⚠ Après
+    /// l'attente du fence de cette frame (cf. [`DrawBuffers::write`]).
+    pub fn write_draws(&mut self, frame_index: usize) -> Result<()> {
+        profile!();
+        self.draws.write(frame_index, &self.chunks, &self.visible)
+    }
+
+    /// Commandes de dessin et coutures, pour le rendu.
+    pub(crate) fn draws(&self) -> &DrawBuffers {
+        &self.draws
     }
 
     /// Hot reload : seules les traces changent à chaud, les options de maillage

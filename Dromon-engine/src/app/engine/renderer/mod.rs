@@ -443,6 +443,10 @@ impl Renderer {
             // staging → device s'enregistre ici, hors rendering scope, suivie de sa
             // barrière. Les passes ci-dessous les dessineront dans cette même frame.
             self.world.record_terrain_uploads(frame.command_buffer)?;
+            // Commandes de dessin du terrain, après le fence : ce slot n'est plus lu par le GPU.
+            if let Some(terrain) = self.world.terrain.as_mut() {
+                terrain.write_draws(self.frame_index)?;
+            }
 
             // L'UBO est mis à jour AVANT toute passe : la passe d'ombre comme la
             // passe principale lisent la même `light_view_proj` depuis le set 0.

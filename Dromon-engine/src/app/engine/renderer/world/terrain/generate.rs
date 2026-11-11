@@ -13,7 +13,8 @@ use crate::{
                 render_resources::{MaterialBuffer, MeshData, WorldMaps},
                 world::{
                     terrain::{
-                        Terrain, arenas::TerrainArenas, culling::VisibleSet, graveyard::Graveyard,
+                        Terrain, arenas::TerrainArenas, culling::VisibleSet,
+                        draw_buffers::DrawBuffers, graveyard::Graveyard,
                         loaded_mask::LoadedMask, mesh_queue::MeshQueue, meshes::InstalledChunks,
                     },
                     water::Water,
@@ -310,6 +311,7 @@ impl Terrain {
             pending_uploads: Vec::new(),
             graveyard: Graveyard::new(frames_in_flight),
             visible: VisibleSet::default(),
+            draws: DrawBuffers::new(context.clone(), frames_in_flight as usize),
             max_lod: params.lod.max_lod(),
             debug: debug.clone(),
             context,

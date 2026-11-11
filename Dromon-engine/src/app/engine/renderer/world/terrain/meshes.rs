@@ -1,12 +1,15 @@
+use ash::vk;
 use bytemuck::{Pod, Zeroable};
 use glam::IVec2;
+use std::mem::offset_of;
 use rustc_hash::FxHashMap;
 
 use crate::app::engine::renderer::render_resources::TerrainMesh;
 use crate::app::engine::terrain_generation::{CHUNK_SIZE, ShownLods};
 
-/// Couture d'un chunk, poussée à chaque draw. ⚠ Même disposition que `ChunkSeam`
-/// (`lib/chunk_seam.slang`).
+/// Couture d'un chunk, lue comme attribut **par instance** : chaque draw indirect la
+/// désigne par son `first_instance`. ⚠ Mêmes champs que `ChunkSeam`
+/// (`lib/chunk_seam.slang`) et que les entrées 4 à 6 de `terrain.slang`.
 ///
 /// Dépend de ce que les voisins **affichent** : un voisin qui change de LOD ne modifie que
 /// ces 16 octets, pas le mesh.
@@ -29,6 +32,42 @@ impl ChunkSeam {
             lod_step: (1u32 << shown.get(coord).unwrap_or(0)) as f32,
             bits: shown.seam_bits(coord),
         }
+    }
+
+    /// Binding des coutures. `INSTANCE` : avec `instance_count` = 1, le draw lit
+    /// l'élément `first_instance` du buffer.
+    pub const BINDING: u32 = 1;
+
+    pub fn binding_description() -> vk::VertexInputBindingDescription {
+        vk::VertexInputBindingDescription {
+            binding: Self::BINDING,
+            stride: std::mem::size_of::<ChunkSeam>() as u32,
+            input_rate: vk::VertexInputRate::INSTANCE,
+        }
+    }
+
+    /// Locations 4 à 6, à la suite de celles de `TerrainVertex`.
+    pub fn attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
+        [
+            vk::VertexInputAttributeDescription {
+                binding: Self::BINDING,
+                location: 4,
+                format: vk::Format::R32G32_SINT,
+                offset: offset_of!(ChunkSeam, origin) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: Self::BINDING,
+                location: 5,
+                format: vk::Format::R32_SFLOAT,
+                offset: offset_of!(ChunkSeam, lod_step) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: Self::BINDING,
+                location: 6,
+                format: vk::Format::R32_UINT,
+                offset: offset_of!(ChunkSeam, bits) as u32,
+            },
+        ]
     }
 
     /// La dalle de la face d'index `face` dans `Face::ALL` est-elle à dessiner ?
@@ -83,10 +122,6 @@ impl InstalledChunks {
     #[inline]
     pub fn get(&self, coord: &IVec2) -> Option<&InstalledChunk> {
         self.chunks.get(coord)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.chunks.is_empty()
     }
 
     /// Renvoie le mesh remplacé, le cas échéant. Un **remplacement** (cas courant du

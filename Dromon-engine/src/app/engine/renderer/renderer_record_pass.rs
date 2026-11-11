@@ -58,9 +58,8 @@ impl Renderer {
                 self.terrain_render_sytem.record_shadow_terrain(
                     command_buffer,
                     frame_index,
-                    &terrain.chunks,
                     terrain.arenas(),
-                    &terrain.visible.shadow,
+                    terrain.draws(),
                 );
             }
 
@@ -163,9 +162,8 @@ impl Renderer {
                 self.terrain_render_sytem.record_render_terrain(
                     frame.command_buffer,
                     self.frame_index,
-                    &terrain.chunks,
                     terrain.arenas(),
-                    &terrain.visible.camera,
+                    terrain.draws(),
                     world_maps,
                     materials,
                 );

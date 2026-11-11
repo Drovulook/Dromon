@@ -252,7 +252,11 @@ impl RenderingContext {
                         &vk::PhysicalDeviceFeatures::default()
                             .sampler_anisotropy(true)
                             // PolygonMode::LINE / POINT (vue fil de fer du terrain).
-                            .fill_mode_non_solid(true),
+                            .fill_mode_non_solid(true)
+                            // Terrain : un `cmd_draw_indexed_indirect` par passe, la couture
+                            // de chaque chunk désignée par `first_instance`.
+                            .multi_draw_indirect(true)
+                            .draw_indirect_first_instance(true),
                     )
                     .enabled_extension_names(&[
                         ash::khr::swapchain::NAME.as_ptr(),

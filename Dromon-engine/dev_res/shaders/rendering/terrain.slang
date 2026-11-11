@@ -7,16 +7,16 @@
 #include "lib/tonemap.slang"
 #include "lib/chunk_seam.slang"
 
-// ⚠ Même disposition que le bloc poussé par `TerrainRenderSystem`.
-[[vk::push_constant]]
-ConstantBuffer<ChunkSeam> chunkSeam;
-
-// Entrées vertex : doivent matcher `TerrainVertex` côté Rust (locations 0 à 3).
+// Entrées vertex : `TerrainVertex` côté Rust (locations 0 à 3, par sommet), puis
+// `ChunkSeam` (locations 4 à 6, par instance : celle que désigne `first_instance`).
 struct VSInput {
   float3 inPosition;  // location 0 — coordonnées monde, avant couture
   float3 inNormal;    // location 1 — normale lissée (gradient de densité)
   uint4 inMaterialIdsAndSeamRole;  // location 2 — xyz : IDs dans la table des matériaux ; w : rôle de couture
   float4 inWeights;   // location 3 — poids associés, somme 1 (w inutilisé)
+  int2 inSeamOrigin;  // location 4 — couture du chunk (cf. `ChunkSeam`)
+  float inSeamLodStep; // location 5
+  uint inSeamBits;    // location 6
 }
 
 // Humidité côtière ajoutée aux précipitations pour la **teinte** des matériaux (sable
@@ -43,7 +43,11 @@ struct VSOutput {
 [shader("vertex")]
 VSOutput terrainVertMain(VSInput input) {
   VSOutput output;
-  float3 worldPos = seamDisplace(chunkSeam, input.inPosition, input.inMaterialIdsAndSeamRole.w);
+  ChunkSeam seam;
+  seam.origin = input.inSeamOrigin;
+  seam.lodStep = input.inSeamLodStep;
+  seam.bits = input.inSeamBits;
+  float3 worldPos = seamDisplace(seam, input.inPosition, input.inMaterialIdsAndSeamRole.w);
   output.pos = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
   output.worldNormal = input.inNormal;
   output.rain = precipitation(worldPos.xy) + coastMoisture(worldPos.xy);

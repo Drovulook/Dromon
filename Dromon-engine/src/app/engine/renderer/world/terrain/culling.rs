@@ -23,6 +23,8 @@ pub struct VisibleSet {
     pub camera: Vec<IVec2>,
     /// Chunks à dessiner dans la passe d'ombre.
     pub shadow: Vec<IVec2>,
+    /// Tampon du tri de `camera` : `(clé de distance, chunk)`.
+    by_distance: Vec<(u32, IVec2)>,
 }
 
 impl VisibleSet {
@@ -40,10 +42,15 @@ impl VisibleSet {
 
         self.camera.clear();
         self.shadow.clear();
+        self.by_distance.clear();
+        let eye = camera.position.truncate();
         for &coord in chunks.coords() {
             let (min, max) = Frustum::chunk_aabb(coord, max_height);
             if camera_frustum.intersects_aabb(min, max) {
-                self.camera.push(coord);
+                // Clé calculée une fois par chunk, pas à chaque comparaison du tri. Les
+                // bits d'un `f32` positif sont dans le même ordre que sa valeur.
+                let dist2 = ((min + max) * 0.5).truncate().distance_squared(eye);
+                self.by_distance.push((dist2.to_bits(), coord));
             }
             if light_frustum.intersects_aabb(min, max) {
                 self.shadow.push(coord);
@@ -54,13 +61,9 @@ impl VisibleSet {
             profile!("tri des chunks par distance");
             // Avant → arrière : maximise le rejet early-Z (moins d'overdraw en relief).
             // Inutile pour l'ombre : passe depth-only, sans fragment shader coûteux.
-            let eye = camera.position.truncate();
-            let dist2 = |c: IVec2| {
-                let (min, max) = Frustum::chunk_aabb(c, max_height);
-                ((min + max) * 0.5).truncate().distance_squared(eye)
-            };
+            self.by_distance.sort_unstable_by_key(|&(key, _)| key);
             self.camera
-                .sort_unstable_by(|&a, &b| dist2(a).total_cmp(&dist2(b)));
+                .extend(self.by_distance.iter().map(|&(_, coord)| coord));
         }
     }
 }

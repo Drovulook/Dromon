@@ -1,6 +1,7 @@
 // Couture Transvoxel entre chunks de LOD différents : déformation appliquée au rendu.
 // Le mesh d'un chunk ne dépend que de (coord, lod) ; ses voisins n'agissent que par
-// `ChunkSeam`, poussé à chaque draw. Là où une dalle est dessinée, la dernière rangée de
+// `ChunkSeam`, attribut par instance (désigné par le `first_instance` de chaque commande
+// indirecte, cf. world/terrain/draw_buffers.rs). Là où une dalle est dessinée, la dernière rangée de
 // sommets MC est comprimée pour lui laisser la place.
 // Méthode et atténuations : lod/transition_shrink.rs.
 #pragma once
