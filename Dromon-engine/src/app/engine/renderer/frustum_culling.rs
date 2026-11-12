@@ -55,11 +55,44 @@ impl Frustum {
         }
         true
     }
+}
 
-    /// Boîte englobante du chunk `coord`, du sol au plafond du monde `max_height`.
-    pub fn chunk_aabb(coord: IVec2, max_height: f32) -> (Vec3, Vec3) {
+/// [`Frustum::intersects_aabb`] spécialisé pour les colonnes de chunks (`CHUNK_SIZE` de
+/// côté, du sol au plafond du monde `max_height`) : toutes ont la même forme, donc pour un plan donné le coin le plus « en avant » est le
+/// même pour tous les chunks, à leur décalage près. Le choix du coin se fait une fois par
+/// plan ; par chunk, il reste `a·cx + b·cy + c ≥ 0`. Même résultat, aux arrondis près.
+pub struct ChunkCuller {
+    /// `(a, b, c)` par plan.
+    planes: [[f32; 3]; 6],
+}
+
+impl ChunkCuller {
+    pub fn new(frustum: &Frustum, max_height: f32) -> Self {
         let size = CHUNK_SIZE as f32;
-        let min = Vec3::new(coord.x as f32 * size, coord.y as f32 * size, 0.0);
-        (min, min + Vec3::new(size, size, max_height))
+        let planes = frustum.planes.map(|plane| {
+            // Coin le plus en avant, relatif à l'origine (cx·size, cy·size, 0) du chunk.
+            let corner = Vec3::new(
+                if plane.x >= 0.0 { size } else { 0.0 },
+                if plane.y >= 0.0 { size } else { 0.0 },
+                if plane.z >= 0.0 { max_height } else { 0.0 },
+            );
+            // n·(origine + coin) + w = (n.x·size)·cx + (n.y·size)·cy + (n·coin + w)
+            [
+                plane.x * size,
+                plane.y * size,
+                plane.truncate().dot(corner) + plane.w,
+            ]
+        });
+        Self { planes }
+    }
+
+    /// `false` ⇒ le chunk est certainement invisible (cf. [`Frustum::intersects_aabb`]).
+    #[inline]
+    pub fn contains(&self, coord: IVec2) -> bool {
+        let (x, y) = (coord.x as f32, coord.y as f32);
+        // `&` et non `&&` : les 6 plans sans branchement, moins cher qu'une sortie anticipée.
+        self.planes
+            .iter()
+            .fold(true, |inside, &[a, b, c]| inside & (a * x + b * y + c >= 0.0))
     }
 }

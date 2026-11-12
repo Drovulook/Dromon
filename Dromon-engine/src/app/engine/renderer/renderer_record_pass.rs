@@ -158,7 +158,13 @@ impl Renderer {
                 self.world.terrain.as_ref(),
                 self.world.world_maps.as_ref(),
                 self.world.materials.as_ref(),
-            ) {
+            )
+            //
+            {
+                let _gpu =
+                    self.gpu_profiler
+                        .scope(frame.command_buffer, self.frame_index, "terrain");
+
                 self.terrain_render_sytem.record_render_terrain(
                     frame.command_buffer,
                     self.frame_index,
@@ -169,18 +175,30 @@ impl Renderer {
                 );
             }
 
-            self.sky_render_system.record_render_sky(
-                frame.command_buffer,
-                self.frame_index,
-                self.world.world_maps.as_ref(),
-            );
+            {
+                let _gpu = self
+                    .gpu_profiler
+                    .scope(frame.command_buffer, self.frame_index, "sky");
+
+                self.sky_render_system.record_render_sky(
+                    frame.command_buffer,
+                    self.frame_index,
+                    self.world.world_maps.as_ref(),
+                );
+            }
 
             // Transparente : en dernier, une fois le fond (terrain + ciel) dessiné.
             if let (Some(water), Some(world_maps), true) = (
                 self.world.water.as_ref(),
                 self.world.world_maps.as_ref(),
                 self.world.config.render.water.enabled,
-            ) {
+            )
+            //
+            {
+                let _gpu = self
+                    .gpu_profiler
+                    .scope(frame.command_buffer, self.frame_index, "water");
+
                 self.water_render_system.record_render_water(
                     frame.command_buffer,
                     self.frame_index,
@@ -191,6 +209,10 @@ impl Renderer {
 
             /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+            // Fin de rendu = resolve MSAA → swapchain + stockage des attachments.
+            let _gpu = self
+                .gpu_profiler
+                .scope(frame.command_buffer, self.frame_index, "resolve");
             self.context.device.cmd_end_rendering(frame.command_buffer);
         }
         // L'image reste cible de rendu : `Screenshots::record` la rend présentable.

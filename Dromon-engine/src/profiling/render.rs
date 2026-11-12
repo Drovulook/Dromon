@@ -5,7 +5,7 @@
 //! atteint. On lit les résultats 2 frames plus tard (après le fence du slot) :
 //! `(end - begin) × timestamp_period` = durée réelle GPU, en ns (l'unité du fil).
 //! Envoi via `[PROFILE_GPU]`,
-//! throttlé à 500 ms. Vit dans le `Renderer` (a besoin du `device`), contrairement au
+//! throttlé à 200 ms. Vit dans le `Renderer` (a besoin du `device`), contrairement au
 //! profiling CPU qui est global.
 
 use std::cell::{Cell, RefCell};

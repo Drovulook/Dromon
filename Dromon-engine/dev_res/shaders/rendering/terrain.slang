@@ -60,6 +60,9 @@ VSOutput terrainVertMain(VSInput input) {
 // Transmission de l'eau sous laquelle le fond marin n'est plus ombré : invisible en
 // 8 bits (1/255 ≈ 4e-3), marge pour l'exposition du tone mapping.
 static const float MIN_SEABED_VISIBILITY = 1e-3;
+// Transmission sous laquelle le détail des textures du fond est indiscernable : couleur
+// de table seule, sans lecture. Réglé à l'œil.
+static const float MIN_SEABED_TEXTURE_VISIBILITY = 0.3;
 
 // Vertex shader « depth-only » de la passe d'ombre. Position seule : elle ne dessine que
 // le corps des chunks, sans couture (écart ≤ step/2, loin de la caméra).
@@ -96,11 +99,15 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   float3 color = 0.0;
   float shadow = 1.0;
   bool shadowDone = false;
-  float3 seabed = seabedTransmittance(vertIn.worldPos);
-  if (max(seabed.r, max(seabed.g, seabed.b)) >= MIN_SEABED_VISIBILITY) {
+  // Une seule évaluation (2 lectures de texture), partagée par les fonctions de la mer.
+  bool throughSea = seenThroughSea(vertIn.worldPos);
+  float3 seabed = seabedTransmittance(vertIn.worldPos, throughSea);
+  float seabedVisibility = max(seabed.r, max(seabed.g, seabed.b));
+  if (seabedVisibility >= MIN_SEABED_VISIBILITY) {
     // Mélange de matériaux, texturé (triplanaire) ou couleur de table.
-    Surface surface =
-        blendedSurface(vIds, vWeights, bary, vertIn.rain, s, N, triplanarWeights(N));
+    bool allowTextures = seabedVisibility >= MIN_SEABED_TEXTURE_VISIBILITY;
+    Surface surface = blendedSurface(vIds, vWeights, bary, vertIn.rain, s, N,
+                                     triplanarWeights(N), allowTextures);
     // Ombre : normale géométrique (biais de pente) ; éclairage : normale de détail.
     shadow = computeShadow(vertIn.worldPos, N, NdotL);
     shadowDone = true;
@@ -119,11 +126,11 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   }
 
   // Sous la mer : absorbé et noyé dans la couleur de l'eau.
-  color = underwater(color, vertIn.worldPos);
+  color = underwater(color, vertIn.worldPos, throughSea);
 
   // Écume du rivage : flotte à la surface, donc ni absorbée ni teintée par l'eau.
   // Éclairée comme une face horizontale (ombre du fond, proche en eau peu profonde).
-  float foam = shoreFoam(vertIn.worldPos);
+  float foam = shoreFoam(vertIn.worldPos, throughSea);
   if (foam > 0.0) {
     if (!shadowDone)
       shadow = computeShadow(vertIn.worldPos, N, NdotL);
@@ -134,7 +141,7 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   // Brouillard sur la partie aérienne du regard seulement. Caméra et fragment sous
   // l'eau : aucun air traversé.
   if (!(cameraUnderSea() && vertIn.worldPos.z < seaLevel()))
-    color = applyFog(color, airPathEnd(vertIn.worldPos), L, lightCol);
+    color = applyFog(color, airPathEnd(vertIn.worldPos, throughSea), L, lightCol);
 
   return float4(tonemap(color), 1.0);
 }

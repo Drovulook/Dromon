@@ -87,7 +87,7 @@ float3 triplanarWeights(float3 N) {
 // explicites : les lectures ont lieu dans des branches qui varient d'un pixel à
 // l'autre, où les dérivées implicites (différences dans le quad 2×2) sont indéfinies.
 struct SurfacePoint {
-  float3 pos; // décalé par `textureWarp`
+  float3 pos; // décalé par `textureWarp` dans `blendedSurface`, si une texture est lue
   float3 dx;  // ddx(pos), calculé hors de toute branche
   float3 dy;  // ddy(pos)
 };
@@ -95,9 +95,13 @@ struct SurfacePoint {
 // Point de lecture des textures pour la position monde `pos`. Dérivées de `pos` sans
 // celles du warp : son étirement (≲ 25 %) change à peine le niveau de mipmap.
 SurfacePoint surfacePoint(float3 pos, float3 dx, float3 dy) {
-  SurfacePoint s = { pos + textureWarp(pos), dx, dy };
+  SurfacePoint s = { pos, dx, dy };
   return s;
 }
+
+// Répétitions de texture par pixel au-delà desquelles la texture n'est plus lue
+// (couleur de table seule) : son détail y est indiscernable. Réglé à l'œil.
+static const float TEXTURE_CUTOFF = 0.15;
 
 // Facteurs du mélange par hauteur (somme 1) de 4 surfaces au plus : score = hauteur
 // + poids ; seules celles à moins de `depth` du meilleur score contribuent → le relief
@@ -176,11 +180,13 @@ Surface triplanarSample(uint layer, float scale, SurfacePoint s, float3 N, float
 // Surface du matériau `id` au point `s`, de couleur d'ensemble celle de la table sous
 // `precipitation` (teinte d'humidité). Texturé : `texel / moyenne` ne garde que le
 // détail (rapport à la moyenne, contraste intact) ; au loin, les mipmaps tendent vers
-// la moyenne → couleur de la table seule. Sans texture : normale géométrique `N`.
-Surface surfaceSample(uint id, SurfacePoint s, float3 N, float3 w, float precipitation) {
+// la moyenne → couleur de la table seule. Sans texture, ou `textured` faux (détail
+// indiscernable) : aucune lecture, normale géométrique `N`.
+Surface surfaceSample(uint id, SurfacePoint s, float3 N, float3 w, float precipitation,
+                      bool textured) {
   Material m = materials[id];
   float3 tint = materialAlbedo(id, precipitation);
-  if (m.textureParams.x < 0.0) {
+  if (!textured) {
     Surface flat = { tint, flatMaterialHeight(), N, 1.0 };
     return flat;
   }
@@ -205,8 +211,9 @@ static const int BLEND_MATERIALS = 4;
 // Gouraud par sommet, mais matériau par matériau. `vIds` / `vWeights` : matériaux des
 // 3 sommets (lus dans le point d'entrée : Slang n'accepte `GetAttributeAtVertex` que
 // sur ses entrées directes). `N` = normale géométrique, `w` = ses poids triplanaires.
+// `allowTextures` faux : aucune lecture de texture (fond sous trop d'eau).
 Surface blendedSurface(uint4 vIds[3], float4 vWeights[3], float3 bary, float rain,
-                       SurfacePoint s, float3 N, float3 w) {
+                       SurfacePoint s, float3 N, float3 w, bool allowTextures) {
   uint ids[PIXEL_MATERIALS];
   float weights[PIXEL_MATERIALS];
   int count = 0;
@@ -250,11 +257,29 @@ Surface blendedSurface(uint4 vIds[3], float4 vWeights[3], float3 bary, float rai
     n = min(n + 1, BLEND_MATERIALS);
   }
 
+  // Matériaux dont la texture est lue : texturés, et pixel assez petit devant une
+  // répétition (petit axe de l'empreinte : l'anisotrope choisit la mipmap selon lui).
+  // Le warp ne sert qu'aux lectures : calculé seulement si l'une d'elles a lieu. La
+  // teinte lit la position non décalée, sinon elle sauterait au seuil.
+  float footprint = min(length(s.dx), length(s.dy));
+  bool textured[BLEND_MATERIALS] = { false, false, false, false };
+  bool anyTextured = false;
+  if (allowTextures) {
+    for (int j = 0; j < n; j++) {
+      float4 params = materials[topIds[j]].textureParams;
+      textured[j] = params.x >= 0.0 && footprint * params.y < TEXTURE_CUTOFF;
+      anyTextured = anyTextured || textured[j];
+    }
+  }
+  float3 tintPos = s.pos;
+  if (anyTextured)
+    s.pos += textureWarp(s.pos);
+
   // Mélange par hauteur (entrées au-delà de n : poids nul → absentes).
   Surface surfaces[BLEND_MATERIALS];
   float4 heights = 0.0, blendWeights = 0.0;
   for (int j = 0; j < n; j++) {
-    surfaces[j] = surfaceSample(topIds[j], s, N, w, rain);
+    surfaces[j] = surfaceSample(topIds[j], s, N, w, rain, textured[j]);
     heights[j] = surfaces[j].height;
     blendWeights[j] = topWeights[j];
   }
@@ -267,6 +292,6 @@ Surface blendedSurface(uint4 vIds[3], float4 vWeights[3], float3 bary, float rai
     r.ao += f[j] * surfaces[j].ao;
   }
   r.normal = n > 0 ? normalize(r.normal) : N;
-  r.albedo *= macroTint(s.pos);
+  r.albedo *= macroTint(tintPos);
   return r;
 }

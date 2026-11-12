@@ -44,6 +44,8 @@ struct Frame {
     uniform_buffer: UniformBuffer,
 }
 
+const IN_FLIGHT_FRAMES_COUNT: usize = 2;
+
 pub struct Renderer {
     in_flight_frames_count: usize,
     frame_index: usize,
@@ -89,12 +91,11 @@ impl Renderer {
                 None,
             )?;
 
-            let in_flight_frames_count = 2;
             let command_buffers = context.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
                     .command_pool(frame_command_pool)
                     .level(vk::CommandBufferLevel::PRIMARY)
-                    .command_buffer_count(in_flight_frames_count as u32),
+                    .command_buffer_count(IN_FLIGHT_FRAMES_COUNT as u32),
             )?;
 
             let mut frames = Vec::with_capacity(command_buffers.len());
@@ -113,8 +114,7 @@ impl Renderer {
 
             // Shadow map : créée avant les descriptor sets car son image view et son
             // sampler sont écrits dans le descriptor set 2 dès la construction.
-            let shadow_map =
-                ShadowMap::new(context.clone(), config.render.shadow.map_resolution)?;
+            let shadow_map = ShadowMap::new(context.clone(), config.render.shadow.map_resolution)?;
 
             // creating descriptor sets
             let uniform_buffer_handles: Vec<vk::Buffer> = frames
@@ -135,7 +135,7 @@ impl Renderer {
                 logger.clone(),
                 context.clone(),
                 descriptor_handler.clone(),
-                in_flight_frames_count,
+                IN_FLIGHT_FRAMES_COUNT,
                 config,
             )?;
 
@@ -219,13 +219,13 @@ impl Renderer {
                 logger.clone(),
                 context.physical_device.properties.limits.timestamp_period,
                 timestamp_valid_bits,
-                in_flight_frames_count,
+                IN_FLIGHT_FRAMES_COUNT,
             )?;
 
-            let screenshots = Screenshots::new(context.clone(), in_flight_frames_count);
+            let screenshots = Screenshots::new(context.clone(), IN_FLIGHT_FRAMES_COUNT);
 
             Ok(Self {
-                in_flight_frames_count,
+                in_flight_frames_count: IN_FLIGHT_FRAMES_COUNT,
                 frame_index: 0,
                 frames,
                 image_available_semaphores,
@@ -273,7 +273,10 @@ impl Renderer {
 
     /// Config de génération du terrain, s'il y en a un.
     pub(crate) fn world_gen(&self) -> Option<&WorldGenConfig> {
-        self.world.terrain.as_ref().map(|terrain| &terrain.world_gen)
+        self.world
+            .terrain
+            .as_ref()
+            .map(|terrain| &terrain.world_gen)
     }
 
     /// Hot reload : un traitement par [`Reload`] géré (cf. `Reload::is_supported`).

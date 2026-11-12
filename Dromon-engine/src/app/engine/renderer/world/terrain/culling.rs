@@ -10,7 +10,8 @@
 use glam::IVec2;
 
 use crate::app::engine::renderer::camera::Camera;
-use crate::app::engine::renderer::frustum_culling::Frustum;
+use crate::app::engine::renderer::frustum_culling::{ChunkCuller, Frustum};
+use crate::app::engine::terrain_generation::CHUNK_SIZE;
 use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::terrain::meshes::InstalledChunks;
 use crate::profile;
@@ -36,23 +37,29 @@ impl VisibleSet {
         max_height: f32,
     ) {
         profile!();
-        let camera_frustum = Frustum::from_view_proj(camera.proj * camera.view);
-        let light_frustum =
-            Frustum::from_view_proj(light.view_proj(camera.position, camera.front()));
+        let camera_culler = ChunkCuller::new(
+            &Frustum::from_view_proj(camera.proj * camera.view),
+            max_height,
+        );
+        let light_culler = ChunkCuller::new(
+            &Frustum::from_view_proj(light.view_proj(camera.position, camera.front())),
+            max_height,
+        );
 
         self.camera.clear();
         self.shadow.clear();
         self.by_distance.clear();
         let eye = camera.position.truncate();
+        let size = CHUNK_SIZE as f32;
         for &coord in chunks.coords() {
-            let (min, max) = Frustum::chunk_aabb(coord, max_height);
-            if camera_frustum.intersects_aabb(min, max) {
+            if camera_culler.contains(coord) {
                 // Clé calculée une fois par chunk, pas à chaque comparaison du tri. Les
                 // bits d'un `f32` positif sont dans le même ordre que sa valeur.
-                let dist2 = ((min + max) * 0.5).truncate().distance_squared(eye);
-                self.by_distance.push((dist2.to_bits(), coord));
+                let center = (coord.as_vec2() + 0.5) * size;
+                self.by_distance
+                    .push((center.distance_squared(eye).to_bits(), coord));
             }
-            if light_frustum.intersects_aabb(min, max) {
+            if light_culler.contains(coord) {
                 self.shadow.push(coord);
             }
         }

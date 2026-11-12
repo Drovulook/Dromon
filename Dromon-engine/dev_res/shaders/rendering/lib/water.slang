@@ -55,11 +55,14 @@ bool seenThroughSea(float3 worldPos) {
   return worldPos.z < seaLevel() && seaCovers(seaEntry(worldPos).xy);
 }
 
+// Les fonctions du fond ci-dessous prennent `throughSea` = `seenThroughSea(worldPos)`,
+// évalué une seule fois par le fragment shader (2 lectures de texture par appel).
+
 // Fin de la partie « air » du regard caméra → worldPos, là où s'arrête le brouillard
 // atmosphérique : la surface de la mer si le fragment est dessous, sinon le fragment.
 // Caméra sous l'eau : non géré ici (cf. `cameraUnderSea`).
-float3 airPathEnd(float3 worldPos) {
-  return seenThroughSea(worldPos) ? seaEntry(worldPos) : worldPos;
+float3 airPathEnd(float3 worldPos, bool throughSea) {
+  return throughSea ? seaEntry(worldPos) : worldPos;
 }
 
 // Réflectance de l'eau à incidence normale : ((n − 1)/(n + 1))², n = 1,33.
@@ -198,11 +201,11 @@ float foamSurge(float2 xy, float t) {
 //
 // Seuillage d'un bruit par la profondeur : au rivage le seuil est bas (presque tout
 // est couvert, sauf quelques trous), au large seuls les pics passent (taches isolées).
-float shoreFoam(float3 worldPos) {
+float shoreFoam(float3 worldPos, bool throughSea) {
   float depth = seaLevel() - worldPos.z;
   // Taille d'un pixel sur le sol. AVANT tout branchement (dérivées).
   float footprint = length(fwidth(worldPos.xy));
-  if (depth <= 0.0 || cameraUnderSea() || !seenThroughSea(worldPos)) return 0.0;
+  if (depth <= 0.0 || cameraUnderSea() || !throughSea) return 0.0;
 
   float zoneDepth = ubo.foam[0].y;
   float calmZone = ubo.foam[2].x;
@@ -252,16 +255,16 @@ float seaViewPath(float3 worldPos, float depth) {
 // Part de la couleur du fond `worldPos` qui atteint l'œil, par canal : descente de la
 // lumière jusqu'au fond (≈ verticale, profondeur), puis remontée vers l'œil. 1 hors
 // de la mer.
-float3 seabedTransmittance(float3 worldPos) {
-  if (!seenThroughSea(worldPos)) return 1.0;
+float3 seabedTransmittance(float3 worldPos, bool throughSea) {
+  if (!throughSea) return 1.0;
   float depth = seaLevel() - worldPos.z;
   return exp(-ubo.waterAbsorption.xyz * (depth + seaViewPath(worldPos, depth)));
 }
 
 // Fond marin vu à travers l'eau (Beer-Lambert). `color` : fond déjà éclairé. Surface
 // supposée plane (vagues ignorées).
-float3 underwater(float3 color, float3 worldPos) {
-  if (!seenThroughSea(worldPos)) return color;
+float3 underwater(float3 color, float3 worldPos, bool throughSea) {
+  if (!throughSea) return color;
   float depth = seaLevel() - worldPos.z;
   float viewPath = seaViewPath(worldPos, depth);
   float3 camPos = ubo.cameraPosition.xyz;
