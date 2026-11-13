@@ -197,8 +197,8 @@ Surface surfaceSample(uint id, SurfacePoint s, float3 N, float3 w, float precipi
 
 // Matériaux portés par un sommet (3, cf. `VOXEL_MATERIALS`).
 static const int VERTEX_MATERIALS = 3;
-// Matériaux distincts au plus dans un triangle : 3 sommets × 3.
-static const int PIXEL_MATERIALS = 3 * VERTEX_MATERIALS;
+// Emplacement de matériau vide (ID impossible).
+static const uint NO_MATERIAL = 0xFFFFFFFFu;
 // Poids sous lequel un matériau n'est pas lu (3 lectures de texture épargnées).
 static const float MIN_PIXEL_WEIGHT = 0.02;
 // Matériaux lus au plus par pixel (les plus lourds) : leurs lectures sont gardées en
@@ -214,48 +214,34 @@ static const int BLEND_MATERIALS = 4;
 // `allowTextures` faux : aucune lecture de texture (fond sous trop d'eau).
 Surface blendedSurface(uint4 vIds[3], float4 vWeights[3], float3 bary, float rain,
                        SurfacePoint s, float3 N, float3 w, bool allowTextures) {
-  uint ids[PIXEL_MATERIALS];
-  float weights[PIXEL_MATERIALS];
-  int count = 0;
+  // Poids cumulés dans BLEND_MATERIALS emplacements fixes. Boucles déroulées : indices
+  // constants, tout reste en registres (la recherche de doublons par index variable
+  // coûtait ~12 % du shader). Exact jusqu'à 4 matériaux distincts ; au-delà, un
+  // nouveau venu évince le plus léger s'il pèse plus (poids partiels : approché).
+  uint4 slotIds = NO_MATERIAL;
+  float4 slotWeights = 0.0;
+  [ForceUnroll]
   for (int v = 0; v < 3; v++) {
+    [ForceUnroll]
     for (int i = 0; i < VERTEX_MATERIALS; i++) {
+      uint id = vIds[v][i];
       float wi = bary[v] * vWeights[v][i];
-      if (wi <= 0.0)
-        continue;
-      // Fusion des doublons (un matériau porté par plusieurs sommets).
-      int j = 0;
-      while (j < count && ids[j] != vIds[v][i])
-        j++;
-      if (j == count) {
-        ids[count] = vIds[v][i];
-        weights[count] = 0.0;
-        count++;
+      bool4 match = slotIds == id;
+      slotWeights += select(match, float4(wi), float4(0.0));
+      // Absent : emplacement le plus léger (vide = poids 0), s'il pèse moins que wi.
+      float lightest = min(min(slotWeights.x, slotWeights.y), min(slotWeights.z, slotWeights.w));
+      bool place = !any(match) && wi > lightest;
+      [ForceUnroll]
+      for (int k = 0; k < BLEND_MATERIALS; k++) {
+        bool take = place && slotWeights[k] == lightest;
+        slotIds[k] = take ? id : slotIds[k];
+        slotWeights[k] = take ? wi : slotWeights[k];
+        place = place && !take;
       }
-      weights[j] += wi;
     }
   }
-
-  // Les BLEND_MATERIALS plus lourds, hors négligeables (tri par insertion).
-  // utilisé pour raison de performance (4*4 registres au lieu de 9 * 4)
-  // trop compliqué pour ce que ca rapporte; à modifier ou suppriemr plus tard.
-  uint topIds[BLEND_MATERIALS];
-  float topWeights[BLEND_MATERIALS];
-  int n = 0;
-  for (int j = 0; j < count; j++) {
-    if (weights[j] < MIN_PIXEL_WEIGHT)
-      continue;
-    int k = min(n, BLEND_MATERIALS - 1);
-    if (n == BLEND_MATERIALS && weights[j] <= topWeights[k])
-      continue; // liste pleine, plus léger que le dernier
-    while (k > 0 && topWeights[k - 1] < weights[j]) {
-      topIds[k] = topIds[k - 1];
-      topWeights[k] = topWeights[k - 1];
-      k--;
-    }
-    topIds[k] = ids[j];
-    topWeights[k] = weights[j];
-    n = min(n + 1, BLEND_MATERIALS);
-  }
+  // Négligeables retirés : poids nul = emplacement absent (cf. `heightBlendFactors`).
+  slotWeights = select(slotWeights < MIN_PIXEL_WEIGHT, float4(0.0), slotWeights);
 
   // Matériaux dont la texture est lue : texturés, et pixel assez petit devant une
   // répétition (petit axe de l'empreinte : l'anisotrope choisit la mipmap selon lui).
@@ -265,33 +251,40 @@ Surface blendedSurface(uint4 vIds[3], float4 vWeights[3], float3 bary, float rai
   bool textured[BLEND_MATERIALS] = { false, false, false, false };
   bool anyTextured = false;
   if (allowTextures) {
-    for (int j = 0; j < n; j++) {
-      float4 params = materials[topIds[j]].textureParams;
-      textured[j] = params.x >= 0.0 && footprint * params.y < TEXTURE_CUTOFF;
-      anyTextured = anyTextured || textured[j];
+    [ForceUnroll]
+    for (int j = 0; j < BLEND_MATERIALS; j++) {
+      if (slotWeights[j] > 0.0) {
+        float4 params = materials[slotIds[j]].textureParams;
+        textured[j] = params.x >= 0.0 && footprint * params.y < TEXTURE_CUTOFF;
+        anyTextured = anyTextured || textured[j];
+      }
     }
   }
   float3 tintPos = s.pos;
   if (anyTextured)
     s.pos += textureWarp(s.pos);
 
-  // Mélange par hauteur (entrées au-delà de n : poids nul → absentes).
+  // Mélange par hauteur (emplacements absents : poids nul, ignorés).
+  Surface none = { float3(0.0), 0.0, float3(0.0), 0.0 };
   Surface surfaces[BLEND_MATERIALS];
-  float4 heights = 0.0, blendWeights = 0.0;
-  for (int j = 0; j < n; j++) {
-    surfaces[j] = surfaceSample(topIds[j], s, N, w, rain, textured[j]);
+  float4 heights = 0.0;
+  [ForceUnroll]
+  for (int j = 0; j < BLEND_MATERIALS; j++) {
+    surfaces[j] = none;
+    if (slotWeights[j] > 0.0)
+      surfaces[j] = surfaceSample(slotIds[j], s, N, w, rain, textured[j]);
     heights[j] = surfaces[j].height;
-    blendWeights[j] = topWeights[j];
   }
-  float4 f = heightBlendFactors(heights, blendWeights, materialBlendDepth());
-  Surface r = { float3(0.0), 0.0, float3(0.0), 0.0 };
-  for (int j = 0; j < n; j++) {
+  float4 f = heightBlendFactors(heights, slotWeights, materialBlendDepth());
+  Surface r = none;
+  [ForceUnroll]
+  for (int j = 0; j < BLEND_MATERIALS; j++) {
     r.albedo += f[j] * surfaces[j].albedo;
     r.height += f[j] * surfaces[j].height;
     r.normal += f[j] * surfaces[j].normal;
     r.ao += f[j] * surfaces[j].ao;
   }
-  r.normal = n > 0 ? normalize(r.normal) : N;
+  r.normal = any(slotWeights > 0.0) ? normalize(r.normal) : N;
   r.albedo *= macroTint(tintPos);
   return r;
 }
