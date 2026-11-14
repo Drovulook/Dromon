@@ -41,6 +41,13 @@ float computeShadow(float3 worldPos, float3 N, float NdotL) {
   // NDC xy ∈ [-1,1] → coordonnées de texture uv ∈ [0,1].
   float2 uv = proj.xy * 0.5 + 0.5;
 
+  // Hors de la carte, PCF compris (taps à ±1 texel, + 1/2 texel de filtrage bilinéaire) :
+  // les 9 lectures ne verraient que la bordure blanche (CLAMP_TO_BORDER) → éclairé.
+  float margin = 1.5 * shadowMapTexelUv();
+  if (any(uv < -margin) || any(uv > 1.0 + margin)) {
+    return 1.0;
+  }
+
   // Petit biais de profondeur constant (la pente est gérée par le normal offset),
   // unités monde → profondeur normalisée via l'épaisseur de la boîte.
   float bias = texel * depthBiasTexels() / ubo.shadowParams.x;

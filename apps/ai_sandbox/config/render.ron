@@ -63,7 +63,7 @@
     shadow: (
         // Côté de la shadow map, en texels. Résolution des ombres :
         // 2 · half_size / map_resolution unités monde par texel.
-        map_resolution: 4096,
+        map_resolution: 8192,
 
         // Anti-acné, en texels de shadow map. Taches d'ombre sur les surfaces éclairées
         // (« acné », surtout soleil bas) → augmenter ; ombres décollées des objets →
@@ -81,18 +81,19 @@
             focus_distance: 0.0,
         ),
 
-        // Terrain survolé (appliquée par `generate_terrain`). Boîte de 4000 unités
-        // (~2 u/texel) : couvre une vallée devant la caméra, au prix d'ombres plus
-        // floues de près. L'œil recule de 3000 pour passer au-dessus des sommets
-        // (relief ≤ ~1300, lumière à ~30° de la verticale) ; `far` couvre tout le
-        // relief, inclinaison de la boîte comprise (4000 · tan 30° ≈ 2300 de plus).
+        // Terrain survolé (appliquée par `generate_terrain`). Boîte de 6000 unités
+        // (~1,5 u/texel à 4096) : couvre ~5 km devant la caméra, au prix d'ombres plus
+        // floues de près (4000 → ~1 u/texel). L'œil recule de 3000 pour passer
+        // au-dessus des sommets (relief ≤ ~1300, lumière à ~30° de la verticale) ;
+        // `far` couvre tout le relief, inclinaison de la boîte comprise
+        // (6000 · tan 30° ≈ 3500 de plus).
         terrain: (
-            half_size: 2000.0,
+            half_size: 3000.0,
             near: 1.0,
-            far: 8000.0,
+            far: 10000.0,
             eye_distance: 3000.0,
             follow_camera: true,
-            focus_distance: 1500.0, // centre de la boîte, devant la caméra
+            focus_distance: 2200.0, // centre de la boîte, devant la caméra
         ),
     ),
 

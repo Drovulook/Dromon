@@ -14,11 +14,16 @@ float seaLevel() { return ubo.water.x; }
 //
 // Le test de portée reste indispensable : le masque est torique, donc périodique. Sans
 // lui, le ciel (fond infini) peindrait la mer sur chaque copie de la fenêtre chargée.
+//
+// Les deux lectures sont lancées avant tout test de leurs résultats : leurs attentes se
+// chevauchent (un `return` entre elles les enchaînait). Sans mer, aucune lecture : les
+// cartes ne sont pas liées dans une scène sans terrain.
 bool seaCovers(float2 xy) {
   if (ubo.water.w == 0.0) return false;
   if (distance(xy, ubo.cameraPosition.xy) > ubo.water.y) return false;
-  if (coastDistance(xy) > ubo.water.z) return false;
-  return chunkLoaded(xy);
+  float coast = coastDistance(xy);
+  bool loaded = chunkLoaded(xy);
+  return coast <= ubo.water.z && loaded;
 }
 
 // Calculé côté CPU (`Water::update`) : le ciel le lit sans les cartes du monde.

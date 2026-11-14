@@ -41,8 +41,9 @@ float4 climate(float2 xy) {
 
 // Le terrain du chunk sous `xy` est-il affiché ?
 bool chunkLoaded(float2 xy) {
-  uint n, unused;
-  loadedChunksMap.GetDimensions(n, unused);
+  // Côté du masque depuis l'UBO : `GetDimensions` passe par l'unité de texture, d'où
+  // une attente aussi longue qu'une lecture.
+  uint n = uint(ubo.loadedChunks.x);
   // N puissance de 2 : `& (N − 1)` = modulo positif, y compris pour c < 0 (complément à 2).
   int2 texel = int2(floor(xy / CHUNK_SIZE)) & int(n - 1);
   return loadedChunksMap.Load(int3(texel, 0)).r > 0.5;

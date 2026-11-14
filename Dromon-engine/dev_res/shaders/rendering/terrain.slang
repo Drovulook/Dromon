@@ -13,7 +13,7 @@ struct VSInput {
   float3 inPosition;  // location 0 — coordonnées monde, avant couture
   float3 inNormal;    // location 1 — normale lissée (gradient de densité)
   uint4 inMaterialIdsAndSeamRole;  // location 2 — xyz : IDs dans la table des matériaux ; w : rôle de couture
-  float4 inWeights;   // location 3 — poids associés, somme 1 (w inutilisé)
+  uint4 inWeights;    // location 3 — poids associés, entiers 0–255, somme 255 (w inutilisé)
   int2 inSeamOrigin;  // location 4 — couture du chunk (cf. `ChunkSeam`)
   float inSeamLodStep; // location 5
   uint inSeamBits;    // location 6
@@ -35,9 +35,20 @@ struct VSOutput {
   // par sommet suffit (cf. vault, Generation-Monde).
   float rain;
   // Matériaux du sommet, **non interpolés** : le fragment lit ceux des 3 sommets de
-  // son triangle (`GetAttributeAtVertex`) et les mélange lui-même.
-  nointerpolation uint4 materialIds;
-  nointerpolation float4 materialWeights;
+  // son triangle (`GetAttributeAtVertex`) et les mélange lui-même. 3 × 8 bits chacun :
+  // la mémoire des attributs (TRAM) limite le lancement des warps de pixels. Sans
+  // perte : IDs < 256 (`MAX_MATERIALS`), poids déjà sur 8 bits dans le vertex buffer.
+  nointerpolation uint materialIds;
+  nointerpolation uint materialWeights;
+}
+
+// Trois octets → un `uint` (x dans l'octet de poids faible).
+uint packBytes(uint3 b) {
+  return b.x | (b.y << 8) | (b.z << 16);
+}
+
+uint3 unpackBytes(uint p) {
+  return uint3(p & 0xFFu, (p >> 8) & 0xFFu, (p >> 16) & 0xFFu);
 }
 
 [shader("vertex")]
@@ -51,8 +62,8 @@ VSOutput terrainVertMain(VSInput input) {
   output.pos = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
   output.worldNormal = input.inNormal;
   output.rain = precipitation(worldPos.xy) + coastMoisture(worldPos.xy);
-  output.materialIds = input.inMaterialIdsAndSeamRole;
-  output.materialWeights = input.inWeights;
+  output.materialIds = packBytes(input.inMaterialIdsAndSeamRole.xyz);
+  output.materialWeights = packBytes(input.inWeights.xyz);
   output.worldPos = worldPos;
   return output;
 }
@@ -90,8 +101,9 @@ float4 terrainFragMain(VSOutput vertIn, float3 bary : SV_Barycentrics) : SV_Targ
   uint4 vIds[3];
   float4 vWeights[3];
   for (int v = 0; v < 3; v++) {
-    vIds[v] = GetAttributeAtVertex(vertIn.materialIds, v);
-    vWeights[v] = GetAttributeAtVertex(vertIn.materialWeights, v);
+    vIds[v] = uint4(unpackBytes(GetAttributeAtVertex(vertIn.materialIds, v)), 0);
+    float3 w = float3(unpackBytes(GetAttributeAtVertex(vertIn.materialWeights, v)));
+    vWeights[v] = float4(w * (1.0 / 255.0), 0.0);
   }
 
   // Fond marin noyé (transmission sous MIN_SEABED_VISIBILITY) : sa couleur n'atteint

@@ -15,7 +15,9 @@ use crate::AppDirs;
 
 /// IDs disponibles : `u16` (cf. `Voxel`), 0 réservé à l'air, le dernier au matériau
 /// de debug.
-const MAX_MATERIALS: usize = u16::MAX as usize - 1;
+/// IDs sur 8 bits dans le shader du terrain (attributs compactés) : 0 = air, puis les
+/// matériaux, puis le debug (255).
+const MAX_MATERIALS: usize = u8::MAX as usize - 1;
 
 /// Textures du terrain fournies (photos, exports) : un sous-dossier par texture, aux
 /// cartes nommées [`TEXTURE_COLOR`], [`TEXTURE_HEIGHT`]…
@@ -198,7 +200,7 @@ impl ConfigFile for MaterialsConfig {
         ensure!(!self.materials.is_empty(), "materials est vide");
         ensure!(
             self.materials.len() <= MAX_MATERIALS,
-            "au plus {MAX_MATERIALS} matériaux (IDs u16, 0 = air, dernier = debug)"
+            "au plus {MAX_MATERIALS} matériaux (IDs sur 8 bits dans le shader, 0 = air, dernier = debug)"
         );
         let mut names = HashSet::new();
         for m in &self.materials {

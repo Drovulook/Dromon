@@ -42,6 +42,7 @@ struct UniformBuffer {
     float4 textureDetail;   // x = normal_strength, y = ao_strength, z = flat_material_height
     float4 textureWarp;     // x = warp_amplitude, y = warp_wavelength
     float4 textureTint;     // x = tint_wavelength, y = brightness_variation, z = hue_variation
+    float4 loadedChunks;    // x = côté du masque des chunks installés (texels, puissance de 2)
 };
 [[vk::binding(0, 0)]]
 ConstantBuffer<UniformBuffer> ubo;

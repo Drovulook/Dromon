@@ -43,6 +43,9 @@ pub struct WorldMaps {
     /// Passage monde → UV, pour l'UBO : `uv = (xy − x) · y` pour la grille fine
     /// (`coast_distance`), `uv = (xy − z) · w` pour la grille climatique.
     pub uv_transform: Vec4,
+    /// Côté du masque des chunks installés (texels, puissance de 2), pour l'UBO : les
+    /// shaders l'y lisent au lieu de `GetDimensions` (une attente de l'unité de texture).
+    pub loaded_mask_size: u32,
 }
 
 impl WorldMaps {
@@ -181,6 +184,7 @@ impl WorldMaps {
             sampler,
             descriptor_set,
             uv_transform,
+            loaded_mask_size,
         })
     }
 

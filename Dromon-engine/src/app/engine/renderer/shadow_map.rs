@@ -3,8 +3,10 @@ use anyhow::Result;
 use ash::vk;
 use std::sync::Arc;
 
-/// Format de la shadow map : profondeur 32 bits flottante, sans stencil.
-const SHADOW_MAP_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
+/// Format de la shadow map : profondeur 16 bits, sans stencil. Moitié moins de mémoire
+/// que D32 (4096² : 32 Mo, tient dans le L2) ; pas de profondeur `far / 65536` ≈ 0,12
+/// unité, bien sous le biais anti-acné (~1 texel ≈ 1 unité).
+const SHADOW_MAP_FORMAT: vk::Format = vk::Format::D16_UNORM;
 
 /// Ressources GPU de la passe d'ombre : une image de profondeur dans laquelle on
 /// rend la scène depuis le point de vue de la lumière, plus le sampler (en mode

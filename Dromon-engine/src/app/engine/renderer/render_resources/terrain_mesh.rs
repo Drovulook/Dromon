@@ -34,7 +34,8 @@ pub struct TerrainVertex {
     /// `R16G16B16A16_UINT` : 3 IDs de matériau (indices dans la table GPU), puis le rôle
     /// de couture.
     pub material_ids_and_seam_role: [u16; VERTEX_MATERIAL_CHANNELS],
-    /// Poids associés (`R8G8B8A8_UNORM` : 255 → 1.0), somme 255.
+    /// Poids associés (`R8G8B8A8_UINT`, entiers : le shader les compacte tels quels),
+    /// somme 255.
     pub weights: [u8; VERTEX_MATERIAL_CHANNELS],
 }
 
@@ -97,7 +98,7 @@ impl TerrainVertex {
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 3,
-                format: vk::Format::R8G8B8A8_UNORM,
+                format: vk::Format::R8G8B8A8_UINT,
                 offset: offset_of!(TerrainVertex, weights) as u32,
             },
         ]

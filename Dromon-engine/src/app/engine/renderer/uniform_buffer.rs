@@ -1,4 +1,5 @@
 use super::buffer::Buffer;
+use super::render_resources::WorldMaps;
 use crate::app::engine::renderer::world::atmosphere::Atmosphere;
 use crate::app::engine::renderer::world::light::DirectionalLight;
 use crate::app::engine::renderer::world::stars::Stars;
@@ -56,6 +57,7 @@ struct UniformBufferObject {
     texture_detail: Vec4, // x = normal_strength, y = ao_strength, z = flat_material_height, w inutilisé
     texture_warp: Vec4,   // x = warp_amplitude, y = warp_wavelength, zw inutilisés
     texture_tint: Vec4,   // x = tint_wavelength, y = brightness_variation, z = hue_variation, w inutilisé
+    loaded_chunks: Vec4,  // x = côté du masque des chunks installés (texels), yzw inutilisés
 }
 
 pub struct UniformBuffer {
@@ -91,7 +93,7 @@ impl UniformBuffer {
         sun: &DirectionalLight,
         atmosphere: &Atmosphere,
         stars: &Stars,
-        world_maps_uv: Vec4,
+        world_maps: Option<&WorldMaps>,
         water: Option<&Water>,
         config: &EngineConfig,
         sim_secs: f32,
@@ -133,6 +135,10 @@ impl UniformBuffer {
                 Vec4::new(f.bubble_speed, f.drift, f.surge_period, f.surge_spread),
                 Vec4::new(f.calm_zone, f.calm_density, 0.0, 0.0),
             ]
+        });
+        // Sans cartes (scène sans terrain), aucun shader ne les lit.
+        let (world_maps_uv, loaded_chunks) = world_maps.map_or((Vec4::ZERO, Vec4::ZERO), |m| {
+            (m.uv_transform, Vec4::new(m.loaded_mask_size as f32, 0.0, 0.0, 0.0))
         });
         let ubo = UniformBufferObject {
             view: camera.view,
@@ -212,6 +218,7 @@ impl UniformBuffer {
                 textures.hue_variation,
                 0.0,
             ),
+            loaded_chunks,
         };
 
         unsafe {
