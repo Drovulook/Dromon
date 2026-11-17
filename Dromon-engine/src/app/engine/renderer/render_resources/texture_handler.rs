@@ -105,11 +105,22 @@ impl TextureHandler {
             pixels.len(),
         ));
 
+        self.create_object_texture_from_rgba(image_width, image_height, pixels)
+    }
+
+    /// Texture d'objet depuis des texels RGBA8 sRGB en mémoire (ex. damier du lookdev),
+    /// mêmes mipmaps et descriptor set que `create_object_texture`.
+    pub fn create_object_texture_from_rgba(
+        &self,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result<(Texture, Buffer)> {
         let (mut texture, staging) = self.create_texture_from_bytes(
-            image_width,
-            image_height,
+            width,
+            height,
             vk::Format::R8G8B8A8_SRGB,
-            full_mip_chain(image_width, image_height),
+            full_mip_chain(width, height),
             1,
             pixels,
         )?;

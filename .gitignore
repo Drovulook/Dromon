@@ -1,6 +1,7 @@
 /target
 /.claude
 CLAUDE.md
+bugs.md
 # Instructions de l'agent du bac à sable : partie de sa définition, versionnée.
 !/apps/ai_sandbox/CLAUDE.md
 links.md

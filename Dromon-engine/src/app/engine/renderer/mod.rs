@@ -271,12 +271,13 @@ impl Renderer {
         &mut self.world
     }
 
-    /// Config de génération du terrain, s'il y en a un.
+    /// Config de génération du terrain, s'il y en a un, ou celle gardée par le lookdev.
     pub(crate) fn world_gen(&self) -> Option<&WorldGenConfig> {
         self.world
             .terrain
             .as_ref()
             .map(|terrain| &terrain.world_gen)
+            .or(self.world.lookdev_world_gen.as_ref())
     }
 
     /// Hot reload : un traitement par [`Reload`] géré (cf. `Reload::is_supported`).
@@ -303,13 +304,19 @@ impl Renderer {
         if reloads.contains(Reload::Live) {
             self.world.hot_reload_live(&config);
         }
+        let old_lookdev = self.world.config.debug.lookdev;
         // Toujours : `World` porte la config de référence (UBO, passes, génération), qui
         // doit rester celle de l'`Engine` quel que soit le rechargement.
         self.world.config = config;
-        // Après le remplacement : matériaux et génération lisent `world.config`.
+        // Après le remplacement : matériaux, génération et lookdev lisent `world.config`.
         let reload_textures = reloads.contains(Reload::TerrainTextures);
         if reload_textures || reloads.contains(Reload::Materials) {
             self.world.hot_reload_materials(reload_textures)?;
+        }
+        if reloads.contains(Reload::Lookdev) {
+            self.world.hot_reload_lookdev(&old_lookdev)?;
+            // Sol, ou eau, cartes du monde et matériaux du terrain recréé.
+            Self::initialize(self.context.clone(), &mut self.world)?;
         }
         if (reloads.contains(Reload::Terrain) || reloads.contains(Reload::MacroMap))
             && let Some(world_gen) = world_gen

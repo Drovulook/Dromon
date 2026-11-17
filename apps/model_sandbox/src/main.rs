@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
+use dromon_engine::config::ModelSource;
 use dromon_engine::{RenderObject, Scene, Timer, Transform, World};
 
-// Relatifs au `res/` de cette app.
-const GLTF_PATH: &str = "models/dromon_ship/scene.gltf";
+// `res/models/<nom>/scene.gltf`.
+const MODEL: &str = "dromon_ship";
+// Relatif au `res/` de cette app.
 const TEXTURE_PATH: &str = "models/dromon_ship/DefaultMaterial_baseColor.png";
 
 /// Bac à sable de visualisation de modèles. Implémente `Scene` : le moteur appelle
@@ -14,8 +16,9 @@ impl Scene for ModelSandbox {
         let rrm = &mut world.rrm;
         rrm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
         rrm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
-        rrm.add_mesh("mesh1".to_string(), GLTF_PATH.to_string(), true)?;
-        rrm.add_mesh("mesh2".to_string(), GLTF_PATH.to_string(), true)?;
+        let model = ModelSource::Files(MODEL.to_string());
+        rrm.add_mesh("mesh1".to_string(), &model, true)?;
+        rrm.add_mesh("mesh2".to_string(), &model, true)?;
 
         let render_objects = vec![
             RenderObject::new(

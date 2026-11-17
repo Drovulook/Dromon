@@ -31,6 +31,8 @@ pub(crate) enum Reload {
     Materials,
     /// Texture arrays du terrain, puis la table (elle porte leurs albédos moyens).
     TerrainTextures,
+    /// Entrée ou sortie du mode lookdev, ou nouveau sol.
+    Lookdev,
 }
 
 impl Reload {
@@ -45,7 +47,8 @@ impl Reload {
             | Reload::Terrain
             | Reload::MacroMap
             | Reload::Materials
-            | Reload::TerrainTextures => true,
+            | Reload::TerrainTextures
+            | Reload::Lookdev => true,
         }
     }
 }
@@ -340,12 +343,14 @@ fn debug_reloads(old: &DebugConfig, new: &DebugConfig, out: &mut Reloads) {
         shadows,
         camera_unbounded,
         mesh,
+        lookdev,
     } = old;
     out.check("log_batch_stats", log_batch_stats, &new.log_batch_stats, Reload::Live);
     out.check("log_gpu_usage", log_gpu_usage, &new.log_gpu_usage, Reload::Live);
     out.check("shadows", shadows, &new.shadows, Reload::Live);
     out.check("camera_unbounded", camera_unbounded, &new.camera_unbounded, Reload::Live);
     out.check("mesh", mesh, &new.mesh, Reload::Terrain);
+    out.check("lookdev", lookdev, &new.lookdev, Reload::Lookdev);
 }
 
 fn material_rules_reloads(old: &MaterialRulesConfig, new: &MaterialRulesConfig, out: &mut Reloads) {

@@ -14,7 +14,7 @@
         amplitude: 1400.0,      // fBm ridged ∈ ~[0, 0.8] → crêtes à ~+1 120 (ancien 1200)
         frequency: 0.00025,
         octaves: 9,
-        lacunarity: 2.15,       // non entière, sinon les octaves s'alignent
+        lacunarity: 2.1,       // non entière, sinon les octaves s'alignent
         gain: 0.5,              // la renormalisation rend `ridge` neutre en amplitude
         erosion: 0.085,         // creuse les vallées sans tout lisser
         ridge: 0.80,            // arêtes vives → montagne escarpée

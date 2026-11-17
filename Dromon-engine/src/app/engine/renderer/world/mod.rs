@@ -2,6 +2,7 @@ pub(crate) mod atmosphere;
 mod day_night;
 pub(crate) mod game_clock;
 pub(crate) mod light;
+mod lookdev;
 pub(crate) mod stars;
 pub(crate) mod terrain;
 pub(crate) mod water;
@@ -28,7 +29,7 @@ use crate::app::{
     },
     logger::Logger,
 };
-use crate::config::{Anisotropy, EngineConfig};
+use crate::config::{Anisotropy, EngineConfig, WorldGenConfig};
 use crate::profile;
 use game_clock::GameClock;
 
@@ -38,6 +39,12 @@ pub struct World {
     pub logger: Arc<Logger>,
     pub rrm: RenderResourceManager,
     pub render_objects: Vec<RenderObject>,
+    /// Objets du mode lookdev (sol, assets posés par commande) : à part de
+    /// `render_objects`, que la scène peut réassigner.
+    pub(crate) lookdev_objects: Vec<RenderObject>,
+    /// En lookdev, la config que la scène a passée à `generate_terrain` : le terrain
+    /// sera créé avec en sortant du mode. `None` : scène sans terrain.
+    pub(crate) lookdev_world_gen: Option<WorldGenConfig>,
     pub camera: Camera,
     pub light: DirectionalLight,
     pub atmosphere: Atmosphere,
@@ -92,6 +99,8 @@ impl World {
             logger,
             rrm,
             render_objects: Vec::new(),
+            lookdev_objects: Vec::new(),
+            lookdev_world_gen: None,
             camera: Camera::new(&config.render.camera, config.debug.camera_unbounded),
             light: DirectionalLight::new(&config),
             atmosphere: Atmosphere::new(env.atmosphere),
@@ -165,7 +174,8 @@ impl World {
         if new.camera != old.camera
             && let Err(e) = self.camera.hot_reload(&new.camera)
         {
-            self.logger.warn(&format!("pose de départ de la caméra ignorée : {e}"));
+            self.logger
+                .warn(&format!("pose de départ de la caméra ignorée : {e}"));
         }
         let unbounded = config.debug.camera_unbounded;
         if unbounded != self.config.debug.camera_unbounded {
@@ -185,7 +195,12 @@ impl World {
         self.rrm.texture_handler.hot_reload(anisotropy, |sampler| {
             for texture in textures.values() {
                 if let Some(set) = texture.descriptor_set {
-                    descriptor_handler.write_image_sampler(set, 0, texture.texture_image_view, sampler);
+                    descriptor_handler.write_image_sampler(
+                        set,
+                        0,
+                        texture.texture_image_view,
+                        sampler,
+                    );
                 }
             }
             if let Some(materials) = materials {
@@ -234,7 +249,7 @@ impl World {
         if let Some(materials) = self.materials.as_mut() {
             materials.release_texture_staging();
         }
-        self.rrm.release_texture_staging();
+        self.rrm.release_pending();
     }
 
     pub fn update_world_data(&mut self, timer: &Timer, input_state: &InputState, aspect: f32) {

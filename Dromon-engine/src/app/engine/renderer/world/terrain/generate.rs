@@ -38,7 +38,13 @@ use crate::{
 impl World {
     /// Crée le terrain de la scène. Appelée par la scène dans `setup`. Rend la main
     /// aussitôt : les chunks sont maillés en fond et apparaissent au fil des frames.
+    /// En mode lookdev (`debug.ron`), pose un sol plat à la place et garde `config` pour
+    /// la sortie du mode.
     pub fn generate_terrain(&mut self, config: &WorldGenConfig) -> Result<()> {
+        if self.config.debug.lookdev.enabled {
+            self.lookdev_world_gen = Some(config.clone());
+            return self.setup_lookdev();
+        }
         // Terrain survolé : grande boîte d'ombre qui suit la caméra (`render.ron`).
         self.light.shadow = self.config.render.shadow.terrain.clone();
 
@@ -84,6 +90,11 @@ impl World {
     /// du monde ne sont reconstruites que si elle a changé, ou si la portée de chargement
     /// change la taille du masque. La table des matériaux est gardée.
     pub(crate) fn regenerate_terrain(&mut self, config: &WorldGenConfig) -> Result<()> {
+        // Lookdev actif : pas de terrain, seule la config gardée pour la sortie change.
+        if let Some(world_gen) = self.lookdev_world_gen.as_mut() {
+            *world_gen = config.clone();
+            return Ok(());
+        }
         let macro_changed = self
             .terrain
             .as_ref()

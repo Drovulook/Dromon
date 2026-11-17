@@ -18,6 +18,7 @@ pub struct DebugConfig {
     /// `true` : la caméra peut sortir du disque du monde (vue d'ensemble, bord du monde).
     pub camera_unbounded: bool,
     pub mesh: MeshDebug,
+    pub lookdev: LookdevParams,
 }
 
 impl Default for DebugConfig {
@@ -28,6 +29,27 @@ impl Default for DebugConfig {
             shadows: true,
             camera_unbounded: false,
             mesh: MeshDebug::default(),
+            lookdev: LookdevParams::default(),
+        }
+    }
+}
+
+/// Mode lookdev : pas de terrain, un sol plat à la place, pour examiner des assets.
+/// Rechargé à chaud (entrée, sortie, taille du sol). Sans effet sur une scène sans terrain.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LookdevParams {
+    /// `true` : `generate_terrain` pose le sol au lieu de créer le terrain.
+    pub enabled: bool,
+    /// Côté du sol, centré sur l'origine (unités monde).
+    pub ground_size: f32,
+}
+
+impl Default for LookdevParams {
+    fn default() -> Self {
+        LookdevParams {
+            enabled: false,
+            ground_size: 50.0,
         }
     }
 }

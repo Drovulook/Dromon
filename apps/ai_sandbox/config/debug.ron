@@ -12,4 +12,12 @@
         world_bottom: true,       // face du dessous des chunks
         transition_color: false,  // cellules de transition Transvoxel en magenta
     ),
+
+    // Lookdev : pas de terrain, un sol plat (damier de 1 unité) pour examiner des
+    // assets. Rechargé à chaud ; en sortant, le terrain est recréé, les objets posés
+    // retirés et la caméra remise à sa pose de départ (render.ron).
+    lookdev: (
+        enabled: true,
+        ground_size: 200.0, // côté du sol, centré sur l'origine
+    ),
 )

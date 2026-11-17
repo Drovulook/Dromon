@@ -53,6 +53,13 @@ impl Renderer {
                 frame_index,
                 &self.world.render_objects,
             );
+            if !self.world.lookdev_objects.is_empty() {
+                self.object_render_system.record_shadow_objects(
+                    command_buffer,
+                    frame_index,
+                    &self.world.lookdev_objects,
+                );
+            }
 
             if let Some(terrain) = self.world.terrain.as_ref() {
                 self.terrain_render_sytem.record_shadow_terrain(
@@ -152,6 +159,13 @@ impl Renderer {
                 self.frame_index,
                 &self.world.render_objects,
             );
+            if !self.world.lookdev_objects.is_empty() {
+                self.object_render_system.record_render_objects(
+                    frame.command_buffer,
+                    self.frame_index,
+                    &self.world.lookdev_objects,
+                );
+            }
 
             // Les cartes du monde sont créées avec le terrain (`generate_terrain`).
             if let (Some(terrain), Some(world_maps), Some(materials)) = (

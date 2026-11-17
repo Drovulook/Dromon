@@ -14,10 +14,11 @@ mod environment;
 mod material_rules;
 mod material_textures;
 mod materials;
+mod models;
 mod render;
 mod world_gen;
 
-pub use debug::{DebugConfig, MeshDebug};
+pub use debug::{DebugConfig, LookdevParams, MeshDebug};
 pub use environment::{
     AtmosphereParams, ClockParams, DayNightParams, EnvironmentConfig, SkyKeyframe, StarsParams,
     SunDisk, WaterParams, WaveParams,
@@ -32,6 +33,7 @@ pub use materials::{
     TEXTURE_MAPS, TEXTURE_NORMAL, TextureSource, generated_texture_dir, has_all_maps,
     is_valid_texture_name, terrain_texture_dir,
 };
+pub use models::{MODEL_FILE, ModelSource, generated_model_dir, model_dir};
 pub use render::{
     Anisotropy, CameraParams, DisplayMode, LodParams, PresentMode, RenderConfig, ShadowConfig,
     ShadowSettings, TerrainRenderParams, TextureParams, TonemapParams, WaterRenderParams,

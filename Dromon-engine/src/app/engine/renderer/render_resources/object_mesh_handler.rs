@@ -1,4 +1,3 @@
-use crate::AppDirs;
 use crate::app::engine::renderer::buffer::Buffer;
 use crate::app::engine::renderer::render_resources::object_mesh::ObjectMesh;
 use crate::app::engine::renderer::render_resources::object_mesh::ObjectVertex;
@@ -6,6 +5,7 @@ use crate::app::{engine::rendering_context::RenderingContext, logger::Logger};
 use anyhow::{Context, Result};
 use ash::vk;
 use glam::{Mat3, Mat4, Vec2, Vec3};
+use std::path::Path;
 use std::sync::Arc;
 
 pub struct ObjectMeshHandler {
@@ -18,8 +18,19 @@ impl ObjectMeshHandler {
         ObjectMeshHandler { context, logger }
     }
 
-    pub fn create_model(&self, model_path: &str, smooth: bool) -> Result<ObjectMesh> {
+    /// Mesh lu depuis un fichier glTF (chemin complet, cf. `ModelSource::resolve`).
+    pub fn create_model(&self, model_path: &Path, smooth: bool) -> Result<ObjectMesh> {
         let (vertices, indices) = self.load_scene(model_path, smooth)?;
+        self.create_mesh_from_data(vertices, indices)
+    }
+
+    /// Mesh depuis des données en mémoire. La copie vers le device reste à enregistrer
+    /// (`initialize`).
+    pub fn create_mesh_from_data(
+        &self,
+        vertices: Vec<ObjectVertex>,
+        indices: Vec<u32>,
+    ) -> Result<ObjectMesh> {
         let (vertex_staging_buffer, vertex_buffer) = Self::create_staging_and_device_buffer(
             self.context.clone(),
             vertices.as_slice(),
@@ -46,13 +57,9 @@ impl ObjectMeshHandler {
     /// (vertices, indices).
     pub fn load_scene(
         &self,
-        model_path: &str,
+        full_path: &Path,
         smooth: bool,
     ) -> Result<(Vec<ObjectVertex>, Vec<u32>)> {
-        // Relatif au `res/` de l'app.
-        let full_path = AppDirs::get().res().join(model_path);
-        let full_path = full_path.as_path();
-
         // On évite gltf::import() qui chargerait AUSSI toutes les images
         // référencées par le .gltf.
         let gltf = gltf::Gltf::open(full_path)
