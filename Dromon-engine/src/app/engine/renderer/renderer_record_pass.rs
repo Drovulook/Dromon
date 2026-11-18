@@ -57,7 +57,7 @@ impl Renderer {
                 self.object_render_system.record_shadow_objects(
                     command_buffer,
                     frame_index,
-                    &self.world.lookdev_objects,
+                    self.world.lookdev_objects.iter().map(|o| &o.object),
                 );
             }
 
@@ -163,7 +163,7 @@ impl Renderer {
                 self.object_render_system.record_render_objects(
                     frame.command_buffer,
                     self.frame_index,
-                    &self.world.lookdev_objects,
+                    self.world.lookdev_objects.iter().map(|o| &o.object),
                 );
             }
 

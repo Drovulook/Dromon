@@ -38,6 +38,7 @@ Action refusée → ne cherche pas de contournement : dis à l'utilisateur ce qu
 | `screenshot` | capture de la fenêtre du jeu (image + chemin du PNG temporaire) |
 | `texgen` | génère les textures d'une recette (cf. « Textures procédurales ») |
 | `texgen_delete` | supprime définitivement un fichier de `dev_res/texgen/` (chemin relatif à ce dossier) |
+| `object_spawn` / `object_remove` / `object_clear` | pose / retire des modèles 3D (mode lookdev, cf. « Examiner un modèle 3D ») |
 
 « Moteur injoignable » → demande à l'utilisateur de lancer `./launch.py --ai_sandbox` (à la
 racine du dépôt).
@@ -65,7 +66,7 @@ les commentaires d'un fichier avant de le modifier** (unités, bornes, pièges) 
 | `material_textures.ron` | rendu des textures du terrain |
 | `world_macro.ron` | carte du monde : graine, taille, continents, climat (régénère tout le terrain) |
 | `world_detail.ron` | relief de détail (régénère le terrain) |
-| `debug.ron` | traces et aides visuelles de développement |
+| `debug.ron` | traces et aides visuelles de développement ; mode `lookdev` |
 
 Textures du terrain (`color.png`, `height.png`, `normal.png`, `ao.png` par dossier),
 référencées par `materials.ron` et rechargées à chaud : `Files("x")` →
@@ -92,6 +93,21 @@ arrière-plan), puis lis les PNG concernés.
 Chaque capture coûte ~1 500–2 000 tokens : n'en prends que pour juger un changement
 visible, pas pour vérifier qu'une modification a été appliquée (les logs suffisent).
 Les captures sont temporaires (supprimées à l'arrêt du moteur).
+
+## Examiner un modèle 3D (mode lookdev)
+`debug.ron` → `lookdev: (enabled: true, ground_size: …)` : plus de terrain ni de mer, un sol
+plat en z = 0, damier de cases de **1 unité** (règle pour juger les tailles). Rechargé à
+chaud : `enabled: false` recrée le terrain, retire les objets posés et remet la caméra à
+sa pose de départ (`render.ron`). Ombres seulement dans ±`shadow.static_scene.half_size`
+autour de l'origine (`render.ron`).
+
+- `object_spawn(model, pos, rotation_deg, scale, generated)` → `id`. Modèle :
+  `work/objgen/models/<model>/scene.gltf` (`generated=True`), à défaut
+  `res/models/<model>/scene.gltf`. Unités et origine du fichier conservées ; gris uni en
+  attendant les matériaux. Hors lookdev → erreur.
+- Un modèle déjà chargé n'est **pas relu** : après l'avoir régénéré, `object_clear` puis
+  `object_spawn`.
+- Cadrer avec `camera_teleport` (ex. `pos=[-6, -6, 3]`, `yaw_deg=45`, `pitch_deg=-15`).
 
 ## Textures procédurales (texgen)
 Une **recette** `dev_res/texgen/<nom>.slang` (nom en `[a-z0-9_-]`) décrit une tuile de

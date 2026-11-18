@@ -29,6 +29,7 @@ use anyhow::Result;
 use ash::vk;
 pub use material_buffer::MaterialBuffer;
 pub use object_mesh::{ObjectMesh, ObjectVertex};
+pub use object_mesh_handler::MeshLoadOptions;
 use std::{collections::HashMap, sync::Arc};
 pub use terrain_mesh::{
     MeshData, NoRoom, SEAM_VERTEX_FIXED, SEAM_VERTEX_SLAB_HIGH, TerrainMesh, TerrainVertex,
@@ -108,12 +109,17 @@ impl RenderResourceManager {
         Ok(())
     }
 
-    pub fn add_mesh(&mut self, name: String, source: &ModelSource, smooth: bool) -> Result<()> {
+    pub fn add_mesh(
+        &mut self,
+        name: String,
+        source: &ModelSource,
+        options: MeshLoadOptions,
+    ) -> Result<()> {
         if self.meshes.contains_key(&name) {
             self.logger.warn(&format!("mesh {} already exists", name));
             return Ok(());
         }
-        let model = Arc::new(self.mesh_handler.create_model(&source.resolve()?, smooth)?);
+        let model = Arc::new(self.mesh_handler.create_model(&source.resolve()?, options)?);
         self.pending_meshes.push(model.clone());
         self.meshes.insert(name, model);
         Ok(())

@@ -1,23 +1,40 @@
 //! Mode lookdev (`debug.ron` → `lookdev`) : un sol plat à la place du terrain, pour
 //! examiner des assets.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use glam::{Vec2, Vec3};
-use std::sync::Arc;
 
-use crate::app::engine::renderer::render_resources::{ObjectVertex, RenderObject, Transform};
+use crate::app::engine::renderer::render_resources::{
+    MeshLoadOptions, ObjectVertex, RenderObject, Transform,
+};
 use crate::app::engine::renderer::world::World;
-use crate::config::LookdevParams;
+use crate::config::{LookdevParams, ModelSource};
 
 /// Nom du mesh et de la texture du sol dans le `RenderResourceManager`.
 const GROUND: &str = "lookdev_ground";
+/// Id du sol, que `remove` refuse ; les objets posés partent de `FIRST_OBJECT_ID`.
+const GROUND_ID: u32 = 0;
+pub(crate) const FIRST_OBJECT_ID: u32 = 1;
+/// Préfixe des meshes des assets posés dans le `RenderResourceManager` (cache vidé par
+/// `clear`).
+const MODEL_PREFIX: &str = "lookdev_model/";
+/// Texture des assets en attendant leurs matériaux : gris uni, sRGB 188 ≈ albédo 50 %.
+const DEFAULT_TEXTURE: &str = "lookdev_default";
+const DEFAULT_GREY: u8 = 188;
 /// Côté d'une case du damier (unités monde) : sert d'échelle sur les captures.
 const CELL_SIZE: f32 = 1.0;
 /// La texture couvre 2 × 2 cases.
 const TEXTURE_SIZE: u32 = 256;
-/// Gris sRGB ; 128 ≈ albédo 20 %, proche du gris neutre de 18 %.
+/// Gris sRGB ; 230 ≈ albédo 79 %, 96 ≈ 12 %.
 const LIGHT: u8 = 230;
 const DARK: u8 = 96;
+
+/// Objet du lookdev : le sol ou un asset posé par commande.
+pub(crate) struct LookdevObject {
+    /// Stable : un index changerait quand on retire un objet placé avant.
+    pub id: u32,
+    pub object: RenderObject,
+}
 
 impl World {
     /// Pose le sol et place la caméra face à l'origine. À la place du terrain, dans
@@ -68,6 +85,7 @@ impl World {
         self.wait_idle()?;
         self.lookdev_objects.clear();
         self.rrm.meshes.remove(GROUND);
+        self.rrm.meshes.retain(|name, _| !name.starts_with(MODEL_PREFIX));
         // Avant le terrain : son streaming part de la caméra.
         let params = &self.config.render.camera;
         self.camera
@@ -89,19 +107,82 @@ impl World {
             self.rrm
                 .add_texture_from_data(GROUND.to_owned(), TEXTURE_SIZE, TEXTURE_SIZE, &checker())?;
         }
-        self.lookdev_objects.push(RenderObject::new(
-            self.rrm.get_mesh(GROUND).context("mesh du sol absent")?,
-            self.rrm.get_texture(GROUND).context("texture du sol absente")?,
-            Transform::default(),
-        ));
+        self.lookdev_objects.push(LookdevObject {
+            id: GROUND_ID,
+            object: RenderObject::new(
+                self.rrm.get_mesh(GROUND).context("mesh du sol absent")?,
+                self.rrm.get_texture(GROUND).context("texture du sol absente")?,
+                Transform::default(),
+            ),
+        });
         Ok(())
     }
 
     /// GPU au repos : les frames en vol dessinent peut-être ce qui va être détruit.
     fn remove_ground(&mut self) {
-        if let Some(mesh) = self.rrm.meshes.remove(GROUND) {
-            self.lookdev_objects.retain(|object| !Arc::ptr_eq(&object.mesh, &mesh));
+        self.lookdev_objects.retain(|o| o.id != GROUND_ID);
+        self.rrm.meshes.remove(GROUND);
+    }
+
+    /// Pose un asset et renvoie son id. Le fichier n'est relu que si le mesh n'est pas en
+    /// cache (cf. `clear_lookdev_objects`). Bloquant : envoi immédiat au GPU.
+    pub(crate) fn spawn_lookdev_object(
+        &mut self,
+        source: &ModelSource,
+        transform: Transform,
+    ) -> Result<u32> {
+        if self.lookdev_world_gen.is_none() {
+            bail!("lookdev inactif (debug.ron → lookdev.enabled)");
         }
+        let name = format!("{MODEL_PREFIX}{source:?}");
+        if self.rrm.get_mesh(&name).is_none() {
+            // Assets : unités, origine et normales du fichier.
+            let options = MeshLoadOptions { smooth: false, normalize: false };
+            self.rrm.add_mesh(name.clone(), source, options)?;
+        }
+        if self.rrm.get_texture(DEFAULT_TEXTURE).is_none() {
+            let texel = [DEFAULT_GREY, DEFAULT_GREY, DEFAULT_GREY, 255];
+            self.rrm.add_texture_from_data(DEFAULT_TEXTURE.to_owned(), 1, 1, &texel)?;
+        }
+        self.rrm.upload_pending()?;
+
+        let id = self.lookdev_next_id;
+        self.lookdev_next_id += 1;
+        self.lookdev_objects.push(LookdevObject {
+            id,
+            object: RenderObject::new(
+                self.rrm.get_mesh(&name).context("mesh de l'asset absent")?,
+                self.rrm.get_texture(DEFAULT_TEXTURE).context("texture par défaut absente")?,
+                transform,
+            ),
+        });
+        Ok(id)
+    }
+
+    /// Le mesh reste en cache : aucun buffer détruit, pas d'attente du GPU.
+    pub(crate) fn remove_lookdev_object(&mut self, id: u32) -> Result<()> {
+        if id == GROUND_ID {
+            bail!("le sol (id {GROUND_ID}) ne se retire pas");
+        }
+        let index = self
+            .lookdev_objects
+            .iter()
+            .position(|o| o.id == id)
+            .with_context(|| format!("aucun objet d'id {id}"))?;
+        self.lookdev_objects.remove(index);
+        Ok(())
+    }
+
+    /// Retire tous les objets posés (pas le sol) et vide le cache des modèles : un modèle
+    /// régénéré sera relu au prochain `spawn`. Renvoie le nombre d'objets retirés.
+    pub(crate) fn clear_lookdev_objects(&mut self) -> Result<usize> {
+        let before = self.lookdev_objects.len();
+        self.lookdev_objects.retain(|o| o.id == GROUND_ID);
+        // Le cache tient le dernier `Arc` : buffers détruits en le vidant, donc après
+        // les frames en vol.
+        self.wait_idle()?;
+        self.rrm.meshes.retain(|name, _| !name.starts_with(MODEL_PREFIX));
+        Ok(before - self.lookdev_objects.len())
     }
 
     fn wait_idle(&self) -> Result<()> {

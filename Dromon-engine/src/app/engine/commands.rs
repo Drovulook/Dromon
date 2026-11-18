@@ -10,11 +10,15 @@ use crate::app::engine::renderer::Renderer;
 use crate::app::engine::renderer::camera::Camera;
 use crate::app::engine::renderer::world::World;
 use crate::app::engine::renderer::world::game_clock::GameClock;
+use crate::app::engine::renderer::render_resources::Transform;
 use crate::app::socket_server::{Incoming, Replier};
+use crate::config::ModelSource;
 use glam::Vec3;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::mpsc::Receiver;
+
+const DEG_TO_RAD: f32 = std::f32::consts::PI / 180.0;
 
 #[derive(Deserialize)]
 struct Request {
@@ -60,6 +64,38 @@ enum Command {
         size: Option<u32>,
         seed: Option<u32>,
     },
+    /// Lookdev seulement. `model` : `{"Generated": "x"}` ou `{"Files": "x"}` ; rotation
+    /// en degrés autour de X, Y puis Z (cf. `Transform`). Rend l'id de l'objet.
+    #[serde(rename = "object.spawn")]
+    ObjectSpawn {
+        model: ModelSource,
+        pos: Vec3,
+        rotation_deg: Option<Vec3>,
+        scale: Option<Scale>,
+    },
+    #[serde(rename = "object.remove")]
+    ObjectRemove { id: u32 },
+    /// Retire tous les objets posés et vide le cache des modèles (relus au `spawn`).
+    #[serde(rename = "object.clear")]
+    ObjectClear,
+}
+
+/// Échelle uniforme (`2.0`) ou par axe (`[1, 1, 2]`). `untagged` : serde essaie les
+/// variantes dans l'ordre.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Scale {
+    Uniform(f32),
+    Axes(Vec3),
+}
+
+impl Scale {
+    fn to_vec3(&self) -> Vec3 {
+        match *self {
+            Scale::Uniform(s) => Vec3::splat(s),
+            Scale::Axes(axes) => axes,
+        }
+    }
 }
 
 /// Réponse due à une requête, envoyée **une seule fois** : `send` consomme le
@@ -161,6 +197,36 @@ impl Engine {
                 .texgen(&recipe, size.unwrap_or(2048), seed.unwrap_or(0))
                 // `{:#}` : toute la chaîne de contextes, dont la sortie de slangc.
                 .map_err(|e| format!("{e:#}")),
+            Command::ObjectSpawn {
+                model,
+                pos,
+                rotation_deg,
+                scale,
+            } => {
+                let transform = Transform {
+                    translation: pos,
+                    rotation: rotation_deg.unwrap_or(Vec3::ZERO) * DEG_TO_RAD,
+                    scale: scale.map_or(Vec3::ONE, |s| s.to_vec3()),
+                };
+                let id = self
+                    .world()?
+                    .spawn_lookdev_object(&model, transform)
+                    .map_err(|e| format!("{e:#}"))?;
+                Ok(json!({ "id": id }))
+            }
+            Command::ObjectRemove { id } => {
+                self.world()?
+                    .remove_lookdev_object(id)
+                    .map_err(|e| format!("{e:#}"))?;
+                Ok(json!({ "id": id }))
+            }
+            Command::ObjectClear => {
+                let removed = self
+                    .world()?
+                    .clear_lookdev_objects()
+                    .map_err(|e| format!("{e:#}"))?;
+                Ok(json!({ "removed": removed }))
+            }
             Command::Screenshot => unreachable!("commande différée, cf. `execute`"),
         }
     }

@@ -41,7 +41,9 @@ pub struct World {
     pub render_objects: Vec<RenderObject>,
     /// Objets du mode lookdev (sol, assets posés par commande) : à part de
     /// `render_objects`, que la scène peut réassigner.
-    pub(crate) lookdev_objects: Vec<RenderObject>,
+    pub(crate) lookdev_objects: Vec<lookdev::LookdevObject>,
+    /// Prochain id d'objet posé en lookdev ; ne revient jamais en arrière.
+    pub(crate) lookdev_next_id: u32,
     /// En lookdev, la config que la scène a passée à `generate_terrain` : le terrain
     /// sera créé avec en sortant du mode. `None` : scène sans terrain.
     pub(crate) lookdev_world_gen: Option<WorldGenConfig>,
@@ -100,6 +102,7 @@ impl World {
             rrm,
             render_objects: Vec::new(),
             lookdev_objects: Vec::new(),
+            lookdev_next_id: lookdev::FIRST_OBJECT_ID,
             lookdev_world_gen: None,
             camera: Camera::new(&config.render.camera, config.debug.camera_unbounded),
             light: DirectionalLight::new(&config),

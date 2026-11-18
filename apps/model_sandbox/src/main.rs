@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use dromon_engine::config::ModelSource;
-use dromon_engine::{RenderObject, Scene, Timer, Transform, World};
+use dromon_engine::{MeshLoadOptions, RenderObject, Scene, Timer, Transform, World};
 
 // `res/models/<nom>/scene.gltf`.
 const MODEL: &str = "dromon_ship";
@@ -17,8 +17,12 @@ impl Scene for ModelSandbox {
         rrm.add_texture("texture1".to_string(), TEXTURE_PATH.to_string())?;
         rrm.add_texture("texture2".to_string(), TEXTURE_PATH.to_string())?;
         let model = ModelSource::Files(MODEL.to_string());
-        rrm.add_mesh("mesh1".to_string(), &model, true)?;
-        rrm.add_mesh("mesh2".to_string(), &model, true)?;
+        let options = MeshLoadOptions {
+            smooth: true,
+            normalize: true,
+        };
+        rrm.add_mesh("mesh1".to_string(), &model, options)?;
+        rrm.add_mesh("mesh2".to_string(), &model, options)?;
 
         let render_objects = vec![
             RenderObject::new(

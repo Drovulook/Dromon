@@ -15,7 +15,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 // Les modules internes restent `pub(crate)` ; on ne ré-expose que l'API utile aux
 // applications. C'est le patron « facade » : l'extérieur voit `dromon_engine::World`
 // sans rien savoir de l'arborescence `app::engine::renderer::…`.
-pub use app::engine::renderer::render_resources::{RenderObject, Transform};
+pub use app::engine::renderer::render_resources::{MeshLoadOptions, RenderObject, Transform};
 pub use app::engine::renderer::world::World;
 pub use app::engine::terrain_generation::{
     GridShape, MacroGrid, MacroMap, macro_map_cache, macro_map_export_dir,

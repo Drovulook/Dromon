@@ -8,6 +8,15 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Traitements appliqués à un glTF au chargement.
+#[derive(Clone, Copy, Debug)]
+pub struct MeshLoadOptions {
+    /// Normales lissées (modèle exporté en flat shading).
+    pub smooth: bool,
+    /// Recentré et ramené à 2 unités de côté. `false` : unités et origine du fichier.
+    pub normalize: bool,
+}
+
 pub struct ObjectMeshHandler {
     pub context: Arc<RenderingContext>,
     pub logger: Arc<Logger>,
@@ -19,8 +28,8 @@ impl ObjectMeshHandler {
     }
 
     /// Mesh lu depuis un fichier glTF (chemin complet, cf. `ModelSource::resolve`).
-    pub fn create_model(&self, model_path: &Path, smooth: bool) -> Result<ObjectMesh> {
-        let (vertices, indices) = self.load_scene(model_path, smooth)?;
+    pub fn create_model(&self, model_path: &Path, options: MeshLoadOptions) -> Result<ObjectMesh> {
+        let (vertices, indices) = self.load_scene(model_path, options)?;
         self.create_mesh_from_data(vertices, indices)
     }
 
@@ -58,7 +67,7 @@ impl ObjectMeshHandler {
     pub fn load_scene(
         &self,
         full_path: &Path,
-        smooth: bool,
+        options: MeshLoadOptions,
     ) -> Result<(Vec<ObjectVertex>, Vec<u32>)> {
         // On évite gltf::import() qui chargerait AUSSI toutes les images
         // référencées par le .gltf.
@@ -86,12 +95,13 @@ impl ObjectMeshHandler {
         // Lissage optionnel : le modèle est exporté en flat shading (une normale
         // par facette, vertices dupliqués aux coutures). On recalcule des normales
         // LISSES en moyennant celles qui partagent une même position.
-        if smooth {
+        if options.smooth {
             Self::smooth_normals(&mut vertices);
         }
 
-        // --- Recentrage + mise à l'échelle (étape de confort, retirable) ---
-        Self::normalize(&mut vertices);
+        if options.normalize {
+            Self::normalize(&mut vertices);
+        }
 
         Ok((vertices, indices))
     }

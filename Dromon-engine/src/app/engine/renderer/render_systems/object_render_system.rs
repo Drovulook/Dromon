@@ -105,11 +105,11 @@ impl ObjectRenderSystem {
     /// Enregistre les draws des `RenderObject` dans la passe principale. Bind sa
     /// pipeline, le set 0 (caméra) et le set 2 (shadow map) communs, puis pour
     /// chaque objet le set 1 (sa texture) + les push constants.
-    pub(crate) fn record_render_objects(
+    pub(crate) fn record_render_objects<'a>(
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        render_objects: &[RenderObject],
+        render_objects: impl IntoIterator<Item = &'a RenderObject>,
     ) {
         profile!();
         unsafe {
@@ -187,11 +187,11 @@ impl ObjectRenderSystem {
         }
     }
 
-    pub(crate) fn record_shadow_objects(
+    pub(crate) fn record_shadow_objects<'a>(
         &self,
         command_buffer: vk::CommandBuffer,
         frame_index: usize,
-        render_objects: &[RenderObject],
+        render_objects: impl IntoIterator<Item = &'a RenderObject>,
     ) {
         profile!();
         unsafe {

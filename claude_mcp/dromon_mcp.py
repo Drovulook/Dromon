@@ -146,6 +146,40 @@ def texgen_delete(path: str) -> str:
 
 
 @mcp.tool()
+def object_spawn(
+    model: str,
+    pos: list[float],
+    rotation_deg: list[float] | None = None,
+    scale: float | list[float] | None = None,
+    generated: bool = True,
+) -> dict[str, Any]:
+    """Pose un modèle 3D dans la scène (mode lookdev seulement, cf. `config/debug.ron` →
+    `lookdev`). `model` : nom du dossier ; `generated=True` → `work/objgen/models/
+    <model>/scene.gltf`, à défaut `res/models/<model>/` ; `False` → `res/models/<model>/`
+    seulement. `pos` [x, y, z] (sol en z = 0) ; `rotation_deg` [x, y, z] en degrés,
+    appliqués autour de X, puis Y, puis Z ; `scale` : nombre ou [x, y, z]. Unités et
+    origine du fichier conservées. Rend l'`id` de l'objet. Un modèle déjà chargé n'est
+    pas relu : après l'avoir régénéré, `object_clear` puis `object_spawn`."""
+    source = {"Generated" if generated else "Files": model}
+    return call(
+        "object.spawn", model=source, pos=pos, rotation_deg=rotation_deg, scale=scale
+    )
+
+
+@mcp.tool()
+def object_remove(id: int) -> dict[str, Any]:
+    """Retire l'objet `id` rendu par `object_spawn` (le sol ne se retire pas)."""
+    return call("object.remove", id=id)
+
+
+@mcp.tool()
+def object_clear() -> dict[str, Any]:
+    """Retire tous les objets posés (pas le sol) et oublie les modèles chargés : le
+    prochain `object_spawn` relit leurs fichiers. Rend le nombre d'objets retirés."""
+    return call("object.clear")
+
+
+@mcp.tool()
 def logs_tail(n: int = 50, level: Literal["INFO", "WARN", "ERROR"] = "INFO") -> str:
     """Derniers logs du moteur (les plus récents en dernier), horodatés à la réception.
     level : INFO = tout ; WARN = avertissements, erreurs et validation Vulkan ;
